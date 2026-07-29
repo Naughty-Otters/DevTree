@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DevTree</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="app">
+      <header id="toolbar">
+        <div class="toolbar-left">
+          <button id="btn-open-project" class="btn btn-icon btn-ghost" title="Open project folder"></button>
+          <button id="btn-run-analysis" class="btn btn-icon btn-ghost btn-run" disabled title="Run analysis"></button>
+          <button id="btn-focus-view" class="btn btn-icon btn-ghost" disabled title="Focus view"></button>
+        </div>
+        <span id="app-title">DevTree</span>
+        <span id="project-path" class="project-path">No project open</span>
+      </header>
+
+      <div id="workspace">
+        <div id="main-row">
+          <aside id="left-panel">
+            <section id="left-tree-section" class="panel-section">
+              <h3 class="panel-title">Project Tree</h3>
+              <div id="project-tree" class="panel-body scrollable"></div>
+            </section>
+            <div class="resize-handle resize-handle-split" data-resize="left-split" data-tooltip="Resize tree / modules split"></div>
+            <section id="left-modules-section" class="panel-section">
+              <h3 class="panel-title">Modules <span class="panel-hint">search · drill down on graph</span></h3>
+              <div id="modules-list" class="panel-body scrollable"></div>
+            </section>
+          </aside>
+
+          <div class="resize-handle resize-handle-col" data-resize="left" data-tooltip="Resize left sidebar"></div>
+
+          <main id="center-panel">
+            <div id="view-tabs">
+              <button class="view-tab active" data-view="graph">Graph</button>
+              <button class="view-tab" data-view="file">File</button>
+            </div>
+            <div id="graph-nav" class="graph-nav"></div>
+            <div id="center-content">
+              <canvas id="graph-canvas"></canvas>
+              <div id="file-viewer" class="hidden"></div>
+              <div id="graph-overlay" class="graph-overlay hidden">
+                <span id="graph-overlay-text"></span>
+              </div>
+            </div>
+          </main>
+
+          <div class="resize-handle resize-handle-col" data-resize="right" data-tooltip="Resize right sidebar"></div>
+
+          <aside id="right-panel">
+            <section class="panel-section panel-section-full">
+              <h3 class="panel-title">Analysis Rules</h3>
+              <div id="rules-panel" class="panel-body scrollable"></div>
+            </section>
+          </aside>
+        </div>
+
+        <div class="resize-handle resize-handle-row" data-resize="bottom" data-tooltip="Resize results panel"></div>
+
+        <footer id="bottom-panel">
+          <div id="results-panel"></div>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>

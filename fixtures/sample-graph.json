@@ -1,0 +1,31 @@
+{
+  "nodes": [
+    { "id": "src/main.ts", "label": "main.ts", "path": "src/main.ts", "loc": 45, "kind": "module" },
+    { "id": "src/app.ts", "label": "app.ts", "path": "src/app.ts", "loc": 180, "kind": "module" },
+    { "id": "src/router.ts", "label": "router.ts", "path": "src/router.ts", "loc": 90, "kind": "module" },
+    { "id": "src/state/store.ts", "label": "store.ts", "path": "src/state/store.ts", "loc": 220, "kind": "module" },
+    { "id": "src/state/actions.ts", "label": "actions.ts", "path": "src/state/actions.ts", "loc": 130, "kind": "module" },
+    { "id": "src/api/client.ts", "label": "client.ts", "path": "src/api/client.ts", "loc": 160, "kind": "module" },
+    { "id": "src/api/types.ts", "label": "types.ts", "path": "src/api/types.ts", "loc": 60, "kind": "module" },
+    { "id": "src/ui/canvas.ts", "label": "canvas.ts", "path": "src/ui/canvas.ts", "loc": 310, "kind": "module" },
+    { "id": "src/ui/toolbar.ts", "label": "toolbar.ts", "path": "src/ui/toolbar.ts", "loc": 75, "kind": "module" },
+    { "id": "src/utils/geometry.ts", "label": "geometry.ts", "path": "src/utils/geometry.ts", "loc": 95, "kind": "module" },
+    { "id": "src/utils/logger.ts", "label": "logger.ts", "path": "src/utils/logger.ts", "loc": 30, "kind": "module" },
+    { "id": "src/vendor/dagre.ts", "label": "dagre.ts", "path": "src/vendor/dagre.ts", "loc": 400, "kind": "package" }
+  ],
+  "edges": [
+    { "source": "src/main.ts", "target": "src/app.ts", "kind": "import" },
+    { "source": "src/app.ts", "target": "src/router.ts", "kind": "import" },
+    { "source": "src/app.ts", "target": "src/state/store.ts", "kind": "import" },
+    { "source": "src/app.ts", "target": "src/ui/toolbar.ts", "kind": "import" },
+    { "source": "src/state/store.ts", "target": "src/state/actions.ts", "kind": "import" },
+    { "source": "src/state/actions.ts", "target": "src/api/client.ts", "kind": "import" },
+    { "source": "src/api/client.ts", "target": "src/api/types.ts", "kind": "import" },
+    { "source": "src/router.ts", "target": "src/ui/canvas.ts", "kind": "import" },
+    { "source": "src/ui/canvas.ts", "target": "src/utils/geometry.ts", "kind": "import" },
+    { "source": "src/ui/canvas.ts", "target": "src/vendor/dagre.ts", "kind": "import" },
+    { "source": "src/ui/toolbar.ts", "target": "src/utils/logger.ts", "kind": "import" },
+    { "source": "src/api/client.ts", "target": "src/utils/logger.ts", "kind": "import" },
+    { "source": "src/state/actions.ts", "target": "src/utils/logger.ts", "kind": "import" }
+  ]
+}

@@ -1,0 +1,17 @@
+[package]
+name = "devtree-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "devtree_core"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[features]
+wasm = ["dep:wasm-bindgen", "dep:js-sys"]
