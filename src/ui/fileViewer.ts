@@ -31,8 +31,12 @@ hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("sql", sql);
 hljs.registerLanguage("ini", ini);
 
+export interface FileViewerOpenOptions {
+  line?: number;
+}
+
 export interface FileViewerHandle {
-  open: (path: string, content: string) => void;
+  open: (path: string, content: string, opts?: FileViewerOpenOptions) => void;
   close: () => void;
   isOpen: () => boolean;
 }
@@ -61,26 +65,75 @@ export function createFileViewer(
 
   header.append(title, closeBtn);
 
-  const pre = document.createElement("pre");
-  pre.className = "file-viewer-pre scrollable";
+  const body = document.createElement("div");
+  body.className = "file-viewer-body scrollable";
 
-  const code = document.createElement("code");
-  pre.appendChild(code);
-
-  container.append(header, pre);
+  container.append(header, body);
 
   return {
-    open(path: string, content: string) {
+    open(path: string, content: string, opts?: FileViewerOpenOptions) {
       currentPath = path;
       const lang = highlightLanguage(path);
-      title.textContent = path;
-      code.className = `language-${lang}`;
+      title.textContent =
+        opts?.line && opts.line > 0 ? `${path}:${opts.line}` : path;
+
+      body.innerHTML = "";
+      const table = document.createElement("table");
+      table.className = "file-viewer-table";
+
+      const lines = content.split("\n");
+      let highlighted: string[] = [];
       try {
-        code.innerHTML = hljs.highlight(content, { language: lang }).value;
+        const html = hljs.highlight(content, { language: lang }).value;
+        highlighted = html.split("\n");
       } catch {
-        code.textContent = content;
+        highlighted = lines.map((l) =>
+          l
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;"),
+        );
       }
+
+      const targetLine = opts?.line && opts.line > 0 ? opts.line : null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const lineNo = i + 1;
+        const tr = document.createElement("tr");
+        tr.className = "file-viewer-line";
+        tr.dataset.line = String(lineNo);
+        if (targetLine === lineNo) {
+          tr.classList.add("file-viewer-line-active");
+        }
+
+        const gutter = document.createElement("td");
+        gutter.className = "file-viewer-gutter";
+        gutter.textContent = String(lineNo);
+
+        const codeCell = document.createElement("td");
+        codeCell.className = "file-viewer-code";
+        const code = document.createElement("code");
+        code.className = `language-${lang}`;
+        code.innerHTML = highlighted[i] ?? "";
+        codeCell.appendChild(code);
+
+        tr.append(gutter, codeCell);
+        table.appendChild(tr);
+      }
+
+      body.appendChild(table);
       container.classList.remove("hidden");
+
+      if (targetLine) {
+        requestAnimationFrame(() => {
+          const row = body.querySelector<HTMLElement>(
+            `[data-line="${targetLine}"]`,
+          );
+          row?.scrollIntoView({ block: "center" });
+        });
+      } else {
+        body.scrollTop = 0;
+      }
     },
     close() {
       container.classList.add("hidden");

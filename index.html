@@ -15,6 +15,7 @@
           <button id="btn-open-project" class="btn btn-icon btn-ghost" title="Open project folder"></button>
           <button id="btn-run-analysis" class="btn btn-icon btn-ghost btn-run" disabled title="Run analysis"></button>
           <button id="btn-focus-view" class="btn btn-icon btn-ghost" disabled title="Focus view"></button>
+          <button id="btn-settings" class="btn btn-icon btn-ghost" title="Settings"></button>
         </div>
         <span id="app-title">DevTree</span>
         <span id="project-path" class="project-path">No project open</span>
@@ -50,15 +51,6 @@
               </div>
             </div>
           </main>
-
-          <div class="resize-handle resize-handle-col" data-resize="right" data-tooltip="Resize right sidebar"></div>
-
-          <aside id="right-panel">
-            <section class="panel-section panel-section-full">
-              <h3 class="panel-title">Analysis Rules</h3>
-              <div id="rules-panel" class="panel-body scrollable"></div>
-            </section>
-          </aside>
         </div>
 
         <div class="resize-handle resize-handle-row" data-resize="bottom" data-tooltip="Resize results panel"></div>
@@ -66,6 +58,36 @@
         <footer id="bottom-panel">
           <div id="results-panel"></div>
         </footer>
+      </div>
+
+      <div id="settings-overlay" class="hidden" aria-hidden="true">
+        <div class="settings-backdrop"></div>
+        <aside id="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <header class="settings-header">
+            <h2 id="settings-title">Settings</h2>
+            <button id="btn-close-settings" class="btn btn-icon btn-ghost" title="Close settings"></button>
+          </header>
+          <div class="settings-body settings-accordion">
+            <section class="settings-accordion-item is-open" data-settings-section="rules">
+              <button type="button" class="settings-accordion-trigger" aria-expanded="true">
+                <span>Analysis Rules</span>
+                <span class="settings-accordion-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="settings-accordion-panel">
+                <div id="rules-panel" class="panel-body scrollable"></div>
+              </div>
+            </section>
+            <section class="settings-accordion-item" data-settings-section="lsp">
+              <button type="button" class="settings-accordion-trigger" aria-expanded="false">
+                <span>LSP Servers</span>
+                <span class="settings-accordion-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="settings-accordion-panel">
+                <div id="lsp-servers-panel" class="panel-body scrollable"></div>
+              </div>
+            </section>
+          </div>
+        </aside>
       </div>
     </div>
   </body>

@@ -49,7 +49,7 @@ pub struct ScopeGraph {
     pub edges: Vec<PackageEdge>,
 }
 
-pub const HIERARCHY_VERSION: u32 = 2;
+pub const HIERARCHY_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HierarchyIndex {
@@ -1100,13 +1100,14 @@ pub fn build_hierarchy(
     files: &[(String, u32)],
     contents: &HashMap<String, String>,
 ) -> HierarchyIndex {
-    build_hierarchy_with_progress(root, files, contents, |_, _| {})
+    build_hierarchy_with_progress(root, files, contents, None, |_, _| {})
 }
 
 pub fn build_hierarchy_with_progress(
     root: &Path,
     files: &[(String, u32)],
     contents: &HashMap<String, String>,
+    lsp: Option<&crate::lsp::LspPool>,
     mut on_progress: impl FnMut(usize, usize),
 ) -> HierarchyIndex {
     let all_files: HashSet<String> = files.iter().map(|(p, _)| p.clone()).collect();
@@ -1164,7 +1165,28 @@ pub fn build_hierarchy_with_progress(
         resolved.dedup();
         file_imports.insert(path.clone(), resolved);
 
-        let (syms, edges) = extract_symbols(path, &content);
+        let (syms, edges) = if let Some(pool) = lsp {
+            if let Some(lsp_syms) = pool.document_symbols(path) {
+                let lsp_edges = pool.symbol_edges_for_file(path, &lsp_syms);
+                if lsp_edges.is_empty() && !lsp_syms.is_empty() {
+                    // Fall back to heuristic edges when references return nothing
+                    let (_hs, heuristic_edges) = extract_symbols(path, &content);
+                    let ids: HashSet<String> = lsp_syms.iter().map(|s| s.id.clone()).collect();
+                    let filtered: Vec<SymbolEdge> = heuristic_edges
+                        .into_iter()
+                        .filter(|e| ids.contains(&e.source) && ids.contains(&e.target))
+                        .collect();
+                    (lsp_syms, filtered)
+                } else {
+                    (lsp_syms, lsp_edges)
+                }
+            } else {
+                extract_symbols(path, &content)
+            }
+        } else {
+            extract_symbols(path, &content)
+        };
+
         if !syms.is_empty() {
             symbols.insert(path.clone(), syms);
         }
@@ -1210,6 +1232,7 @@ pub fn root_package_graph(hierarchy: &HierarchyIndex) -> Graph {
             path: pkg.clone(),
             loc: locs.get(pkg).copied().unwrap_or(0),
             kind: "package".into(),
+            line: 0,
         })
         .collect();
 

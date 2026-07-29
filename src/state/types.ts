@@ -1,4 +1,4 @@
-import type { AnalysisResult } from "../analysis/types";
+import type { AnalysisResult, RuleSettingsMap } from "../analysis/types";
 import type { GraphNavigation } from "../graph/navigation";
 
 export interface PanelSizes {
@@ -19,6 +19,7 @@ export interface PersistedAppState {
   panelSizes: PanelSizes;
   projectPath: string | null;
   selectedRuleIds: string[];
+  ruleSettings: RuleSettingsMap;
   visibleModuleIds: string[];
   selectedNodeId: string | null;
   camera: CameraState | null;
@@ -39,6 +40,7 @@ export function defaultPersistedState(): PersistedAppState {
     panelSizes: { ...DEFAULT_PANEL_SIZES },
     projectPath: null,
     selectedRuleIds: [],
+    ruleSettings: {},
     visibleModuleIds: [],
     selectedNodeId: null,
     camera: null,

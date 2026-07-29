@@ -1,10 +1,14 @@
 mod analysis;
 mod db;
 mod hierarchy;
+mod lsp;
 mod project;
 
-use analysis::{run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule};
+use analysis::{
+    run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
+};
 use db::{init_db, DbState};
+use lsp::{LspInstallResult, LspServerStatus};
 use project::{scan_project, ProjectScan};
 use tauri::ipc::Channel;
 
@@ -22,10 +26,11 @@ fn scan_project_dir(path: String) -> Result<ProjectScan, String> {
 async fn run_project_analysis(
     path: String,
     rules: Vec<String>,
+    rule_settings: RuleSettingsMap,
     on_progress: Channel<AnalysisProgress>,
 ) -> Result<AnalysisResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_analysis_with_progress(&path, &rules, |progress| {
+        run_analysis_with_progress(&path, &rules, &rule_settings, |progress| {
             let _ = on_progress.send(progress);
         })
     })
@@ -47,6 +52,18 @@ fn read_project_file(project_root: String, relative_path: String) -> Result<Stri
     std::fs::read_to_string(&file).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn list_lsp_servers() -> Vec<LspServerStatus> {
+    lsp::list_lsp_servers()
+}
+
+#[tauri::command]
+async fn install_lsp_server(id: String) -> Result<LspInstallResult, String> {
+    tauri::async_runtime::spawn_blocking(move || lsp::install_lsp_server(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let conn = init_db().expect("failed to initialize database");
@@ -59,6 +76,8 @@ pub fn run() {
             scan_project_dir,
             run_project_analysis,
             read_project_file,
+            list_lsp_servers,
+            install_lsp_server,
             db::load_persisted_state,
             db::save_persisted_state,
             db::get_db_path,

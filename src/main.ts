@@ -4,6 +4,7 @@ import { attachInteraction } from "./canvas/interaction";
 import { fitCameraToContent, focusCameraOnNodeAnimated } from "./canvas/camera";
 import type { Graph } from "./graph/types";
 import type { AnalysisResult } from "./analysis/types";
+import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
 import type { ProjectScan } from "./project/types";
 import {
   openProjectDialog,
@@ -11,13 +12,20 @@ import {
   getAnalysisRules,
   runAnalysis,
   readProjectFile,
+  listLspServers,
+  installLspServer,
 } from "./project/api";
 import { renderProjectTree } from "./ui/projectTree";
 import { renderModulesList, type ModulesListState } from "./ui/modulesList";
 import { createRulesPanel, type RulesPanelState } from "./ui/rulesPanel";
+import {
+  createLspServersPanel,
+  type LspServersPanelState,
+} from "./ui/lspServersPanel";
 import { createResultsPanel } from "./ui/resultsPanel";
 import { createFileViewer } from "./ui/fileViewer";
 import { mountToolbarIcons } from "./ui/toolbar";
+import { createSettingsPanel } from "./ui/settingsPanel";
 import { initResizers } from "./ui/resizer";
 import { showAnalysisDialog } from "./ui/analysisDialog";
 import { initTooltips } from "./ui/tooltip";
@@ -47,6 +55,7 @@ interface AppState {
   projectPath: string | null;
   projectScan: ProjectScan | null;
   selectedRules: Set<string>;
+  ruleSettings: RuleSettingsMap;
   analysisResult: AnalysisResult | null;
   hierarchy: HierarchyIndex | null;
   graphNavigation: GraphNavigation;
@@ -61,10 +70,13 @@ async function main() {
   const btnOpen = document.querySelector<HTMLButtonElement>("#btn-open-project")!;
   const btnRun = document.querySelector<HTMLButtonElement>("#btn-run-analysis")!;
   const btnFocus = document.querySelector<HTMLButtonElement>("#btn-focus-view")!;
+  const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings")!;
   const projectPathEl = document.querySelector<HTMLElement>("#project-path")!;
   const treeContainer = document.querySelector<HTMLElement>("#project-tree")!;
   const modulesContainer = document.querySelector<HTMLElement>("#modules-list")!;
   const rulesContainer = document.querySelector<HTMLElement>("#rules-panel")!;
+  const lspServersContainer = document.querySelector<HTMLElement>("#lsp-servers-panel")!;
+  const settingsOverlay = document.querySelector<HTMLElement>("#settings-overlay")!;
   const resultsContainer = document.querySelector<HTMLElement>("#results-panel")!;
   const graphOverlay = document.querySelector<HTMLElement>("#graph-overlay")!;
   const graphOverlayText = document.querySelector<HTMLElement>("#graph-overlay-text")!;
@@ -83,12 +95,15 @@ async function main() {
         ? persisted.selectedRuleIds
         : rules.map((r) => r.id),
     ),
+    settings: mergeRuleSettings(rules, persisted.ruleSettings),
+    expandedRuleId: null,
   };
 
   const app: AppState = {
     projectPath: null,
     projectScan: null,
     selectedRules: rulesState.selected,
+    ruleSettings: rulesState.settings,
     analysisResult: null,
     hierarchy: null,
     graphNavigation: persisted.graphNavigation ?? rootNavigation(),
@@ -112,6 +127,7 @@ async function main() {
       panelSizes: readPanelSizes(),
       projectPath: app.projectPath,
       selectedRuleIds: Array.from(app.selectedRules),
+      ruleSettings: app.ruleSettings,
       visibleModuleIds: Array.from(app.modulesListState.visibleIds),
       selectedNodeId: app.renderState?.selectedId ?? null,
       camera: app.renderState
@@ -149,10 +165,66 @@ async function main() {
     });
   });
 
-  createRulesPanel(rulesContainer, rulesState, (selected) => {
+  createRulesPanel(rulesContainer, rulesState, (selected, settings) => {
     app.selectedRules = selected;
+    app.ruleSettings = settings;
+    rulesState.settings = settings;
     persist();
   });
+
+  const lspState: LspServersPanelState = {
+    servers: [],
+    installingId: null,
+    errors: {},
+    loading: true,
+  };
+
+  const lspHandlers = {
+    onRefresh: async () => {
+      lspState.loading = true;
+      createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+      try {
+        lspState.servers = await listLspServers();
+        lspState.errors = {};
+      } catch (err) {
+        console.error(err);
+      } finally {
+        lspState.loading = false;
+        createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+      }
+    },
+    onInstall: async (id: string) => {
+      lspState.installingId = id;
+      delete lspState.errors[id];
+      createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+      try {
+        const result = await installLspServer(id);
+        lspState.servers = lspState.servers.map((s) =>
+          s.id === id ? result.server : s,
+        );
+        if (!result.ok) {
+          lspState.errors[id] = result.message;
+        } else {
+          // Re-probe all in case PATH changed
+          lspState.servers = await listLspServers();
+        }
+      } catch (err) {
+        lspState.errors[id] =
+          err instanceof Error ? err.message : String(err);
+      } finally {
+        lspState.installingId = null;
+        createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+      }
+    },
+  };
+
+  createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+
+  const settings = createSettingsPanel(settingsOverlay, () => {
+    void lspHandlers.onRefresh();
+  });
+  btnSettings.addEventListener("click", () => settings.toggle());
+  void lspHandlers.onRefresh();
 
   initResizers(
     () => resize(),
@@ -240,6 +312,32 @@ async function main() {
     if (!next) return;
     app.graphNavigation = next;
     void navigateGraph();
+  }
+
+  async function openSymbolSource(nodeId: string) {
+    if (!app.projectPath || !app.renderState) return;
+    const node = app.renderState.nodes.find((n) => n.id === nodeId);
+    if (!node || !node.path) return;
+    const level =
+      app.graphNavigation.crumbs[app.graphNavigation.crumbs.length - 1]?.level;
+    const isSymbol =
+      level === "symbols" ||
+      (node.kind !== "package" &&
+        node.kind !== "file" &&
+        node.kind !== "folder" &&
+        (node.line ?? 0) > 0);
+    if (!isSymbol) return;
+
+    try {
+      const content = await readProjectFile(app.projectPath, node.path);
+      fileViewer.open(node.path, content, {
+        line: node.line && node.line > 0 ? node.line : undefined,
+      });
+      showFileView();
+    } catch (err) {
+      console.error(err);
+      alert(`Could not open file: ${err}`);
+    }
   }
 
   function openModulePopup(nodeId: string, clientX: number, clientY: number) {
@@ -341,10 +439,44 @@ async function main() {
     persist();
   }
 
+  function clearMainPanel(): void {
+    hideGraphPopup();
+    fileViewer.close();
+    showGraphView();
+
+    app.analysisResult = null;
+    app.hierarchy = null;
+    app.graphNavigation = rootNavigation();
+    app.renderState = null;
+    app.modulesListState = {
+      graphNodes: [],
+      visibleIds: new Set(),
+      searchQuery: app.modulesListState.searchQuery,
+    };
+
+    resultsPanel.setResult(null);
+    refreshModulesList();
+    graphNavContainer.innerHTML = "";
+    btnFocus.disabled = true;
+
+    const ctx2d = canvas.getContext("2d");
+    if (ctx2d) {
+      ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+      ctx2d.fillStyle = "#0f1115";
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    showOverlay("Run analysis to build the dependency graph");
+  }
+
   async function openProjectAt(path: string): Promise<boolean> {
     try {
       projectPathEl.textContent = "Scanning…";
       const scan = await scanProject(path);
+
+      // Always refresh the main panel when (re)opening a project so the
+      // previous project's graph/results don't linger.
+      clearMainPanel();
+
       app.projectPath = scan.root;
       app.projectScan = scan;
 
@@ -357,7 +489,6 @@ async function main() {
       });
       refreshModulesList();
       btnRun.disabled = false;
-      hideOverlay();
       persist();
       return true;
     } catch (err) {
@@ -421,6 +552,24 @@ async function main() {
     onNodeDoubleClick: (id) => {
       clearPendingPopup();
       hideGraphPopup();
+      const level =
+        app.graphNavigation.crumbs[app.graphNavigation.crumbs.length - 1]
+          ?.level;
+      if (level === "symbols") {
+        void openSymbolSource(id);
+        return;
+      }
+      const node = app.renderState?.nodes.find((n) => n.id === id);
+      if (
+        node &&
+        node.kind !== "package" &&
+        node.kind !== "file" &&
+        node.kind !== "folder" &&
+        (node.line ?? 0) > 0
+      ) {
+        void openSymbolSource(id);
+        return;
+      }
       drillIntoNode(id);
     },
   });
@@ -482,6 +631,7 @@ async function main() {
         app.projectPath,
         Array.from(app.selectedRules),
         (progress) => resultsPanel.setProgress(progress),
+        app.ruleSettings,
       );
 
       app.analysisResult = result;

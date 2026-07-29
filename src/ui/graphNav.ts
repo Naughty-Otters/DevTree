@@ -82,7 +82,7 @@ export function renderGraphNav(
 
   const hint = document.createElement("span");
   hint.className = "graph-nav-hint";
-  hint.textContent = "click · details  ·  double-click · drill in";
+  hint.textContent = "click · details  ·  double-click · drill / open source";
   bar.append(controls, crumbs, hint);
   container.appendChild(bar);
 

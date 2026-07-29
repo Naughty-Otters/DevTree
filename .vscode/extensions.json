@@ -1,0 +1,19 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "tauri-apps.tauri-vscode",
+    "dbaeumer.vscode-eslint",
+    "ms-python.python",
+    "golang.go",
+    "vscjava.vscode-java-pack",
+    "fwcd.kotlin",
+    "swiftlang.swift-vscode",
+    "llvm-vs-code-extensions.vscode-clangd",
+    "anysphere.csharp",
+    "shopify.ruby-lsp",
+    "bmewburn.vscode-intelephense-client",
+    "vue.volar",
+    "svelte.svelte-vscode"
+  ]
+}

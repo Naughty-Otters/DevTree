@@ -2,6 +2,7 @@ import type { GraphEdge, GraphNode } from "../graph/types";
 import type { PositionedNode } from "../wasm-bridge";
 import { nodeColor } from "./colors";
 import { dependencyNeighborhood, isEdgeHighlighted } from "./highlights";
+import { pathNodeShape, nodeKindColor, drawNodeKindBadge, NODE_KIND_BADGE_CSS_PX } from "./nodeIcons";
 
 export interface Camera {
   x: number;
@@ -184,20 +185,18 @@ export function render(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
     const isSelected = state.selectedId === node.id;
     const isHovered = state.hoveredId === node.id;
     const baseColor = state.nodeColors.get(node.id) ?? nodeColor(node.id);
+    const kindTint = nodeKindColor(node.kind || "symbol");
 
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+    pathNodeShape(ctx, node.kind || "symbol", screen.x, screen.y, radius);
 
     if (!inNeighborhood) {
       ctx.fillStyle = DIMMED_NODE_FILL;
-    } else if (isFocus) {
-      ctx.fillStyle = "#ffffff";
-    } else if (isSelected) {
+    } else if (isFocus || isSelected) {
       ctx.fillStyle = "#ffffff";
     } else if (isHovered) {
       ctx.fillStyle = lighten(baseColor);
     } else {
-      ctx.fillStyle = baseColor;
+      ctx.fillStyle = mixHex(baseColor, kindTint, 0.22);
     }
     ctx.fill();
 
@@ -205,28 +204,62 @@ export function render(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
     if (!inNeighborhood) {
       ctx.strokeStyle = "rgba(0,0,0,0.2)";
     } else if (isFocus) {
-      ctx.strokeStyle = baseColor;
+      ctx.strokeStyle = kindTint;
       ctx.lineWidth = 3;
     } else if (isSelected) {
-      ctx.strokeStyle = baseColor;
+      ctx.strokeStyle = kindTint;
     } else {
       ctx.strokeStyle = "rgba(0,0,0,0.45)";
     }
     ctx.stroke();
 
     if (inNeighborhood && (isFocus || isSelected || isHovered)) {
+      pathNodeShape(ctx, node.kind || "symbol", screen.x, screen.y, radius);
       ctx.lineWidth = isFocus ? 3 : 2.5;
-      ctx.strokeStyle = isFocus ? baseColor : "#ffffff";
+      ctx.strokeStyle = isFocus ? kindTint : "#ffffff";
       ctx.stroke();
+    }
+
+    if (inNeighborhood) {
+      const dpr = canvas.clientWidth > 0 ? canvas.width / canvas.clientWidth : 1;
+      // Keep icons a consistent screen size, slightly larger when the node is big.
+      const badgePx = Math.max(
+        NODE_KIND_BADGE_CSS_PX * dpr,
+        Math.min(radius * 0.9, NODE_KIND_BADGE_CSS_PX * dpr * 1.35),
+      );
+      const iconColor =
+        isFocus || isSelected ? kindTint : "rgba(15, 17, 21, 0.9)";
+      drawNodeKindBadge(
+        ctx,
+        node.kind || "symbol",
+        screen.x,
+        screen.y,
+        radius,
+        badgePx,
+        iconColor,
+      );
     }
 
     if (inNeighborhood && state.camera.zoom > 0.35) {
       ctx.fillStyle = isFocus ? "#e8ecf5" : withAlpha("#e8ecf5", dimming && !isFocus ? 0.85 : 1);
       ctx.font = `${Math.max(9, 10 * state.camera.zoom)}px sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText(node.label, screen.x, screen.y + radius + 11);
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(node.label, screen.x, screen.y + radius + 12);
     }
   }
+}
+
+function mixHex(a: string, b: string, t: number): string {
+  const parse = (hex: string) => ({
+    r: parseInt(hex.slice(1, 3), 16),
+    g: parseInt(hex.slice(3, 5), 16),
+    b: parseInt(hex.slice(5, 7), 16),
+  });
+  const A = parse(a);
+  const B = parse(b);
+  const m = (x: number, y: number) => Math.round(x + (y - x) * t);
+  return `rgb(${m(A.r, B.r)},${m(A.g, B.g)},${m(A.b, B.b)})`;
 }
 
 function lighten(hex: string): string {

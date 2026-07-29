@@ -4,6 +4,8 @@ export interface GraphNode {
   path: string;
   loc: number;
   kind: string;
+  /** 1-based source line for symbol nodes */
+  line?: number;
 }
 
 export interface GraphEdge {

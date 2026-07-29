@@ -263,14 +263,11 @@ export function autoAdvanceSingleFolder(
 }
 
 export function hasStaleImportIndex(hierarchy: HierarchyIndex): boolean {
+  // Only flag truly outdated persisted indexes. Missing/zero imports after a
+  // fresh analysis is a resolution gap, not a stale schema — showing
+  // "run analysis again" in that case is a false positive.
   const version = hierarchy.version ?? 1;
-  if (version < HIERARCHY_VERSION) return true;
-  if (hierarchy.files.length < 5) return false;
-  const resolved = Object.values(hierarchy.file_imports ?? {}).reduce(
-    (sum, targets) => sum + targets.length,
-    0,
-  );
-  return resolved === 0;
+  return version < HIERARCHY_VERSION;
 }
 
 export function graphForNavigation(
@@ -311,6 +308,7 @@ export function graphForNavigation(
     path: s.file,
     loc: 1,
     kind: s.kind,
+    line: s.line,
   }));
 
   const symbolIds = new Set(nodes.map((n) => n.id));

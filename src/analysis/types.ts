@@ -38,7 +38,7 @@ export interface ScopeGraph {
   edges: PackageEdge[];
 }
 
-export const HIERARCHY_VERSION = 2;
+export const HIERARCHY_VERSION = 3;
 
 export interface HierarchyIndex {
   version?: number;
@@ -51,11 +51,51 @@ export interface HierarchyIndex {
   scope_graphs?: Record<string, ScopeGraph>;
 }
 
+export interface RuleSettingDef {
+  key: string;
+  label: string;
+  kind: "number" | "boolean";
+  default: number | boolean;
+  min?: number;
+  max?: number;
+}
+
 export interface AnalysisRule {
   id: string;
   name: string;
   description: string;
   category: string;
+  settings?: RuleSettingDef[];
+}
+
+/** Per-rule setting values, keyed by rule id then setting key. */
+export type RuleSettingsMap = Record<string, Record<string, number | boolean>>;
+
+export function defaultRuleSettings(rules: AnalysisRule[]): RuleSettingsMap {
+  const out: RuleSettingsMap = {};
+  for (const rule of rules) {
+    const vals: Record<string, number | boolean> = {};
+    for (const s of rule.settings ?? []) {
+      vals[s.key] = s.default;
+    }
+    if (Object.keys(vals).length > 0) {
+      out[rule.id] = vals;
+    }
+  }
+  return out;
+}
+
+export function mergeRuleSettings(
+  rules: AnalysisRule[],
+  saved: RuleSettingsMap | undefined | null,
+): RuleSettingsMap {
+  const defaults = defaultRuleSettings(rules);
+  if (!saved) return defaults;
+  const out: RuleSettingsMap = { ...defaults };
+  for (const [ruleId, vals] of Object.entries(saved)) {
+    out[ruleId] = { ...(out[ruleId] ?? {}), ...vals };
+  }
+  return out;
 }
 
 export interface ValidationItem {

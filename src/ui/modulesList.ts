@@ -1,5 +1,5 @@
 import type { GraphNode } from "../graph/types";
-import { createModuleFileIcon, createModuleFolderIcon } from "./icons";
+import { createNodeKindShapeWrap, nodeKindLabel } from "../canvas/nodeIcons";
 import { nodeColor } from "../canvas/colors";
 import { attachTooltip } from "./tooltip";
 
@@ -196,16 +196,11 @@ function moduleRow(
   colorDot.className = "module-color-dot";
   colorDot.style.backgroundColor = nodeColor(node.id);
 
-  const icon =
-    node.kind === "package" || node.kind === "folder"
-      ? createModuleFolderIcon()
-      : node.kind === "file" || node.kind === "module"
-        ? createModuleFileIcon(node.label)
-        : createModuleFileIcon(node.label);
+  const icon = createNodeKindShapeWrap(node.kind || "symbol");
 
   attachTooltip(
     icon,
-    `${node.label}\n${node.path}\n${node.loc} lines · ${node.kind}`,
+    `${node.label}\n${node.path}\n${node.loc} lines · ${nodeKindLabel(node.kind || "symbol")}`,
   );
   icon.style.cursor = "pointer";
   icon.addEventListener("click", (e) => {

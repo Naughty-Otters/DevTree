@@ -2,7 +2,7 @@
 
 DevTree is a desktop tool for visualizing a codebase's module/dependency graph and (eventually) scoring its architectural health — modularity, cleanliness, type coverage, and test coverage. The client is a [Tauri](https://tauri.app/) app; heavy computation (graph layout, metrics) is written in Rust and compiled to WebAssembly so it runs inside the webview, and the graph itself is rendered on an HTML5 Canvas.
 
-**Current status**: milestone 1 only — a working Tauri shell that renders a hand-authored fixture graph ([fixtures/sample-graph.json](fixtures/sample-graph.json)) on Canvas via a Rust/wasm-computed force-directed layout. There is no real source-code analysis (LSP integration, scoring) yet.
+**Current status**: desktop analysis builds a package → file → symbol dependency map. Symbol extraction and the **Language Diagnostics** rule use system language servers when available (`rust-analyzer`, `typescript-language-server` / `vtsls`, `gopls`, `basedpyright` / `pyright` / `pylsp`); otherwise heuristics are used.
 
 ## Prerequisites
 
@@ -16,6 +16,13 @@ DevTree is a desktop tool for visualizing a codebase's module/dependency graph a
   cargo install wasm-pack
   ```
 - Tauri's own OS-level dependencies (Xcode Command Line Tools on macOS; see the [Tauri prerequisites guide](https://tauri.app/start/prerequisites/) for Linux/Windows)
+- **Optional language servers** (for richer analysis validations and symbol graphs):
+  ```bash
+  rustup component add rust-analyzer
+  npm install -g typescript-language-server typescript   # or: npm i -g @vtsls/language-server
+  go install golang.org/x/tools/gopls@latest
+  npm install -g basedpyright   # or: pip install basedpyright / python-lsp-server
+  ```
 
 ## Setup
 

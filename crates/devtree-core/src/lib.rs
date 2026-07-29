@@ -10,6 +10,13 @@ pub struct Node {
     pub loc: u32,
     #[serde(default)]
     pub kind: String,
+    /// 1-based source line when this node is a symbol; 0/omitted otherwise.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub line: u32,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,9 +203,9 @@ mod tests {
     fn sample_graph() -> Graph {
         Graph {
             nodes: vec![
-                Node { id: "a".into(), label: "a".into(), path: "a".into(), loc: 10, kind: "module".into() },
-                Node { id: "b".into(), label: "b".into(), path: "b".into(), loc: 20, kind: "module".into() },
-                Node { id: "c".into(), label: "c".into(), path: "c".into(), loc: 30, kind: "module".into() },
+                Node { id: "a".into(), label: "a".into(), path: "a".into(), loc: 10, kind: "module".into(), line: 0 },
+                Node { id: "b".into(), label: "b".into(), path: "b".into(), loc: 20, kind: "module".into(), line: 0 },
+                Node { id: "c".into(), label: "c".into(), path: "c".into(), loc: 30, kind: "module".into(), line: 0 },
             ],
             edges: vec![
                 Edge { source: "a".into(), target: "b".into(), kind: "import".into() },

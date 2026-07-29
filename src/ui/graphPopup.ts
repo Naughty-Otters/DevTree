@@ -1,5 +1,6 @@
 import type { GraphEdge, GraphNode } from "../graph/types";
 import { nodeColor } from "../canvas/colors";
+import { createNodeKindShape, nodeKindLabel } from "../canvas/nodeIcons";
 
 let popupEl: HTMLElement | null = null;
 let anchorEl: HTMLElement | null = null;
@@ -59,6 +60,7 @@ function renderModuleList(items: GraphNode[]): string {
       const color = nodeColor(n.id);
       return `<li class="graph-popup-dep-item">
         <span class="graph-popup-dot" style="background:${color}"></span>
+        <span class="graph-popup-dep-kind" data-kind="${escapeHtml(n.kind || "symbol")}"></span>
         <span class="graph-popup-dep-name" title="${escapeHtml(n.path)}">${escapeHtml(n.label)}</span>
       </li>`;
     })
@@ -76,19 +78,26 @@ export function showGraphPopup(
   const popup = ensurePopup();
   const { dependsOn, usedBy } = relatedModules(node.id, nodes, edges);
   const color = nodeColor(node.id);
+  const kindShape = createNodeKindShape(node.kind || "symbol", 18);
+  kindShape.classList.add("graph-popup-kind-icon");
 
   popup.innerHTML = `
     <div class="graph-popup-header">
       <div class="graph-popup-title">
         <span class="graph-popup-dot" style="background:${color}"></span>
+        <span class="graph-popup-kind-slot"></span>
         <span class="graph-popup-name">${escapeHtml(node.label)}</span>
       </div>
       <button type="button" class="graph-popup-close" aria-label="Close">×</button>
     </div>
     <div class="graph-popup-body">
       <div class="graph-popup-row"><span class="graph-popup-label">Path</span><span class="graph-popup-value" title="${escapeHtml(node.path)}">${escapeHtml(node.path)}</span></div>
-      <div class="graph-popup-row"><span class="graph-popup-label">Lines</span><span class="graph-popup-value">${node.loc}</span></div>
-      <div class="graph-popup-row"><span class="graph-popup-label">Kind</span><span class="graph-popup-value">${escapeHtml(node.kind || "module")}</span></div>
+      ${
+        node.line && node.line > 0
+          ? `<div class="graph-popup-row"><span class="graph-popup-label">Line</span><span class="graph-popup-value">${node.line}</span></div>`
+          : `<div class="graph-popup-row"><span class="graph-popup-label">Lines</span><span class="graph-popup-value">${node.loc}</span></div>`
+      }
+      <div class="graph-popup-row"><span class="graph-popup-label">Kind</span><span class="graph-popup-value">${escapeHtml(nodeKindLabel(node.kind || "module"))}</span></div>
       <div class="graph-popup-section">
         <div class="graph-popup-section-title">Depends on <span class="graph-popup-count">${dependsOn.length}</span></div>
         <ul class="graph-popup-deps">${renderModuleList(dependsOn)}</ul>
@@ -99,6 +108,13 @@ export function showGraphPopup(
       </div>
     </div>
   `;
+
+  popup.querySelector(".graph-popup-kind-slot")?.replaceWith(kindShape);
+
+  popup.querySelectorAll<HTMLElement>(".graph-popup-dep-kind").forEach((slot) => {
+    const kind = slot.dataset.kind || "symbol";
+    slot.replaceWith(createNodeKindShape(kind, 16));
+  });
 
   popup.querySelector<HTMLButtonElement>(".graph-popup-close")!.addEventListener("click", () => {
     hideGraphPopup();
