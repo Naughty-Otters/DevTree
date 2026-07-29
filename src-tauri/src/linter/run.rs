@@ -1,11 +1,13 @@
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::analysis::ValidationItem;
+use crate::analysis_session::check_cancelled;
 
 use super::discover::{
     default_linter_id, file_language, languages_in_files, probe_linter, LanguageKind,
@@ -65,61 +67,77 @@ fn kill_process(pid: u32) {
         .status();
 }
 
+pub fn run_language_linter_for_lang(
+    root: &Path,
+    files: &[(String, u32)],
+    settings: &LinterSettingsMap,
+    lang: LanguageKind,
+) -> Result<ValidationItem, String> {
+    let settings = super::status::merge_linter_settings(settings);
+    let cfg = linter_cfg(&settings, lang.id());
+    if !cfg_bool(cfg, "enabled", true) {
+        return Ok(ValidationItem {
+            rule_id: format!("linter:{}", lang.id()),
+            rule_name: format!("{} (linter)", lang.label()),
+            status: "pass".into(),
+            message: format!("{} linter disabled in settings", lang.label()),
+            affected: vec![],
+            cycle_groups: None,
+        });
+    }
+    let linter_id = cfg_str(cfg, "linter_id", default_linter_id(lang));
+    let min_level = cfg_str(cfg, "min_level", "warning");
+    let sample_limit = cfg_u32(cfg, "sample_limit", 20) as usize;
+
+    if probe_linter(&linter_id).is_none() {
+        return Ok(ValidationItem {
+            rule_id: format!("linter:{}", lang.id()),
+            rule_name: format!("{} ({linter_id})", lang.label()),
+            status: "warn".into(),
+            message: format!(
+                "{linter_id} is not installed. Install it from Settings → Language Linters."
+            ),
+            affected: vec![],
+            cycle_groups: None,
+        });
+    }
+
+    let findings = match run_linter(root, lang, &linter_id, files) {
+        Ok(findings) => findings,
+        Err(err) => {
+            return Ok(ValidationItem {
+                rule_id: format!("linter:{}", lang.id()),
+                rule_name: format!("{} ({linter_id})", lang.label()),
+                status: "warn".into(),
+                message: err,
+                affected: vec![],
+                cycle_groups: None,
+            });
+        }
+    };
+    Ok(build_validation_item(
+        lang,
+        &linter_id,
+        &min_level,
+        sample_limit,
+        &findings,
+    ))
+}
+
 pub fn run_language_linter_checks(
     root: &Path,
     files: &[(String, u32)],
     settings: &LinterSettingsMap,
+    cancel: &AtomicBool,
     mut on_progress: impl FnMut(&str),
-) -> Vec<ValidationItem> {
-    let settings = super::status::merge_linter_settings(settings);
+) -> Result<Vec<ValidationItem>, String> {
     let mut items = Vec::new();
     for lang in languages_in_files(files) {
-        let cfg = linter_cfg(&settings, lang.id());
-        if !cfg_bool(cfg, "enabled", true) {
-            continue;
-        }
-        let linter_id = cfg_str(cfg, "linter_id", default_linter_id(lang));
-        let min_level = cfg_str(cfg, "min_level", "warning");
-        let sample_limit = cfg_u32(cfg, "sample_limit", 20) as usize;
-
-        on_progress(&format!("Running {} ({linter_id})…", lang.label()));
-
-        if probe_linter(&linter_id).is_none() {
-            items.push(ValidationItem {
-                rule_id: format!("linter:{}", lang.id()),
-                rule_name: format!("{} ({linter_id})", lang.label()),
-                status: "warn".into(),
-                message: format!(
-                    "{linter_id} is not installed. Install it from Settings → Language Linters."
-                ),
-                affected: vec![],
-            });
-            continue;
-        }
-
-        let findings = match run_linter(root, lang, &linter_id, files) {
-            Ok(f) => f,
-            Err(err) => {
-                items.push(ValidationItem {
-                    rule_id: format!("linter:{}", lang.id()),
-                    rule_name: format!("{} ({linter_id})", lang.label()),
-                    status: "warn".into(),
-                    message: err,
-                    affected: vec![],
-                });
-                continue;
-            }
-        };
-
-        items.push(build_validation_item(
-            lang,
-            &linter_id,
-            &min_level,
-            sample_limit,
-            &findings,
-        ));
+        check_cancelled(cancel)?;
+        on_progress(&format!("Running {} linters…", lang.label()));
+        items.push(run_language_linter_for_lang(root, files, settings, lang)?);
     }
-    items
+    Ok(items)
 }
 
 fn build_validation_item(
@@ -149,6 +167,7 @@ fn build_validation_item(
                 format!("No issues at or above {min_level} level")
             },
             affected: vec![],
+            cycle_groups: None,
         };
     }
 
@@ -170,6 +189,7 @@ fn build_validation_item(
             "{errors} error(s), {warnings} warning(s), {infos} info — level ≥ {min_level}"
         ),
         affected: sample,
+        cycle_groups: None,
     }
 }
 

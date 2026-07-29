@@ -16,7 +16,7 @@ export interface CameraState {
   zoom: number;
 }
 
-export interface PersistedAppState {
+export interface PersistedUiState {
   version: 1;
   panelSizes: PanelSizes;
   projectPath: string | null;
@@ -27,8 +27,11 @@ export interface PersistedAppState {
   visibleModuleIds: string[];
   selectedNodeId: string | null;
   camera: CameraState | null;
-  analysisResult: AnalysisResult | null;
   graphNavigation: GraphNavigation | null;
+}
+
+export interface PersistedAppState extends PersistedUiState {
+  analysisResult: AnalysisResult | null;
 }
 
 export const DEFAULT_PANEL_SIZES: PanelSizes = {
@@ -50,7 +53,7 @@ export function defaultPersistedState(): PersistedAppState {
     visibleModuleIds: [],
     selectedNodeId: null,
     camera: null,
-    analysisResult: null,
     graphNavigation: null,
+    analysisResult: null,
   };
 }

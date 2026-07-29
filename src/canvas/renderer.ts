@@ -19,6 +19,11 @@ export interface RenderState {
   selectedId: string | null;
   /** When set, highlights this node and its direct dependencies/dependents. */
   highlightId: string | null;
+  /** When set, highlights specific nodes and edges (e.g. import cycles). */
+  highlightCycle?: {
+    nodeIds: Set<string>;
+    edgeKeys: Set<string>;
+  };
   hiddenIds: Set<string>;
   nodeColors: Map<string, string>;
 }
@@ -132,9 +137,14 @@ export function render(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
   const locs = locById(state);
 
   const focusId = state.highlightId;
+  const cycleHighlight = state.highlightCycle;
+  const cycleHighlightActive =
+    cycleHighlight != null && cycleHighlight.nodeIds.size > 0;
   const neighborhood =
-    focusId != null ? dependencyNeighborhood(focusId, state.edges) : null;
-  const dimming = neighborhood != null;
+    focusId != null && !cycleHighlightActive
+      ? dependencyNeighborhood(focusId, state.edges)
+      : null;
+  const dimming = neighborhood != null || cycleHighlightActive;
 
   const lineWidth = Math.max(1, 1.2 * state.camera.zoom);
   ctx.lineWidth = lineWidth;
@@ -145,8 +155,11 @@ export function render(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
     const to = state.positions.get(edge.target);
     if (!from || !to) continue;
 
-    const highlighted =
-      focusId != null && isEdgeHighlighted(edge, focusId, neighborhood!);
+    const highlighted = cycleHighlightActive
+      ? cycleHighlight!.edgeKeys.has(`${edge.source}->${edge.target}`) ||
+        (cycleHighlight!.nodeIds.has(edge.source) &&
+          cycleHighlight!.nodeIds.has(edge.target))
+      : focusId != null && isEdgeHighlighted(edge, focusId, neighborhood!);
 
     if (dimming && !highlighted) {
       ctx.strokeStyle = DIMMED_EDGE_STROKE;
@@ -180,8 +193,13 @@ export function render(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
     const screen = worldToScreen(state.camera, canvas, pos.x, pos.y);
     const radius = nodeRadius(node.loc, maxLoc) * state.camera.zoom;
 
-    const inNeighborhood = !dimming || neighborhood!.has(node.id);
-    const isFocus = focusId === node.id;
+    const isCycleNode = cycleHighlightActive
+      ? (cycleHighlight!.nodeIds.has(node.id) ?? false)
+      : false;
+    const inNeighborhood = cycleHighlightActive
+      ? isCycleNode
+      : !dimming || neighborhood!.has(node.id);
+    const isFocus = focusId === node.id || isCycleNode;
     const isSelected = state.selectedId === node.id;
     const isHovered = state.hoveredId === node.id;
     const baseColor = state.nodeColors.get(node.id) ?? nodeColor(node.id);

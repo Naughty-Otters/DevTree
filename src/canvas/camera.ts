@@ -68,6 +68,58 @@ export function animateCamera(
   requestAnimationFrame(step);
 }
 
+export function focusCameraOnNodes(
+  state: RenderState,
+  canvas: HTMLCanvasElement,
+  nodeIds: string[],
+  zoom = 2.2,
+): void {
+  const positions = nodeIds
+    .map((id) => state.positions.get(id))
+    .filter((pos): pos is NonNullable<typeof pos> => pos != null);
+  if (positions.length === 0) return;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const pos of positions) {
+    minX = Math.min(minX, pos.x);
+    maxX = Math.max(maxX, pos.x);
+    minY = Math.min(minY, pos.y);
+    maxY = Math.max(maxY, pos.y);
+  }
+
+  const pad = 48;
+  const contentWidth = Math.max(1, maxX - minX + pad);
+  const contentHeight = Math.max(1, maxY - minY + pad);
+  const fitZoom = Math.min(
+    (canvas.width / contentWidth) * 0.9,
+    (canvas.height / contentHeight) * 0.9,
+    zoom,
+    6,
+  );
+
+  state.camera.zoom = fitZoom;
+  state.camera.x = -(minX + maxX) / 2;
+  state.camera.y = -(minY + maxY) / 2;
+  state.selectedId = nodeIds[0] ?? null;
+}
+
+export function focusCameraOnNodesAnimated(
+  state: RenderState,
+  canvas: HTMLCanvasElement,
+  nodeIds: string[],
+  onFrame: () => void,
+  zoom = 2.2,
+): void {
+  const before = { ...state.camera };
+  focusCameraOnNodes(state, canvas, nodeIds, zoom);
+  const target = { ...state.camera };
+  state.camera = before;
+  animateCamera(state, target, onFrame);
+}
+
 export function focusCameraOnNodeAnimated(
   state: RenderState,
   _canvas: HTMLCanvasElement,

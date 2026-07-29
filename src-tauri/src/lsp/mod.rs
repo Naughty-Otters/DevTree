@@ -46,7 +46,7 @@ impl LangRuntime {
             max_open_files: cfg_u32(cfg, "max_open_files", 200) as usize,
             max_refs_per_symbol: cfg_u32(cfg, "max_refs_per_symbol", 24) as usize,
             collect_symbols: cfg_bool(cfg, "collect_symbols", true),
-            collect_references: cfg_bool(cfg, "collect_references", true),
+            collect_references: cfg_bool(cfg, "collect_references", false),
             collect_diagnostics: cfg_bool(cfg, "collect_diagnostics", true),
             include_javascript: cfg_bool(cfg, "include_javascript", true),
         }

@@ -5,6 +5,8 @@ const DRAG_THRESHOLD = 4;
 
 export interface InteractionCallbacks {
   onChange: () => void;
+  /** Called after pan/zoom/drag settles (pointer up after move). */
+  onViewSettled?: () => void;
   onSelect: (id: string | null) => void;
   onHover?: (id: string | null) => void;
   /** Single click (no drag): open details / clear selection on empty space. */
@@ -38,6 +40,7 @@ export function attachInteraction(
       const zoomFactor = Math.exp(-e.deltaY * 0.001);
       state.camera.zoom = Math.min(4, Math.max(0.1, state.camera.zoom * zoomFactor));
       callbacks.onChange();
+      callbacks.onViewSettled?.();
     },
     { passive: false },
   );
@@ -91,6 +94,8 @@ export function attachInteraction(
       callbacks.onSelect(clicked);
       callbacks.onNodeClick?.(clicked, e.clientX, e.clientY);
       callbacks.onChange();
+    } else if (didMove) {
+      callbacks.onViewSettled?.();
     }
 
     pointerDown = false;
@@ -168,7 +173,6 @@ export function attachInteraction(
       state.hoveredId = hovered;
       canvas.style.cursor = hovered ? "grab" : "default";
       callbacks.onHover?.(hovered);
-      callbacks.onChange();
     }
   });
 }

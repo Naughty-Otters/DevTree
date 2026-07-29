@@ -1,13 +1,29 @@
 use devtree_core::Graph;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::analysis_session::check_cancelled;
 use crate::hierarchy::{
-    build_hierarchy_with_progress, read_file_contents_with_progress, root_package_graph,
-    HierarchyIndex,
+    adjacency_from_edges, build_hierarchy_with_progress, cyclic_components_sampled,
+    extract_cycle_path, format_dependency_cycle, read_file_contents_with_progress,
+    root_package_graph, HierarchyIndex,
 };
+
+const MAX_CYCLE_NODES_STORED: usize = 16;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CycleGroup {
+    pub kind: String,
+    pub nodes: Vec<String>,
+    pub path: Vec<String>,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_count: Option<usize>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationItem {
@@ -16,6 +32,8 @@ pub struct ValidationItem {
     pub status: String,
     pub message: String,
     pub affected: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cycle_groups: Option<Vec<CycleGroup>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +105,7 @@ pub fn default_rules() -> Vec<AnalysisRule> {
         AnalysisRule {
             id: "modularity".into(),
             name: "Modularity".into(),
-            description: "Detect tightly coupled modules and circular dependencies".into(),
+            description: "Detect tightly coupled modules and oversized files".into(),
             category: "architecture".into(),
             settings: vec![num_setting(
                 "max_lines",
@@ -109,6 +127,30 @@ pub fn default_rules() -> Vec<AnalysisRule> {
                 1,
                 20,
             )],
+        },
+        AnalysisRule {
+            id: "circular_dependencies".into(),
+            name: "Circular Dependencies".into(),
+            description:
+                "Detect import cycles between files and packages (uses resolved imports; optionally symbol reference edges from LSP when available)."
+                    .into(),
+            category: "architecture".into(),
+            settings: vec![
+                bool_setting("check_file_imports", "Check file import cycles", true),
+                bool_setting("check_package_imports", "Check package import cycles", true),
+                bool_setting(
+                    "check_symbol_references",
+                    "Check symbol reference cycles (requires LSP symbol references)",
+                    true,
+                ),
+                num_setting(
+                    "sample_limit",
+                    "Max cycles to list",
+                    10,
+                    1,
+                    50,
+                ),
+            ],
         },
         AnalysisRule {
             id: "type_coverage".into(),
@@ -227,12 +269,25 @@ fn cfg_bool(cfg: Option<&serde_json::Map<String, serde_json::Value>>, key: &str,
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuleTaskProgress {
+    pub rule_id: String,
+    pub rule_name: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AnalysisProgress {
+    pub analysis_id: String,
     pub stage: String,
     pub message: String,
     pub current: u32,
     pub total: u32,
     pub percent: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_tasks: Option<Vec<RuleTaskProgress>>,
 }
 
 const SKIP_DIRS: &[&str] = &[
@@ -260,27 +315,291 @@ fn count_lines(path: &Path) -> u32 {
 }
 
 fn emit_progress(
-    on_progress: &mut impl FnMut(AnalysisProgress),
+    emit: &Arc<dyn Fn(AnalysisProgress) + Send + Sync>,
+    analysis_id: &str,
     stage: &str,
     message: &str,
     current: u32,
     total: u32,
     percent: u8,
+    rule_tasks: Option<Vec<RuleTaskProgress>>,
 ) {
-    on_progress(AnalysisProgress {
+    emit(AnalysisProgress {
+        analysis_id: analysis_id.into(),
         stage: stage.into(),
         message: message.into(),
         current,
         total,
         percent,
+        rule_tasks,
     });
+}
+
+fn rule_display_name(rule_id: &str) -> String {
+    default_rules()
+        .into_iter()
+        .find(|rule| rule.id == rule_id)
+        .map(|rule| rule.name)
+        .unwrap_or_else(|| rule_id.to_string())
+}
+
+fn set_rule_task_status(
+    tasks: &Mutex<Vec<RuleTaskProgress>>,
+    rule_id: &str,
+    status: &str,
+    message: Option<String>,
+) {
+    if let Ok(mut tasks) = tasks.lock() {
+        if let Some(task) = tasks.iter_mut().find(|task| task.rule_id == rule_id) {
+            task.status = status.into();
+            task.message = message;
+        }
+    }
+}
+
+fn emit_rule_tasks_progress(
+    emit: &Arc<dyn Fn(AnalysisProgress) + Send + Sync>,
+    analysis_id: &str,
+    rule_tasks: &Arc<Mutex<Vec<RuleTaskProgress>>>,
+    headline: &str,
+) {
+    let tasks = rule_tasks.lock().unwrap().clone();
+    let total = tasks.len().max(1);
+    let done = tasks
+        .iter()
+        .filter(|task| task.status == "done" || task.status == "failed")
+        .count();
+    let running = tasks.iter().filter(|task| task.status == "running").count();
+    let message = if running > 0 {
+        format!("{headline} ({running} running · {done}/{total} done)")
+    } else {
+        headline.to_string()
+    };
+    emit(AnalysisProgress {
+        analysis_id: analysis_id.into(),
+        stage: "validating".into(),
+        message,
+        current: done as u32,
+        total: total as u32,
+        percent: (85 + ((done as f32 / total as f32) * 10.0) as u8).min(95),
+        rule_tasks: Some(tasks),
+    });
+}
+
+fn run_single_validation_rule(
+    rule_id: &str,
+    root: &Path,
+    files: &[(String, u32)],
+    hierarchy: &HierarchyIndex,
+    cfg: Option<&serde_json::Map<String, serde_json::Value>>,
+    lsp_diags: &[crate::lsp::LspDiagnostic],
+) -> ValidationItem {
+    match rule_id {
+        "modularity" => run_modularity_check(files, cfg),
+        "dependency_depth" => run_dependency_depth_check(files, cfg),
+        "circular_dependencies" => run_circular_dependency_check(hierarchy, cfg),
+        "type_coverage" => run_type_coverage_check(files, cfg),
+        "test_coverage" => run_test_coverage_check(root, files, cfg),
+        "file_size" => run_file_size_check(files, cfg),
+        "naming" => run_naming_check(files, cfg),
+        "lsp_diagnostics" => run_lsp_diagnostics_check(lsp_diags, cfg),
+        _ => ValidationItem {
+            rule_id: rule_id.into(),
+            rule_name: rule_display_name(rule_id),
+            status: "pass".into(),
+            message: "Unknown rule".into(),
+            affected: vec![],
+            cycle_groups: None,
+        },
+    }
+}
+
+fn run_validation_rules_parallel(
+    rule_ids: &[String],
+    run_language_linters: bool,
+    linter_languages: Vec<crate::linter::LanguageKind>,
+    root: &Path,
+    files: &[(String, u32)],
+    hierarchy: &HierarchyIndex,
+    rule_settings: &RuleSettingsMap,
+    linter_settings: &crate::linter::LinterSettingsMap,
+    lsp_diags: &[crate::lsp::LspDiagnostic],
+    cancel: &AtomicBool,
+    analysis_id: &str,
+    emit: Arc<dyn Fn(AnalysisProgress) + Send + Sync>,
+) -> Result<Vec<ValidationItem>, String> {
+    let mut initial_tasks = Vec::new();
+    for rule_id in rule_ids {
+        if rule_id == "language_linters" {
+            continue;
+        }
+        initial_tasks.push(RuleTaskProgress {
+            rule_id: rule_id.clone(),
+            rule_name: rule_display_name(rule_id),
+            status: "pending".into(),
+            message: None,
+        });
+    }
+    if run_language_linters {
+        for lang in &linter_languages {
+            initial_tasks.push(RuleTaskProgress {
+                rule_id: format!("language_linters:{}", lang.id()),
+                rule_name: format!("Language Linters · {}", lang.label()),
+                status: "pending".into(),
+                message: None,
+            });
+        }
+    }
+
+    if initial_tasks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rule_tasks = Arc::new(Mutex::new(initial_tasks));
+    {
+        let mut tasks = rule_tasks.lock().unwrap();
+        for task in tasks.iter_mut() {
+            task.status = "running".into();
+        }
+    }
+    emit_rule_tasks_progress(
+        &emit,
+        analysis_id,
+        &rule_tasks,
+        "Running validation rules in parallel…",
+    );
+
+    let validation_results = Arc::new(Mutex::new(Vec::new()));
+    let root_buf = root.to_path_buf();
+    let files_vec = files.to_vec();
+    let lsp_diags_vec = lsp_diags.to_vec();
+    let hierarchy = hierarchy.clone();
+    let rule_settings = rule_settings.clone();
+    let linter_settings = linter_settings.clone();
+    let rule_ids_vec: Vec<String> = rule_ids
+        .iter()
+        .filter(|id| *id != "language_linters")
+        .cloned()
+        .collect();
+
+    std::thread::scope(|scope| {
+        for rule_id in rule_ids_vec {
+            let emit = emit.clone();
+            let rule_tasks = rule_tasks.clone();
+            let validation_results = validation_results.clone();
+            let root_buf = root_buf.clone();
+            let files_vec = files_vec.clone();
+            let lsp_diags_vec = lsp_diags_vec.clone();
+            let hierarchy = hierarchy.clone();
+            let rule_settings = rule_settings.clone();
+            let analysis_id = analysis_id.to_string();
+
+            scope.spawn(move || {
+                if check_cancelled(cancel).is_err() {
+                    set_rule_task_status(&rule_tasks, &rule_id, "failed", Some("Cancelled".into()));
+                    emit_rule_tasks_progress(&emit, &analysis_id, &rule_tasks, "Validation cancelled");
+                    return;
+                }
+
+                let cfg = rule_cfg(&rule_settings, &rule_id);
+                let item = run_single_validation_rule(
+                    &rule_id,
+                    &root_buf,
+                    &files_vec,
+                    &hierarchy,
+                    cfg,
+                    &lsp_diags_vec,
+                );
+
+                set_rule_task_status(&rule_tasks, &rule_id, "done", Some(item.message.clone()));
+                validation_results.lock().unwrap().push(item);
+                emit_rule_tasks_progress(
+                    &emit,
+                    &analysis_id,
+                    &rule_tasks,
+                    &format!("Finished {}", rule_display_name(&rule_id)),
+                );
+            });
+        }
+
+        if run_language_linters {
+            let emit = emit.clone();
+            let rule_tasks = rule_tasks.clone();
+            let validation_results = validation_results.clone();
+            let root_buf = root_buf.clone();
+            let files_vec = files_vec.clone();
+            let linter_settings = linter_settings.clone();
+            let analysis_id = analysis_id.to_string();
+
+            for lang in linter_languages {
+                let task_id = format!("language_linters:{}", lang.id());
+                let emit = emit.clone();
+                let rule_tasks = rule_tasks.clone();
+                let validation_results = validation_results.clone();
+                let root_buf = root_buf.clone();
+                let files_vec = files_vec.clone();
+                let linter_settings = linter_settings.clone();
+                let analysis_id = analysis_id.clone();
+
+                scope.spawn(move || {
+                    if check_cancelled(cancel).is_err() {
+                        set_rule_task_status(
+                            &rule_tasks,
+                            &task_id,
+                            "failed",
+                            Some("Cancelled".into()),
+                        );
+                        emit_rule_tasks_progress(
+                            &emit,
+                            &analysis_id,
+                            &rule_tasks,
+                            "Validation cancelled",
+                        );
+                        return;
+                    }
+
+                    let item = match crate::linter::run_language_linter_for_lang(
+                        &root_buf,
+                        &files_vec,
+                        &linter_settings,
+                        lang,
+                    ) {
+                        Ok(item) => item,
+                        Err(err) => ValidationItem {
+                            rule_id: format!("linter:{}", lang.id()),
+                            rule_name: format!("{} (linter)", lang.label()),
+                            status: "warn".into(),
+                            message: err,
+                            affected: vec![],
+                            cycle_groups: None,
+                        },
+                    };
+
+                    set_rule_task_status(&rule_tasks, &task_id, "done", Some(item.message.clone()));
+                    validation_results.lock().unwrap().push(item);
+                    emit_rule_tasks_progress(
+                        &emit,
+                        &analysis_id,
+                        &rule_tasks,
+                        &format!("Finished {} linters", lang.label()),
+                    );
+                });
+            }
+        }
+    });
+
+    check_cancelled(cancel)?;
+    let results = validation_results.lock().unwrap().clone();
+    Ok(results)
 }
 
 /// Breadth-first walk of the project tree, collecting source files level by level.
 fn scan_source_files(
     root: &Path,
-    on_progress: &mut impl FnMut(AnalysisProgress),
-) -> Vec<(String, u32)> {
+    cancel: &AtomicBool,
+    analysis_id: &str,
+    emit: &Arc<dyn Fn(AnalysisProgress) + Send + Sync>,
+) -> Result<Vec<(String, u32)>, String> {
     let mut files = Vec::new();
     let mut queue: VecDeque<PathBuf> = VecDeque::new();
     queue.push_back(root.to_path_buf());
@@ -288,15 +607,18 @@ fn scan_source_files(
     let mut dirs_visited = 0u32;
 
     while let Some(dir) = queue.pop_front() {
+        check_cancelled(cancel)?;
         dirs_visited += 1;
         if dirs_visited == 1 || dirs_visited % 8 == 0 {
             emit_progress(
-                on_progress,
+                emit,
+                analysis_id,
                 "scanning",
                 &format!("Scanning directories… ({} files found)", files.len()),
                 files.len() as u32,
                 0,
                 5,
+                None,
             );
         }
 
@@ -332,15 +654,17 @@ fn scan_source_files(
     }
 
     emit_progress(
-        on_progress,
+        emit,
+        analysis_id,
         "scanning",
         &format!("Found {} source files", files.len()),
         files.len() as u32,
         files.len() as u32,
         15,
+        None,
     );
 
-    files
+    Ok(files)
 }
 
 fn run_modularity_check(
@@ -361,6 +685,7 @@ fn run_modularity_check(
             status: "pass".into(),
             message: format!("No modules exceed {max_lines} lines"),
             affected: vec![],
+            cycle_groups: None,
         }
     } else {
         ValidationItem {
@@ -372,6 +697,7 @@ fn run_modularity_check(
                 large.len()
             ),
             affected: large,
+            cycle_groups: None,
         }
     }
 }
@@ -424,6 +750,7 @@ fn run_test_coverage_check(
             status: "pass".into(),
             message: "Most modules appear to have corresponding tests".into(),
             affected: vec![],
+            cycle_groups: None,
         }
     } else {
         ValidationItem {
@@ -432,6 +759,7 @@ fn run_test_coverage_check(
             status: "warn".into(),
             message: format!("{} module(s) may lack test files", untested.len()),
             affected: untested,
+            cycle_groups: None,
         }
     }
 }
@@ -454,6 +782,7 @@ fn run_file_size_check(
             status: "pass".into(),
             message: format!("All files are within {max_lines} lines"),
             affected: vec![],
+            cycle_groups: None,
         }
     } else {
         ValidationItem {
@@ -462,6 +791,7 @@ fn run_file_size_check(
             status: "fail".into(),
             message: format!("{} file(s) exceed {max_lines} lines", oversized.len()),
             affected: oversized,
+            cycle_groups: None,
         }
     }
 }
@@ -494,6 +824,7 @@ fn run_naming_check(
             status: "pass".into(),
             message: "File naming looks consistent".into(),
             affected: vec![],
+            cycle_groups: None,
         }
     } else {
         ValidationItem {
@@ -502,6 +833,7 @@ fn run_naming_check(
             status: "warn".into(),
             message: format!("{} file(s) have non-standard naming", inconsistent.len()),
             affected: inconsistent,
+            cycle_groups: None,
         }
     }
 }
@@ -526,6 +858,7 @@ fn run_dependency_depth_check(
             status: "pass".into(),
             message: format!("No files deeper than {max_depth} path segments"),
             affected: vec![],
+            cycle_groups: None,
         }
     } else {
         ValidationItem {
@@ -537,6 +870,157 @@ fn run_dependency_depth_check(
                 deep_dirs.len()
             ),
             affected: deep_dirs,
+            cycle_groups: None,
+        }
+    }
+}
+
+fn cap_cycle_nodes(nodes: Vec<String>) -> (Vec<String>, Option<usize>) {
+    let total = nodes.len();
+    if total <= MAX_CYCLE_NODES_STORED {
+        return (nodes, None);
+    }
+    (nodes.into_iter().take(MAX_CYCLE_NODES_STORED).collect(), Some(total))
+}
+
+fn collect_formatted_cycles(
+    adj: &HashMap<String, Vec<String>>,
+    kind: &str,
+    label: &str,
+    sample_limit: usize,
+) -> (usize, Vec<String>, Vec<CycleGroup>) {
+    let (total, components) = cyclic_components_sampled(adj, sample_limit);
+    let mut formatted = Vec::new();
+    let mut groups = Vec::new();
+    for component in components {
+        let path = extract_cycle_path(&component, adj);
+        let line = format_dependency_cycle(&component, adj, label);
+        if line.is_empty() {
+            continue;
+        }
+        let (nodes, node_count) = cap_cycle_nodes(component);
+        let capped_path = if path.len() > MAX_CYCLE_NODES_STORED {
+            path.into_iter().take(MAX_CYCLE_NODES_STORED).collect()
+        } else {
+            path
+        };
+        formatted.push(line.clone());
+        groups.push(CycleGroup {
+            kind: kind.into(),
+            nodes,
+            path: capped_path,
+            label: line,
+            node_count,
+        });
+    }
+    (total, formatted, groups)
+}
+
+fn run_circular_dependency_check(
+    hierarchy: &HierarchyIndex,
+    cfg: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> ValidationItem {
+    let check_files = cfg_bool(cfg, "check_file_imports", true);
+    let check_packages = cfg_bool(cfg, "check_package_imports", true);
+    let check_symbols = cfg_bool(cfg, "check_symbol_references", true);
+    let sample_limit = cfg_u32(cfg, "sample_limit", 10) as usize;
+
+    let mut cycles = Vec::new();
+    let mut cycle_groups = Vec::new();
+    let mut total_groups = 0usize;
+
+    if check_files {
+        let adj = adjacency_from_edges(
+            hierarchy
+                .file_imports
+                .iter()
+                .flat_map(|(source, targets)| {
+                    targets
+                        .iter()
+                        .map(move |target| (source.as_str(), target.as_str()))
+                }),
+        );
+        let (total, mut formatted, mut groups) =
+            collect_formatted_cycles(&adj, "file_imports", "file imports", sample_limit);
+        total_groups += total;
+        cycles.append(&mut formatted);
+        cycle_groups.append(&mut groups);
+    }
+
+    if check_packages {
+        let adj = adjacency_from_edges(
+            hierarchy
+                .package_edges
+                .iter()
+                .map(|edge| (edge.source.as_str(), edge.target.as_str())),
+        );
+        let (total, mut formatted, mut groups) =
+            collect_formatted_cycles(&adj, "package_imports", "package imports", sample_limit);
+        total_groups += total;
+        cycles.append(&mut formatted);
+        cycle_groups.append(&mut groups);
+    }
+
+    if check_symbols && !hierarchy.symbol_edges.is_empty() {
+        let adj = adjacency_from_edges(
+            hierarchy
+                .symbol_edges
+                .iter()
+                .map(|edge| (edge.source.as_str(), edge.target.as_str())),
+        );
+        let (total, mut formatted, mut groups) = collect_formatted_cycles(
+            &adj,
+            "symbol_references",
+            "symbol references",
+            sample_limit,
+        );
+        total_groups += total;
+        cycles.append(&mut formatted);
+        cycle_groups.append(&mut groups);
+    }
+
+    cycles.sort();
+    cycles.dedup();
+    if cycles.len() > sample_limit {
+        cycles.truncate(sample_limit);
+    }
+    if cycle_groups.len() > sample_limit {
+        cycle_groups.truncate(sample_limit);
+    }
+
+    if total_groups == 0 {
+        let source = if hierarchy.symbol_edges.is_empty() {
+            "import graph"
+        } else {
+            "import graph and LSP symbol references"
+        };
+        ValidationItem {
+            rule_id: "circular_dependencies".into(),
+            rule_name: "Circular Dependencies".into(),
+            status: "pass".into(),
+            message: format!("No circular dependencies detected in {source}"),
+            affected: vec![],
+            cycle_groups: None,
+        }
+    } else {
+        let has_file_cycles = cycle_groups
+            .iter()
+            .any(|group| group.kind == "file_imports");
+        let status = if has_file_cycles { "fail" } else { "warn" };
+        ValidationItem {
+            rule_id: "circular_dependencies".into(),
+            rule_name: "Circular Dependencies".into(),
+            status: status.into(),
+            message: format!(
+                "{total_groups} circular dependency group(s) found{}",
+                if total_groups > cycles.len() {
+                    " (list truncated)"
+                } else {
+                    ""
+                }
+            ),
+            affected: cycles,
+            cycle_groups: Some(cycle_groups),
         }
     }
 }
@@ -552,6 +1036,7 @@ fn run_type_coverage_check(
             status: "pass".into(),
             message: "JavaScript file checks disabled".into(),
             affected: vec![],
+            cycle_groups: None,
         };
     }
     let untyped: Vec<String> = files
@@ -570,6 +1055,7 @@ fn run_type_coverage_check(
             status: "pass".into(),
             message: "No plain JavaScript files detected".into(),
             affected: vec![],
+            cycle_groups: None,
         }
     } else {
         ValidationItem {
@@ -578,6 +1064,7 @@ fn run_type_coverage_check(
             status: "warn".into(),
             message: format!("{} JavaScript file(s) could benefit from TypeScript", untyped.len()),
             affected: untyped,
+            cycle_groups: None,
         }
     }
 }
@@ -612,6 +1099,7 @@ fn run_lsp_diagnostics_check(
                 "No errors or warnings from language servers".into()
             },
             affected: vec![],
+            cycle_groups: None,
         };
     }
 
@@ -635,6 +1123,7 @@ fn run_lsp_diagnostics_check(
                 warnings.len()
             ),
             affected: sample,
+            cycle_groups: None,
         }
     } else {
         ValidationItem {
@@ -650,48 +1139,38 @@ fn run_lsp_diagnostics_check(
                     .unwrap_or("lsp")
             ),
             affected: sample,
+            cycle_groups: None,
         }
     }
 }
 
-fn generate_suggestions(validation: &[ValidationItem]) -> Vec<SuggestionItem> {
-    let mut suggestions = Vec::new();
-    for item in validation {
-        if item.status == "pass" {
-            continue;
+fn trim_analysis_result_for_transport(
+    hierarchy: &mut HierarchyIndex,
+    validation: &mut [ValidationItem],
+) {
+    // Scope graphs are rebuilt on the frontend from file_imports; omitting them
+    // dramatically reduces IPC + persistence payload size on large projects.
+    hierarchy.scope_graphs.clear();
+    for item in validation.iter_mut() {
+        if item.rule_id == "circular_dependencies" {
+            item.affected.clear();
         }
-        let priority = match item.status.as_str() {
-            "fail" => "high",
-            _ => "medium",
-        };
-        suggestions.push(SuggestionItem {
-            priority: priority.into(),
-            title: format!("Address: {}", item.rule_name),
-            description: item.message.clone(),
-            targets: item.affected.clone(),
-        });
     }
-    if suggestions.is_empty() {
-        suggestions.push(SuggestionItem {
-            priority: "low".into(),
-            title: "Looking good".into(),
-            description: "No immediate architectural issues found. Consider enabling more rules for deeper analysis.".into(),
-            targets: vec![],
-        });
-    }
-    suggestions
 }
 
 pub fn run_analysis(
     project_root: &str,
     rule_ids: &[String],
 ) -> Result<AnalysisResult, String> {
+    let cancel = AtomicBool::new(false);
     run_analysis_with_progress(
         project_root,
         rule_ids,
         &RuleSettingsMap::new(),
         &crate::lsp::LspSettingsMap::new(),
         &crate::linter::LinterSettingsMap::new(),
+        &cancel,
+        "test",
         |_| {},
     )
 }
@@ -702,70 +1181,98 @@ pub fn run_analysis_with_progress(
     rule_settings: &RuleSettingsMap,
     lsp_settings: &crate::lsp::LspSettingsMap,
     linter_settings: &crate::linter::LinterSettingsMap,
-    mut on_progress: impl FnMut(AnalysisProgress),
+    cancel: &AtomicBool,
+    analysis_id: &str,
+    on_progress: impl FnMut(AnalysisProgress) + Send + 'static,
 ) -> Result<AnalysisResult, String> {
     let root = Path::new(project_root);
     if !root.is_dir() {
         return Err(format!("Not a directory: {project_root}"));
     }
 
+    let on_progress = Arc::new(Mutex::new(on_progress));
+    let emit: Arc<dyn Fn(AnalysisProgress) + Send + Sync> = Arc::new({
+        let on_progress = on_progress.clone();
+        move |progress| {
+            if let Ok(mut callback) = on_progress.lock() {
+                callback(progress);
+            }
+        }
+    });
+
     emit_progress(
-        &mut on_progress,
+        &emit,
+        analysis_id,
         "scanning",
         "Starting breadth-first scan…",
         0,
         0,
         0,
+        None,
     );
 
-    let files = scan_source_files(root, &mut on_progress);
+    let files = scan_source_files(root, cancel, analysis_id, &emit)?;
     if files.is_empty() {
         return Err("No source files found in project".to_string());
     }
 
     let file_total = files.len() as u32;
-    let contents = read_file_contents_with_progress(root, &files, |current, total| {
+    let emit_read = emit.clone();
+    let analysis_id_read = analysis_id.to_string();
+    let contents = read_file_contents_with_progress(root, &files, cancel, move |current, total| {
         let pct = 15 + ((current as f32 / total.max(1) as f32) * 20.0) as u8;
         emit_progress(
-            &mut on_progress,
+            &emit_read,
+            &analysis_id_read,
             "reading",
             &format!("Reading file contents ({current}/{total})"),
             current as u32,
             total as u32,
             pct.min(35),
+            None,
         );
-    });
+    })?;
+
+    check_cancelled(cancel)?;
 
     emit_progress(
-        &mut on_progress,
+        &emit,
+        analysis_id,
         "lsp",
         "Starting language servers…",
         0,
         0,
         36,
+        None,
     );
 
+    let emit_lsp = emit.clone();
+    let analysis_id_lsp = analysis_id.to_string();
     let lsp_pool = crate::lsp::LspPool::start(
         root,
         &files,
         &contents,
         lsp_settings,
-        |message, current, total| {
-        let pct = if total > 0 {
-            36 + ((current as f32 / total as f32) * 14.0) as u8
-        } else {
-            40
-        };
-        emit_progress(
-            &mut on_progress,
-            "lsp",
-            message,
-            current,
-            total,
-            pct.min(50),
-        );
-    },
+        move |message, current, total| {
+            let pct = if total > 0 {
+                36 + ((current as f32 / total as f32) * 14.0) as u8
+            } else {
+                40
+            };
+            emit_progress(
+                &emit_lsp,
+                &analysis_id_lsp,
+                "lsp",
+                message,
+                current,
+                total,
+                pct.min(50),
+                None,
+            );
+        },
     );
+
+    check_cancelled(cancel)?;
 
     let lsp_ref = if lsp_pool.server_count() > 0 {
         Some(&lsp_pool)
@@ -773,89 +1280,61 @@ pub fn run_analysis_with_progress(
         None
     };
 
-    let hierarchy =
-        build_hierarchy_with_progress(root, &files, &contents, lsp_ref, |current, total| {
+    let emit_analyze = emit.clone();
+    let analysis_id_analyze = analysis_id.to_string();
+    let mut hierarchy = build_hierarchy_with_progress(
+        root,
+        &files,
+        &contents,
+        lsp_ref,
+        cancel,
+        move |current, total| {
             let pct = 50 + ((current as f32 / total.max(1) as f32) * 35.0) as u8;
             emit_progress(
-                &mut on_progress,
+                &emit_analyze,
+                &analysis_id_analyze,
                 "analyzing",
                 &format!("Resolving imports & symbols ({current}/{total})"),
                 current as u32,
                 total as u32,
                 pct.min(85),
+                None,
             );
-        });
+        },
+    )?;
 
     let lsp_diags = lsp_pool.diagnostics();
     drop(lsp_pool);
 
+    check_cancelled(cancel)?;
+
     let graph = root_package_graph(&hierarchy);
-    let mut validation = Vec::new();
-    let rule_total = rule_ids.len().max(1) as u32;
     let run_language_linters = rule_ids.iter().any(|id| id == "language_linters")
         && cfg_bool(rule_cfg(rule_settings, "language_linters"), "enabled", true);
+    let linter_languages = if run_language_linters {
+        crate::linter::languages_in_files(&files)
+    } else {
+        Vec::new()
+    };
 
-    for (i, rule_id) in rule_ids.iter().enumerate() {
-        if rule_id == "language_linters" {
-            continue;
-        }
-        let current = (i + 1) as u32;
-        emit_progress(
-            &mut on_progress,
-            "validating",
-            &format!("Running rule: {rule_id}"),
-            current,
-            rule_total,
-            (85 + ((current as f32 / rule_total as f32) * 10.0) as u8).min(95),
-        );
+    let validation = run_validation_rules_parallel(
+        rule_ids,
+        run_language_linters,
+        linter_languages,
+        root,
+        &files,
+        &hierarchy,
+        rule_settings,
+        linter_settings,
+        &lsp_diags,
+        cancel,
+        analysis_id,
+        emit.clone(),
+    )?;
 
-        let cfg = rule_cfg(rule_settings, rule_id);
-        match rule_id.as_str() {
-            "modularity" => validation.push(run_modularity_check(&files, cfg)),
-            "dependency_depth" => validation.push(run_dependency_depth_check(&files, cfg)),
-            "type_coverage" => validation.push(run_type_coverage_check(&files, cfg)),
-            "test_coverage" => validation.push(run_test_coverage_check(root, &files, cfg)),
-            "file_size" => validation.push(run_file_size_check(&files, cfg)),
-            "naming" => validation.push(run_naming_check(&files, cfg)),
-            "lsp_diagnostics" => validation.push(run_lsp_diagnostics_check(&lsp_diags, cfg)),
-            _ => {}
-        }
-    }
+    check_cancelled(cancel)?;
 
-    if run_language_linters {
-        emit_progress(
-            &mut on_progress,
-            "validating",
-            "Running language linters…",
-            rule_total,
-            rule_total,
-            92,
-        );
-        validation.extend(crate::linter::run_language_linter_checks(
-            root,
-            &files,
-            linter_settings,
-            |message| {
-                emit_progress(
-                    &mut on_progress,
-                    "validating",
-                    message,
-                    rule_total,
-                    rule_total,
-                    93,
-                );
-            },
-        ));
-    }
-
-    emit_progress(
-        &mut on_progress,
-        "finalizing",
-        "Generating suggestions…",
-        file_total,
-        file_total,
-        97,
-    );
+    let mut validation = validation;
 
     let pass_count = validation.iter().filter(|v| v.status == "pass").count();
     let warn_count = validation.iter().filter(|v| v.status == "warn").count();
@@ -871,22 +1350,24 @@ pub fn run_analysis_with_progress(
         fail_count
     );
 
-    let suggestions = generate_suggestions(&validation);
+    trim_analysis_result_for_transport(&mut hierarchy, &mut validation);
 
     emit_progress(
-        &mut on_progress,
+        &emit,
+        analysis_id,
         "done",
         "Analysis complete",
         file_total,
         file_total,
         100,
+        None,
     );
 
     Ok(AnalysisResult {
         graph,
         hierarchy,
         validation,
-        suggestions,
+        suggestions: vec![],
         summary,
     })
 }

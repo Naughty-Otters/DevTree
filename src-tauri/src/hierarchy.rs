@@ -2,6 +2,9 @@ use devtree_core::{Edge, Graph, Node};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+
+use crate::analysis_session::check_cancelled;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolInfo {
@@ -1100,7 +1103,9 @@ pub fn build_hierarchy(
     files: &[(String, u32)],
     contents: &HashMap<String, String>,
 ) -> HierarchyIndex {
-    build_hierarchy_with_progress(root, files, contents, None, |_, _| {})
+    let cancel = AtomicBool::new(false);
+    build_hierarchy_with_progress(root, files, contents, None, &cancel, |_, _| {})
+        .expect("hierarchy build")
 }
 
 pub fn build_hierarchy_with_progress(
@@ -1108,8 +1113,9 @@ pub fn build_hierarchy_with_progress(
     files: &[(String, u32)],
     contents: &HashMap<String, String>,
     lsp: Option<&crate::lsp::LspPool>,
+    cancel: &AtomicBool,
     mut on_progress: impl FnMut(usize, usize),
-) -> HierarchyIndex {
+) -> Result<HierarchyIndex, String> {
     let all_files: HashSet<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let mut file_imports: HashMap<String, Vec<String>> = HashMap::new();
     let mut symbols: HashMap<String, Vec<SymbolInfo>> = HashMap::new();
@@ -1139,6 +1145,7 @@ pub fn build_hierarchy_with_progress(
 
     let total = files.len();
     for (i, (path, _)) in files.iter().enumerate() {
+        check_cancelled(cancel)?;
         if i == 0 || (i + 1) % 4 == 0 || i + 1 == total {
             on_progress(i + 1, total);
         }
@@ -1205,7 +1212,7 @@ pub fn build_hierarchy_with_progress(
 
     let scope_graphs = build_all_scope_graphs(&file_infos, &file_imports, &packages);
 
-    HierarchyIndex {
+    Ok(HierarchyIndex {
         version: HIERARCHY_VERSION,
         files: file_infos,
         packages,
@@ -1214,7 +1221,7 @@ pub fn build_hierarchy_with_progress(
         symbols,
         symbol_edges,
         scope_graphs,
-    }
+    })
 }
 
 pub fn root_package_graph(hierarchy: &HierarchyIndex) -> Graph {
@@ -1254,17 +1261,21 @@ pub fn root_package_graph(hierarchy: &HierarchyIndex) -> Graph {
 }
 
 pub fn read_file_contents(root: &Path, files: &[(String, u32)]) -> HashMap<String, String> {
-    read_file_contents_with_progress(root, files, |_, _| {})
+    let cancel = AtomicBool::new(false);
+    read_file_contents_with_progress(root, files, &cancel, |_, _| {})
+        .expect("read file contents")
 }
 
 pub fn read_file_contents_with_progress(
     root: &Path,
     files: &[(String, u32)],
+    cancel: &AtomicBool,
     mut on_progress: impl FnMut(usize, usize),
-) -> HashMap<String, String> {
+) -> Result<HashMap<String, String>, String> {
     let mut map = HashMap::new();
     let total = files.len();
     for (i, (rel, _)) in files.iter().enumerate() {
+        check_cancelled(cancel)?;
         if i == 0 || (i + 1) % 8 == 0 || i + 1 == total {
             on_progress(i + 1, total);
         }
@@ -1273,12 +1284,309 @@ pub fn read_file_contents_with_progress(
             map.insert(rel.clone(), content);
         }
     }
-    map
+    Ok(map)
+}
+
+/// Build a directed adjacency list from source→target pairs.
+pub fn adjacency_from_edges<'a, I>(edges: I) -> HashMap<String, Vec<String>>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
+    for (source, target) in edges {
+        adj.entry(source.to_string()).or_default().push(target.to_string());
+        adj.entry(target.to_string()).or_default();
+    }
+    for neighbors in adj.values_mut() {
+        neighbors.sort();
+        neighbors.dedup();
+    }
+    adj
+}
+
+/// Count cyclic SCCs and collect up to `sample_limit` without materializing every component.
+pub fn cyclic_components_sampled(
+    adj: &HashMap<String, Vec<String>>,
+    sample_limit: usize,
+) -> (usize, Vec<Vec<String>>) {
+    let mut index = 0usize;
+    let mut stack: Vec<String> = Vec::new();
+    let mut on_stack: HashSet<String> = HashSet::new();
+    let mut indices: HashMap<String, usize> = HashMap::new();
+    let mut lowlink: HashMap<String, usize> = HashMap::new();
+    let mut total_cyclic = 0usize;
+    let mut samples: Vec<Vec<String>> = Vec::new();
+
+    fn strongconnect(
+        v: &str,
+        adj: &HashMap<String, Vec<String>>,
+        index: &mut usize,
+        stack: &mut Vec<String>,
+        on_stack: &mut HashSet<String>,
+        indices: &mut HashMap<String, usize>,
+        lowlink: &mut HashMap<String, usize>,
+        total_cyclic: &mut usize,
+        samples: &mut Vec<Vec<String>>,
+        sample_limit: usize,
+    ) {
+        indices.insert(v.to_string(), *index);
+        lowlink.insert(v.to_string(), *index);
+        *index += 1;
+        stack.push(v.to_string());
+        on_stack.insert(v.to_string());
+
+        for w in adj.get(v).into_iter().flatten() {
+            if !indices.contains_key(w) {
+                strongconnect(
+                    w, adj, index, stack, on_stack, indices, lowlink, total_cyclic, samples,
+                    sample_limit,
+                );
+                let v_low = *lowlink.get(v).unwrap();
+                let w_low = *lowlink.get(w).unwrap();
+                lowlink.insert(v.to_string(), v_low.min(w_low));
+            } else if on_stack.contains(w) {
+                let v_low = *lowlink.get(v).unwrap();
+                let w_idx = *indices.get(w).unwrap();
+                lowlink.insert(v.to_string(), v_low.min(w_idx));
+            }
+        }
+
+        if lowlink.get(v) == indices.get(v) {
+            let mut component = Vec::new();
+            loop {
+                let w = stack.pop().expect("tarjan stack");
+                on_stack.remove(&w);
+                let done = w == v;
+                component.push(w);
+                if done {
+                    break;
+                }
+            }
+
+            let is_cyclic = if component.len() > 1 {
+                true
+            } else if let Some(node) = component.first() {
+                adj.get(node)
+                    .map(|neighbors| neighbors.iter().any(|n| n == node))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if is_cyclic {
+                *total_cyclic += 1;
+                if samples.len() < sample_limit {
+                    component.sort();
+                    samples.push(component);
+                }
+            }
+        }
+    }
+
+    for node in adj.keys() {
+        if !indices.contains_key(node) {
+            strongconnect(
+                node,
+                adj,
+                &mut index,
+                &mut stack,
+                &mut on_stack,
+                &mut indices,
+                &mut lowlink,
+                &mut total_cyclic,
+                &mut samples,
+                sample_limit,
+            );
+        }
+    }
+
+    (total_cyclic, samples)
+}
+
+/// Tarjan's algorithm — returns strongly connected components (each sorted).
+pub fn strongly_connected_components(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+    let mut index = 0usize;
+    let mut stack: Vec<String> = Vec::new();
+    let mut on_stack: HashSet<String> = HashSet::new();
+    let mut indices: HashMap<String, usize> = HashMap::new();
+    let mut lowlink: HashMap<String, usize> = HashMap::new();
+    let mut sccs: Vec<Vec<String>> = Vec::new();
+
+    fn strongconnect(
+        v: &str,
+        adj: &HashMap<String, Vec<String>>,
+        index: &mut usize,
+        stack: &mut Vec<String>,
+        on_stack: &mut HashSet<String>,
+        indices: &mut HashMap<String, usize>,
+        lowlink: &mut HashMap<String, usize>,
+        sccs: &mut Vec<Vec<String>>,
+    ) {
+        indices.insert(v.to_string(), *index);
+        lowlink.insert(v.to_string(), *index);
+        *index += 1;
+        stack.push(v.to_string());
+        on_stack.insert(v.to_string());
+
+        for w in adj.get(v).into_iter().flatten() {
+            if !indices.contains_key(w) {
+                strongconnect(w, adj, index, stack, on_stack, indices, lowlink, sccs);
+                let v_low = *lowlink.get(v).unwrap();
+                let w_low = *lowlink.get(w).unwrap();
+                lowlink.insert(v.to_string(), v_low.min(w_low));
+            } else if on_stack.contains(w) {
+                let v_low = *lowlink.get(v).unwrap();
+                let w_idx = *indices.get(w).unwrap();
+                lowlink.insert(v.to_string(), v_low.min(w_idx));
+            }
+        }
+
+        if lowlink.get(v) == indices.get(v) {
+            let mut component = Vec::new();
+            loop {
+                let w = stack.pop().expect("tarjan stack");
+                on_stack.remove(&w);
+                let done = w == v;
+                component.push(w);
+                if done {
+                    break;
+                }
+            }
+            component.sort();
+            sccs.push(component);
+        }
+    }
+
+    for node in adj.keys() {
+        if !indices.contains_key(node) {
+            strongconnect(node, adj, &mut index, &mut stack, &mut on_stack, &mut indices, &mut lowlink, &mut sccs);
+        }
+    }
+
+    sccs
+}
+
+/// SCCs that represent cycles (size > 1, or a single node with a self-edge).
+pub fn cyclic_components(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+    strongly_connected_components(adj)
+        .into_iter()
+        .filter(|component| {
+            if component.len() > 1 {
+                return true;
+            }
+            if let Some(node) = component.first() {
+                return adj
+                    .get(node)
+                    .map(|neighbors| neighbors.iter().any(|n| n == node))
+                    .unwrap_or(false);
+            }
+            false
+        })
+        .collect()
+}
+
+pub fn extract_cycle_path(component: &[String], adj: &HashMap<String, Vec<String>>) -> Vec<String> {
+    if component.is_empty() {
+        return Vec::new();
+    }
+    const MAX_PATH: usize = 16;
+    if component.len() > MAX_PATH {
+        return component.iter().take(MAX_PATH).cloned().collect();
+    }
+    if component.len() == 1 {
+        let node = component[0].clone();
+        return vec![node.clone(), node];
+    }
+
+    let members: HashSet<String> = component.iter().cloned().collect();
+    let start = component.first().cloned().unwrap_or_default();
+    let mut path = vec![start.clone()];
+    let mut visited: HashSet<String> = HashSet::from([start.clone()]);
+    let mut current = start;
+
+    for _ in 0..component.len() {
+        let Some(next) = adj.get(&current).and_then(|neighbors| {
+            neighbors
+                .iter()
+                .find(|n| members.contains(*n) && !visited.contains(*n))
+                .cloned()
+        }) else {
+            break;
+        };
+        path.push(next.clone());
+        visited.insert(next.clone());
+        current = next;
+    }
+
+    if path.len() > 1 {
+        let first = path.first().cloned().unwrap_or_default();
+        if adj
+            .get(&current)
+            .map(|neighbors| neighbors.iter().any(|n| *n == first))
+            .unwrap_or(false)
+        {
+            path.push(first);
+        }
+    }
+
+    if path.len() < 2 {
+        return component.to_vec();
+    }
+
+    path
+}
+
+pub fn format_dependency_cycle(component: &[String], adj: &HashMap<String, Vec<String>>, label: &str) -> String {
+    if component.is_empty() {
+        return String::new();
+    }
+    if component.len() == 1 {
+        let node = &component[0];
+        return format!("[{label}] {node} → {node}");
+    }
+
+    const LARGE_SCC: usize = 12;
+    if component.len() > LARGE_SCC {
+        let preview: Vec<&str> = component.iter().take(5).map(String::as_str).collect();
+        return format!(
+            "[{label}] strongly connected group ({} files): {} …",
+            component.len(),
+            preview.join(", ")
+        );
+    }
+
+    let path = extract_cycle_path(component, adj);
+    if path.len() < 2 {
+        return format!(
+            "[{label}] strongly connected group ({} files): {}",
+            component.len(),
+            component.join(", ")
+        );
+    }
+
+    format!("[{label}] {}", path.join(" → "))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_file_import_cycle() {
+        let mut imports: HashMap<String, Vec<String>> = HashMap::new();
+        imports.insert("src/a.ts".into(), vec!["src/b.ts".into()]);
+        imports.insert("src/b.ts".into(), vec!["src/c.ts".into()]);
+        imports.insert("src/c.ts".into(), vec!["src/a.ts".into()]);
+        let adj = adjacency_from_edges(
+            imports
+                .iter()
+                .flat_map(|(s, ts)| ts.iter().map(move |t| (s.as_str(), t.as_str()))),
+        );
+        let (count, cycles) = cyclic_components_sampled(&adj, usize::MAX);
+        assert_eq!(count, 1);
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0].len(), 3);
+    }
 
     #[test]
     fn ts_import_extraction_main() {

@@ -57,13 +57,46 @@ export function parseAffectedEntry(raw: string): ValidationAffectedEntry {
   return { raw: trimmed, file: trimmed, message: trimmed };
 }
 
+/** Expand circular-dependency affected lines into per-file entries when possible. */
+export function expandAffectedForDisplay(
+  affected: string[],
+): ValidationAffectedEntry[] {
+  const out: ValidationAffectedEntry[] = [];
+  for (const raw of affected) {
+    const trimmed = raw.trim();
+    const cycleMatch = trimmed.match(/^\[[^\]]+\]\s+(.+)$/);
+    if (cycleMatch) {
+      const body = cycleMatch[1];
+      if (body.includes("strongly connected group")) {
+        out.push(parseAffectedEntry(raw));
+        continue;
+      }
+      const parts = body
+        .split("→")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length > 1) {
+        for (const file of parts) {
+          out.push({
+            raw,
+            file,
+            message: "Part of import cycle",
+          });
+        }
+        continue;
+      }
+    }
+    out.push(parseAffectedEntry(raw));
+  }
+  return out;
+}
+
 export function groupAffectedByFile(
   affected: string[],
 ): Map<string, ValidationAffectedEntry[]> {
   const groups = new Map<string, ValidationAffectedEntry[]>();
-  for (const raw of affected) {
-    const entry = parseAffectedEntry(raw);
-    const file = entry.file || raw;
+  for (const entry of expandAffectedForDisplay(affected)) {
+    const file = entry.file || entry.raw;
     const list = groups.get(file) ?? [];
     list.push(entry);
     groups.set(file, list);

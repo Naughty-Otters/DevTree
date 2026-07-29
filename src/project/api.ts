@@ -3,6 +3,7 @@ import type {
   AnalysisRule,
   AnalysisProgress,
   RuleSettingsMap,
+  RuleTaskProgress,
 } from "../analysis/types";
 import type { LspInstallResult, LspServerStatus, LspSettingsMap } from "../lsp/types";
 import type {
@@ -108,6 +109,7 @@ export async function installLinter(
 export async function runAnalysis(
   path: string,
   rules: string[],
+  analysisId: string,
   onProgress?: (progress: AnalysisProgress) => void,
   ruleSettings?: RuleSettingsMap,
   lspSettings?: LspSettingsMap,
@@ -120,6 +122,7 @@ export async function runAnalysis(
       onProgress?.(progress);
     };
     return invoke<AnalysisResult>("run_project_analysis", {
+      analysisId,
       path,
       rules,
       ruleSettings: ruleSettings ?? {},
@@ -128,7 +131,15 @@ export async function runAnalysis(
       onProgress: channel,
     });
   }
-  return mockAnalysis(path, rules, onProgress, linterSettings);
+  return mockAnalysis(path, rules, analysisId, onProgress, linterSettings);
+}
+
+export async function cancelAnalysis(analysisId: string): Promise<boolean> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<boolean>("cancel_project_analysis", { analysisId });
+  }
+  return mockCancelAnalysis(analysisId);
 }
 
 export async function readProjectFile(
@@ -204,7 +215,7 @@ function mockLspServers(): LspServerStatus[] {
       key: "collect_references",
       label: "Collect symbol references",
       kind: "boolean" as const,
-      default: true,
+      default: false,
     },
     {
       key: "collect_diagnostics",
@@ -374,7 +385,7 @@ function mockRules(): AnalysisRule[] {
     {
       id: "modularity",
       name: "Modularity",
-      description: "Detect tightly coupled modules and circular dependencies",
+      description: "Detect tightly coupled modules and oversized files",
       category: "architecture",
       settings: [
         {
@@ -400,6 +411,41 @@ function mockRules(): AnalysisRule[] {
           default: 4,
           min: 1,
           max: 20,
+        },
+      ],
+    },
+    {
+      id: "circular_dependencies",
+      name: "Circular Dependencies",
+      description:
+        "Detect import cycles between files and packages (resolved imports; optional LSP symbol reference cycles)",
+      category: "architecture",
+      settings: [
+        {
+          key: "check_file_imports",
+          label: "Check file import cycles",
+          kind: "boolean",
+          default: true,
+        },
+        {
+          key: "check_package_imports",
+          label: "Check package import cycles",
+          kind: "boolean",
+          default: true,
+        },
+        {
+          key: "check_symbol_references",
+          label: "Check symbol reference cycles (requires LSP symbol references)",
+          kind: "boolean",
+          default: true,
+        },
+        {
+          key: "sample_limit",
+          label: "Max cycles to list",
+          kind: "number",
+          default: 10,
+          min: 1,
+          max: 50,
         },
       ],
     },
@@ -551,26 +597,92 @@ function mockProjectScan(path: string): ProjectScan {
   };
 }
 
+const mockCancelledAnalyses = new Set<string>();
+
+function mockCancelAnalysis(analysisId: string): boolean {
+  mockCancelledAnalyses.add(analysisId);
+  return true;
+}
+
 async function mockAnalysis(
   path: string,
   rules: string[],
+  analysisId: string,
   onProgress?: (progress: AnalysisProgress) => void,
   _linterSettings?: LinterSettingsMap,
 ): Promise<AnalysisResult> {
   const stages: AnalysisProgress[] = [
-    { stage: "scanning", message: "Starting breadth-first scan…", current: 0, total: 0, percent: 0 },
-    { stage: "scanning", message: "Found 12 source files", current: 12, total: 12, percent: 15 },
-    { stage: "reading", message: "Reading file contents (6/12)", current: 6, total: 12, percent: 28 },
-    { stage: "reading", message: "Reading file contents (12/12)", current: 12, total: 12, percent: 40 },
-    { stage: "analyzing", message: "Resolving imports & symbols (6/12)", current: 6, total: 12, percent: 62 },
-    { stage: "analyzing", message: "Resolving imports & symbols (12/12)", current: 12, total: 12, percent: 85 },
-    { stage: "validating", message: "Running validation rules…", current: rules.length, total: rules.length || 1, percent: 95 },
-    { stage: "done", message: "Analysis complete", current: 12, total: 12, percent: 100 },
+    { analysisId, stage: "scanning", message: "Starting breadth-first scan…", current: 0, total: 0, percent: 0 },
+    { analysisId, stage: "scanning", message: "Found 12 source files", current: 12, total: 12, percent: 15 },
+    { analysisId, stage: "reading", message: "Reading file contents (6/12)", current: 6, total: 12, percent: 28 },
+    { analysisId, stage: "reading", message: "Reading file contents (12/12)", current: 12, total: 12, percent: 40 },
+    { analysisId, stage: "analyzing", message: "Resolving imports & symbols (6/12)", current: 6, total: 12, percent: 62 },
+    { analysisId, stage: "analyzing", message: "Resolving imports & symbols (12/12)", current: 12, total: 12, percent: 85 },
+    { analysisId, stage: "validating", message: "Running validation rules…", current: rules.length, total: rules.length || 1, percent: 95 },
+    { analysisId, stage: "done", message: "Analysis complete", current: 12, total: 12, percent: 100 },
   ];
-  for (const stage of stages) {
+  for (const stage of stages.slice(0, 5)) {
+    if (mockCancelledAnalyses.has(analysisId)) {
+      mockCancelledAnalyses.delete(analysisId);
+      throw new Error("Analysis cancelled");
+    }
     onProgress?.(stage);
     await new Promise((r) => setTimeout(r, 80));
   }
+
+  const ruleNames: Record<string, string> = {
+    modularity: "Modularity",
+    dependency_depth: "Dependency Depth",
+    circular_dependencies: "Circular Dependencies",
+    type_coverage: "Type Coverage",
+    test_coverage: "Test Coverage",
+    file_size: "File Size",
+    naming: "Naming Conventions",
+    language_linters: "Language Linters",
+    lsp_diagnostics: "Language Diagnostics",
+  };
+  const ruleTasks: RuleTaskProgress[] = rules.map((id) => ({
+    ruleId: id,
+    ruleName: ruleNames[id] ?? id,
+    status: "pending",
+  }));
+
+  onProgress?.({
+    analysisId,
+    stage: "validating",
+    message: `Validating ${ruleTasks.length} rules in parallel…`,
+    current: 0,
+    total: ruleTasks.length,
+    percent: 86,
+    ruleTasks: ruleTasks.map((task) => ({ ...task, status: "running" as const })),
+  });
+
+  await Promise.all(
+    ruleTasks.map(async (task, index) => {
+      await new Promise((r) => setTimeout(r, 200 + index * 50));
+      if (mockCancelledAnalyses.has(analysisId)) return;
+      task.status = "done";
+      const runningCount = ruleTasks.filter((t) => t.status === "running").length;
+      onProgress?.({
+        analysisId,
+        stage: "validating",
+        message: `${runningCount} running in parallel · ${ruleTasks.filter((t) => t.status === "done").length}/${ruleTasks.length} done`,
+        current: ruleTasks.filter((t) => t.status === "done").length,
+        total: ruleTasks.length,
+        percent: 90,
+        ruleTasks: [...ruleTasks],
+      });
+    }),
+  );
+
+  if (mockCancelledAnalyses.has(analysisId)) {
+    mockCancelledAnalyses.delete(analysisId);
+    throw new Error("Analysis cancelled");
+  }
+
+  onProgress?.(stages[stages.length - 1]!);
+  await new Promise((r) => setTimeout(r, 80));
+  mockCancelledAnalyses.delete(analysisId);
 
   const { loadFixtureGraph } = await import("../graph/loadFixture");
   const { graphForNavigation, rootNavigation } = await import("../graph/navigation");
@@ -600,6 +712,7 @@ async function mockAnalysis(
     const names: Record<string, string> = {
       modularity: "Modularity",
       dependency_depth: "Dependency Depth",
+      circular_dependencies: "Circular Dependencies",
       type_coverage: "Type Coverage",
       test_coverage: "Test Coverage",
       file_size: "File Size",
@@ -620,14 +733,7 @@ async function mockAnalysis(
     graph,
     hierarchy,
     validation,
-    suggestions: [
-      {
-        priority: "medium" as const,
-        title: "Run in Tauri for full analysis",
-        description: `Browser mode uses fixture data. Open a real project with 'npm run tauri dev' for filesystem analysis of ${path}.`,
-        targets: [],
-      },
-    ],
     summary: `Mock analysis of ${path} with ${rules.length} rule(s) (browser mode)`,
+    suggestions: [],
   };
 }

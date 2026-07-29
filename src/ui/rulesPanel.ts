@@ -8,6 +8,9 @@ export interface RulesPanelState {
   settings: RuleSettingsMap;
   /** Only one rule's settings accordion open at a time. */
   expandedRuleId: string | null;
+  /** True while analysis rules are loading from the backend. */
+  loading?: boolean;
+  loadError?: string | null;
 }
 
 export function createRulesPanel(
@@ -19,6 +22,30 @@ export function createRulesPanel(
     state.expandedRuleId = null;
   }
   container.innerHTML = "";
+
+  if (state.loading) {
+    const loading = document.createElement("div");
+    loading.className = "panel-empty panel-loading";
+    loading.textContent = "Loading analysis rules…";
+    container.appendChild(loading);
+    return;
+  }
+
+  if (state.loadError) {
+    const err = document.createElement("div");
+    err.className = "panel-empty panel-error";
+    err.textContent = state.loadError;
+    container.appendChild(err);
+    return;
+  }
+
+  if (state.rules.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "panel-empty";
+    empty.textContent = "No analysis rules available";
+    container.appendChild(empty);
+    return;
+  }
 
   const header = document.createElement("div");
   header.className = "rules-header";

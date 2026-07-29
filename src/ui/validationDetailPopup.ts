@@ -1,9 +1,10 @@
-import type { ValidationItem } from "../analysis/types";
+import type { CycleGroup, ValidationItem } from "../analysis/types";
 import type { SymbolInfo } from "../analysis/types";
 import {
   groupAffectedByFile,
   type ValidationAffectedEntry,
 } from "../validation/parseAffected";
+import { cycleGroupsFromValidation, cycleKindLabel } from "../validation/cycles";
 
 export interface ValidationNavTarget {
   file: string;
@@ -14,6 +15,7 @@ export interface ValidationNavTarget {
 export interface ValidationDetailHandlers {
   onOpenFile: (target: ValidationNavTarget) => void;
   onShowOnGraph: (target: ValidationNavTarget) => void;
+  onShowCycleOnGraph?: (cycle: CycleGroup) => void;
   resolveSymbol?: (
     file: string,
     line?: number,
@@ -115,7 +117,59 @@ export function showValidationDetail(
   const body = document.createElement("div");
   body.className = "validation-detail-body scrollable";
 
-  if (groups.size === 0) {
+  const cycles = cycleGroupsFromValidation(item);
+  if (cycles.length > 0) {
+    const intro = document.createElement("p");
+    intro.className = "validation-detail-cycle-intro";
+    intro.textContent =
+      "Each group is a circular dependency. Use “Show on graph” to highlight the cycle on the dependency diagram.";
+    body.appendChild(intro);
+
+    const list = document.createElement("ul");
+    list.className = "validation-detail-cycles";
+
+    for (const [, cycle] of cycles.entries()) {
+      const li = document.createElement("li");
+      li.className = "validation-detail-cycle";
+
+      const header = document.createElement("div");
+      header.className = "validation-detail-cycle-header";
+
+      const kind = document.createElement("span");
+      kind.className = "validation-detail-cycle-kind";
+      kind.textContent = cycleKindLabel(cycle.kind);
+
+      const count = document.createElement("span");
+      count.className = "validation-detail-cycle-count";
+      count.textContent =
+        cycle.node_count != null && cycle.node_count > cycle.nodes.length
+          ? `${cycle.node_count} nodes`
+          : `${cycle.nodes.length} node${cycle.nodes.length === 1 ? "" : "s"}`;
+
+      header.append(kind, count);
+
+      const label = document.createElement("div");
+      label.className = "validation-detail-cycle-label";
+      label.textContent = cycle.label;
+
+      const actions = document.createElement("div");
+      actions.className = "validation-detail-entry-actions";
+
+      const graphBtn = document.createElement("button");
+      graphBtn.type = "button";
+      graphBtn.className = "btn-text validation-detail-action";
+      graphBtn.textContent = "Show on graph";
+      graphBtn.addEventListener("click", () => {
+        handlers.onShowCycleOnGraph?.(cycle);
+      });
+
+      actions.append(graphBtn);
+      li.append(header, label, actions);
+      list.appendChild(li);
+    }
+
+    body.appendChild(list);
+  } else if (groups.size === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
     empty.textContent = "No file or symbol details for this rule.";

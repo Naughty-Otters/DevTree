@@ -1,4 +1,5 @@
 mod analysis;
+mod analysis_session;
 mod db;
 mod hierarchy;
 mod linter;
@@ -8,6 +9,7 @@ mod project;
 use analysis::{
     run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
 };
+use analysis_session::AnalysisSessionRegistry;
 use db::{init_db, DbState};
 use linter::{LinterInstallResult, LinterSettingsMap, LanguageLinterGroup};
 use lsp::{LspInstallResult, LspServerStatus, LspSettingsMap};
@@ -26,27 +28,43 @@ fn scan_project_dir(path: String) -> Result<ProjectScan, String> {
 
 #[tauri::command]
 async fn run_project_analysis(
+    analysis_id: String,
     path: String,
     rules: Vec<String>,
     rule_settings: RuleSettingsMap,
     lsp_settings: LspSettingsMap,
     linter_settings: LinterSettingsMap,
     on_progress: Channel<AnalysisProgress>,
+    registry: tauri::State<'_, AnalysisSessionRegistry>,
 ) -> Result<AnalysisResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let cancel = registry.register(analysis_id.clone());
+    let progress_id = analysis_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         run_analysis_with_progress(
             &path,
             &rules,
             &rule_settings,
             &lsp_settings,
             &linter_settings,
-            |progress| {
+            &cancel,
+            &progress_id,
+            move |progress| {
                 let _ = on_progress.send(progress);
             },
         )
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    registry.unregister(&analysis_id);
+    result
+}
+
+#[tauri::command]
+fn cancel_project_analysis(
+    analysis_id: String,
+    registry: tauri::State<'_, AnalysisSessionRegistry>,
+) -> bool {
+    registry.cancel(&analysis_id)
 }
 
 #[tauri::command]
@@ -114,12 +132,14 @@ pub fn run() {
     let conn = init_db().expect("failed to initialize database");
     tauri::Builder::default()
         .manage(DbState(std::sync::Mutex::new(conn)))
+        .manage(AnalysisSessionRegistry::new())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_analysis_rules,
             scan_project_dir,
             run_project_analysis,
+            cancel_project_analysis,
             read_project_file,
             write_project_file,
             list_lsp_servers,

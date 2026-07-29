@@ -1,17 +1,39 @@
-import type { AnalysisResult, AnalysisProgress } from "../analysis/types";
+import type { AnalysisResult, RuleTaskProgress } from "../analysis/types";
 import type { HierarchyIndex } from "../analysis/types";
+import type { AnalysisRun } from "../analysis/manager";
+import {
+  effectiveRuleStatus,
+  getPipelineStages,
+  overallProgressMeta,
+  overallProgressPercent,
+  pipelineStageFillPercent,
+  pipelineStageStatus,
+  ruleTaskFillPercent,
+} from "../analysis/progressDisplay";
+import { cycleGroupsFromValidation } from "../validation/cycles";
 import { findSymbolAtLine } from "../validation/navigation";
 import {
   showValidationDetail,
   type ValidationDetailHandlers,
 } from "./validationDetailPopup";
+import {
+  showAnalysisStatDetail,
+  type AnalysisDetailHandlers,
+  type AnalysisStatKind,
+} from "./analysisDetailPopup";
 
-type TabId = "analysis" | "validation" | "suggestions";
+type TabId = "analysis" | "validation";
 
 export interface ResultsPanelHandlers {
   onOpenValidationTarget?: ValidationDetailHandlers["onOpenFile"];
   onShowValidationOnGraph?: ValidationDetailHandlers["onShowOnGraph"];
+  onShowCycleOnGraph?: ValidationDetailHandlers["onShowCycleOnGraph"];
+  onShowModuleOnGraph?: AnalysisDetailHandlers["onShowModuleOnGraph"];
+  onShowDependencyOnGraph?: AnalysisDetailHandlers["onShowDependencyOnGraph"];
   getHierarchy?: () => HierarchyIndex | null;
+  onCancelRun?: (id: string) => void;
+  onCancelAllRuns?: () => void;
+  onApplyRun?: (id: string) => void;
 }
 
 export function createResultsPanel(
@@ -19,13 +41,11 @@ export function createResultsPanel(
   handlers: ResultsPanelHandlers = {},
 ): {
   setResult: (result: AnalysisResult | null) => void;
-  setRunning: (running: boolean) => void;
-  setProgress: (progress: AnalysisProgress) => void;
+  setRuns: (runs: AnalysisRun[]) => void;
 } {
   let activeTab: TabId = "analysis";
   let currentResult: AnalysisResult | null = null;
-  let running = false;
-  let progress: AnalysisProgress | null = null;
+  let activeRuns: AnalysisRun[] = [];
 
   const tabs = document.createElement("div");
   tabs.className = "results-tabs";
@@ -33,7 +53,6 @@ export function createResultsPanel(
   const tabDefs: { id: TabId; label: string }[] = [
     { id: "analysis", label: "Analysis" },
     { id: "validation", label: "Validation" },
-    { id: "suggestions", label: "Suggestions" },
   ];
 
   const tabButtons: Record<TabId, HTMLButtonElement> = {} as Record<
@@ -60,107 +79,421 @@ export function createResultsPanel(
   const content = document.createElement("div");
   content.className = "results-content";
 
+  const runsHost = document.createElement("div");
+  runsHost.className = "analysis-runs-section";
+  runsHost.hidden = true;
+
+  const resultsHost = document.createElement("div");
+  resultsHost.className = "results-tab-content";
+
+  const emptyHost = document.createElement("div");
+  emptyHost.className = "panel-empty";
+  emptyHost.textContent = "Run analysis to see results";
+  emptyHost.hidden = true;
+
+  content.append(runsHost, resultsHost, emptyHost);
   container.append(tabs, content);
 
-  function renderProgress(): void {
-    content.innerHTML = "";
-    const wrap = document.createElement("div");
-    wrap.className = "analysis-progress";
+  interface TaskBarRefs {
+    row: HTMLElement;
+    icon: HTMLElement;
+    statusLabel: HTMLElement;
+    fill: HTMLElement;
+    track: HTMLElement;
+  }
 
-    const title = document.createElement("div");
-    title.className = "analysis-progress-title";
-    title.textContent = "Running analysis…";
+  interface RunCardRefs {
+    root: HTMLElement;
+    message: HTMLElement;
+    overallTrack: HTMLElement;
+    overallFill: HTMLElement;
+    overallMeta: HTMLElement;
+    actions: HTMLElement;
+    rulesHeading: HTMLElement | null;
+    rulesList: HTMLElement | null;
+    pipelineBars: Map<string, TaskBarRefs>;
+    ruleBars: Map<string, TaskBarRefs>;
+  }
 
-    const message = document.createElement("div");
-    message.className = "analysis-progress-message";
-    message.textContent = progress?.message ?? "Preparing…";
+  const runCards = new Map<string, RunCardRefs>();
+  let runsHeadingEl: HTMLElement | null = null;
+  let runsHeadingText: HTMLElement | null = null;
+  let cancelAllBtn: HTMLButtonElement | null = null;
+  let runsCardsHost: HTMLElement | null = null;
+
+  function statusIcon(status: RuleTaskProgress["status"]): string {
+    if (status === "done") return "✓";
+    if (status === "running") return "◐";
+    if (status === "failed") return "✕";
+    return "○";
+  }
+
+  function statusLabelText(status: RuleTaskProgress["status"]): string {
+    if (status === "running") return "Running";
+    if (status === "done") return "Done";
+    if (status === "failed") return "Failed";
+    return "Waiting";
+  }
+
+  function createTaskBar(label: string, key: string): TaskBarRefs {
+    const row = document.createElement("div");
+    row.className = "analysis-rule-task-row analysis-rule-task-pending";
+    row.dataset.taskKey = key;
+
+    const header = document.createElement("div");
+    header.className = "analysis-rule-task-header";
+
+    const icon = document.createElement("span");
+    icon.className = "analysis-rule-task-icon";
+    icon.textContent = "○";
+
+    const name = document.createElement("span");
+    name.className = "analysis-rule-task-name";
+    name.textContent = label;
+
+    const statusLabel = document.createElement("span");
+    statusLabel.className = "analysis-rule-task-status";
+    statusLabel.textContent = "Waiting";
+
+    header.append(icon, name, statusLabel);
 
     const track = document.createElement("div");
-    track.className = "analysis-progress-track";
+    track.className = "analysis-progress-track analysis-rule-progress-track";
     track.setAttribute("role", "progressbar");
     track.setAttribute("aria-valuemin", "0");
     track.setAttribute("aria-valuemax", "100");
-    const pct = Math.max(0, Math.min(100, progress?.percent ?? 0));
-    track.setAttribute("aria-valuenow", String(pct));
+    track.setAttribute("aria-valuenow", "0");
 
     const fill = document.createElement("div");
     fill.className = "analysis-progress-fill";
-    fill.style.width = `${pct}%`;
-    if (!progress || progress.total === 0) {
-      fill.classList.add("analysis-progress-fill-indeterminate");
-    }
-
+    fill.style.width = "0%";
     track.appendChild(fill);
 
-    const meta = document.createElement("div");
-    meta.className = "analysis-progress-meta";
-    const stage = progress?.stage ? progress.stage : "…";
-    const counts =
-      progress && progress.total > 0
-        ? `${progress.current}/${progress.total}`
-        : progress
-          ? `${progress.current} found`
-          : "";
-    meta.textContent = counts ? `${stage} · ${counts} · ${pct}%` : `${stage} · ${pct}%`;
+    row.append(header, track);
+    return { row, icon, statusLabel, fill, track };
+  }
 
-    wrap.append(title, message, track, meta);
-    content.appendChild(wrap);
+  function updateTaskBar(
+    refs: TaskBarRefs,
+    status: RuleTaskProgress["status"],
+    fillPercent: number,
+  ): void {
+    refs.row.className = `analysis-rule-task-row analysis-rule-task-${status}`;
+    refs.icon.textContent = statusIcon(status);
+    refs.statusLabel.textContent = statusLabelText(status);
+    refs.track.setAttribute("aria-valuenow", String(fillPercent));
+    refs.fill.className = "analysis-progress-fill";
+    refs.fill.style.width = `${fillPercent}%`;
+    if (status === "failed") {
+      refs.fill.classList.add("analysis-progress-fill-error");
+    } else if (status === "done") {
+      refs.fill.classList.add("analysis-progress-fill-done");
+    }
+  }
+
+  function createRunCard(run: AnalysisRun): RunCardRefs {
+    const root = document.createElement("div");
+    root.className = `analysis-run-card analysis-run-${run.status}`;
+    root.dataset.runId = run.id;
+
+    const header = document.createElement("div");
+    header.className = "analysis-run-header";
+
+    const title = document.createElement("div");
+    title.className = "analysis-run-title";
+    title.textContent = run.label;
+
+    const actions = document.createElement("div");
+    actions.className = "analysis-run-actions";
+    header.append(title, actions);
+
+    const message = document.createElement("div");
+    message.className = "analysis-progress-message";
+
+    const overallWrap = document.createElement("div");
+    overallWrap.className = "analysis-progress-overall";
+
+    const overallTrack = document.createElement("div");
+    overallTrack.className = "analysis-progress-track analysis-progress-track-overall";
+    overallTrack.setAttribute("role", "progressbar");
+    overallTrack.setAttribute("aria-valuemin", "0");
+    overallTrack.setAttribute("aria-valuemax", "100");
+    overallTrack.setAttribute("aria-valuenow", "0");
+
+    const overallFill = document.createElement("div");
+    overallFill.className = "analysis-progress-fill";
+    overallFill.style.width = "0%";
+    overallTrack.appendChild(overallFill);
+
+    const overallMeta = document.createElement("div");
+    overallMeta.className = "analysis-progress-meta";
+
+    overallWrap.append(overallTrack, overallMeta);
+
+    const pipelineHeading = document.createElement("div");
+    pipelineHeading.className = "analysis-pipeline-label";
+    pipelineHeading.textContent = "Pipeline";
+
+    const pipelineList = document.createElement("div");
+    pipelineList.className = "analysis-rule-tasks analysis-pipeline-tasks";
+
+    const pipelineBars = new Map<string, TaskBarRefs>();
+    for (const stage of getPipelineStages()) {
+      const bar = createTaskBar(stage.label, stage.id);
+      pipelineBars.set(stage.id, bar);
+      pipelineList.appendChild(bar.row);
+    }
+
+    root.append(header, message, overallWrap, pipelineHeading, pipelineList);
+
+    return {
+      root,
+      message,
+      overallTrack,
+      overallFill,
+      overallMeta,
+      actions,
+      rulesHeading: null,
+      rulesList: null,
+      pipelineBars,
+      ruleBars: new Map(),
+    };
+  }
+
+  function updateRunActions(refs: RunCardRefs, run: AnalysisRun): void {
+    refs.actions.replaceChildren();
+    if (run.status === "running") {
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn btn-ghost analysis-run-cancel";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", () => handlers.onCancelRun?.(run.id));
+      refs.actions.appendChild(cancelBtn);
+      return;
+    }
+    if (run.status === "completed" && run.result) {
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.className = "btn btn-ghost analysis-run-apply";
+      applyBtn.textContent = "Apply";
+      applyBtn.addEventListener("click", () => handlers.onApplyRun?.(run.id));
+      refs.actions.appendChild(applyBtn);
+    }
+  }
+
+  function syncRuleTaskBars(
+    refs: RunCardRefs,
+    ruleTasks: RuleTaskProgress[],
+    currentStage: string,
+    progress: AnalysisRun["progress"],
+  ): void {
+    const ruleIds = new Set(ruleTasks.map((task) => task.ruleId));
+
+    for (const [ruleId, bar] of refs.ruleBars) {
+      if (!ruleIds.has(ruleId)) {
+        bar.row.remove();
+        refs.ruleBars.delete(ruleId);
+      }
+    }
+
+    if (ruleTasks.length === 0) {
+      refs.rulesHeading?.remove();
+      refs.rulesList?.remove();
+      refs.rulesHeading = null;
+      refs.rulesList = null;
+      return;
+    }
+
+    if (!refs.rulesHeading) {
+      refs.rulesHeading = document.createElement("div");
+      refs.rulesHeading.className = "analysis-rules-heading";
+      refs.root.appendChild(refs.rulesHeading);
+    }
+
+    if (!refs.rulesList) {
+      refs.rulesList = document.createElement("div");
+      refs.rulesList.className = "analysis-rule-tasks";
+      refs.root.appendChild(refs.rulesList);
+    }
+
+    const runningCount = ruleTasks.filter((task) => task.status === "running").length;
+    const doneCount = ruleTasks.filter(
+      (task) => task.status === "done" || task.status === "failed",
+    ).length;
+    refs.rulesHeading.textContent =
+      currentStage === "validating" || runningCount > 0
+        ? `Rules (${runningCount} running in parallel · ${doneCount}/${ruleTasks.length} done)`
+        : `Rules (${doneCount}/${ruleTasks.length} done)`;
+
+    for (const task of ruleTasks) {
+      let bar = refs.ruleBars.get(task.ruleId);
+      if (!bar) {
+        bar = createTaskBar(task.ruleName, task.ruleId);
+        refs.ruleBars.set(task.ruleId, bar);
+        refs.rulesList.appendChild(bar.row);
+      } else {
+        bar.row.querySelector(".analysis-rule-task-name")!.textContent = task.ruleName;
+      }
+
+      const status = effectiveRuleStatus(task);
+      const fill = ruleTaskFillPercent(task, progress);
+      updateTaskBar(bar, status, fill);
+    }
+  }
+
+  function updateRunCard(refs: RunCardRefs, run: AnalysisRun): void {
+    refs.root.className = `analysis-run-card analysis-run-${run.status}`;
+    updateRunActions(refs, run);
+
+    const progress = run.progress;
+    const currentStage = progress?.stage ?? "starting";
+    const ruleTasks =
+      run.ruleTasks.length > 0
+        ? run.ruleTasks
+        : (progress?.ruleTasks ?? []);
+
+    if (run.status === "failed") {
+      refs.message.textContent = run.error ?? "Analysis failed";
+    } else if (run.status === "cancelled") {
+      refs.message.textContent = "Cancelled";
+    } else {
+      refs.message.textContent = progress?.message ?? "Preparing…";
+    }
+
+    const overallPct = overallProgressPercent(progress);
+    refs.overallTrack.setAttribute("aria-valuenow", String(overallPct));
+    refs.overallFill.style.width = `${overallPct}%`;
+    refs.overallFill.className = "analysis-progress-fill";
+    if (run.status === "completed") {
+      refs.overallFill.classList.add("analysis-progress-fill-done");
+    }
+
+    if (run.status === "running" && progress) {
+      refs.overallMeta.textContent = overallProgressMeta(progress);
+      refs.overallMeta.hidden = false;
+    } else if (run.status === "completed") {
+      refs.overallMeta.textContent = "Complete · 100%";
+      refs.overallMeta.hidden = false;
+    } else {
+      refs.overallMeta.hidden = true;
+    }
+
+    for (const stage of getPipelineStages()) {
+      const bar = refs.pipelineBars.get(stage.id);
+      if (!bar) continue;
+      const status = pipelineStageStatus(currentStage, stage.id);
+      const fill = pipelineStageFillPercent(currentStage, stage.id, progress);
+      updateTaskBar(bar, status, fill);
+    }
+
+    syncRuleTaskBars(refs, ruleTasks, currentStage, progress);
+  }
+
+  function updateActiveRuns(): void {
+    const visible = activeRuns.filter((run) => run.status === "running");
+    const visibleIds = new Set(visible.map((run) => run.id));
+
+    if (visible.length === 0) {
+      runsHost.hidden = true;
+      runsHost.replaceChildren();
+      runCards.clear();
+      runsHeadingEl = null;
+      runsHeadingText = null;
+      cancelAllBtn = null;
+      runsCardsHost = null;
+      return;
+    }
+
+    runsHost.hidden = false;
+
+    if (!runsHeadingEl) {
+      runsHeadingEl = document.createElement("div");
+      runsHeadingEl.className = "analysis-runs-heading";
+      runsHeadingText = document.createElement("span");
+      runsHeadingText.className = "analysis-runs-heading-text";
+      runsHeadingEl.appendChild(runsHeadingText);
+      runsHost.appendChild(runsHeadingEl);
+    }
+
+    const runningCount = visible.length;
+    runsHeadingText!.textContent =
+      `${runningCount} analysis run${runningCount === 1 ? "" : "s"} in progress`;
+
+    if (runningCount > 1) {
+      if (!cancelAllBtn) {
+        cancelAllBtn = document.createElement("button");
+        cancelAllBtn.type = "button";
+        cancelAllBtn.className = "btn btn-ghost analysis-runs-cancel-all";
+        cancelAllBtn.textContent = "Cancel all";
+        cancelAllBtn.addEventListener("click", () => handlers.onCancelAllRuns?.());
+        runsHeadingEl.appendChild(cancelAllBtn);
+      }
+    } else if (cancelAllBtn) {
+      cancelAllBtn.remove();
+      cancelAllBtn = null;
+    }
+
+    if (!runsCardsHost) {
+      runsCardsHost = document.createElement("div");
+      runsCardsHost.className = "analysis-runs-cards";
+      runsHost.appendChild(runsCardsHost);
+    }
+
+    for (const [id, refs] of runCards) {
+      if (!visibleIds.has(id)) {
+        refs.root.remove();
+        runCards.delete(id);
+      }
+    }
+
+    for (const run of visible) {
+      let refs = runCards.get(run.id);
+      if (!refs) {
+        refs = createRunCard(run);
+        runCards.set(run.id, refs);
+        runsCardsHost.appendChild(refs.root);
+      }
+      updateRunCard(refs, run);
+    }
+  }
+
+  function renderResults(): void {
+    resultsHost.replaceChildren();
+    if (!currentResult) {
+      resultsHost.hidden = true;
+      return;
+    }
+
+    resultsHost.hidden = false;
+    switch (activeTab) {
+      case "analysis":
+        renderAnalysisTab(resultsHost, currentResult, handlers);
+        break;
+      case "validation":
+        renderValidationTab(resultsHost, currentResult, handlers);
+        break;
+    }
   }
 
   function renderContent(): void {
-    if (running) {
-      renderProgress();
-      return;
-    }
+    updateActiveRuns();
 
-    content.innerHTML = "";
-    if (!currentResult) {
-      const empty = document.createElement("div");
-      empty.className = "panel-empty";
-      empty.textContent = "Run analysis to see results";
-      content.appendChild(empty);
-      return;
-    }
+    const hasRunning = activeRuns.some((run) => run.status === "running");
+    emptyHost.hidden = hasRunning || currentResult !== null;
 
-    switch (activeTab) {
-      case "analysis":
-        renderAnalysisTab(content, currentResult);
-        break;
-      case "validation":
-        renderValidationTab(content, currentResult, handlers);
-        break;
-      case "suggestions":
-        renderSuggestionsTab(content, currentResult);
-        break;
-    }
+    renderResults();
   }
 
   return {
     setResult(result: AnalysisResult | null) {
-      running = false;
-      progress = null;
       currentResult = result;
       renderContent();
     },
-    setRunning(isRunning: boolean) {
-      running = isRunning;
-      if (isRunning) {
-        progress = {
-          stage: "starting",
-          message: "Preparing analysis…",
-          current: 0,
-          total: 0,
-          percent: 0,
-        };
-      } else {
-        progress = null;
-      }
-      renderContent();
-    },
-    setProgress(next: AnalysisProgress) {
-      running = true;
-      progress = next;
-      renderProgress();
+    setRuns(runs: AnalysisRun[]) {
+      activeRuns = runs;
+      updateActiveRuns();
+      const hasRunning = activeRuns.some((run) => run.status === "running");
+      emptyHost.hidden = hasRunning || currentResult !== null;
     },
   };
 }
@@ -168,6 +501,7 @@ export function createResultsPanel(
 function renderAnalysisTab(
   container: HTMLElement,
   result: AnalysisResult,
+  handlers: ResultsPanelHandlers,
 ): void {
   const summary = document.createElement("div");
   summary.className = "result-summary";
@@ -177,19 +511,81 @@ function renderAnalysisTab(
   const stats = document.createElement("div");
   stats.className = "result-stats";
 
-  const nodeCount = result.graph.nodes.length;
-  const edgeCount = result.graph.edges.length;
-  const passCount = result.validation.filter((v) => v.status === "pass").length;
-  const warnCount = result.validation.filter((v) => v.status === "warn").length;
-  const failCount = result.validation.filter((v) => v.status === "fail").length;
+  const statDefs: {
+    kind: AnalysisStatKind;
+    value: number;
+    label: string;
+    className: string;
+  }[] = [
+    {
+      kind: "modules",
+      value: result.graph.nodes.length,
+      label: "Modules",
+      className: "stat",
+    },
+    {
+      kind: "dependencies",
+      value: result.graph.edges.length,
+      label: "Dependencies",
+      className: "stat",
+    },
+    {
+      kind: "pass",
+      value: result.validation.filter((v) => v.status === "pass").length,
+      label: "Passed",
+      className: "stat stat-pass",
+    },
+    {
+      kind: "warn",
+      value: result.validation.filter((v) => v.status === "warn").length,
+      label: "Warnings",
+      className: "stat stat-warn",
+    },
+    {
+      kind: "fail",
+      value: result.validation.filter((v) => v.status === "fail").length,
+      label: "Failures",
+      className: "stat stat-fail",
+    },
+  ];
 
-  stats.innerHTML = `
-    <div class="stat"><span class="stat-value">${nodeCount}</span><span class="stat-label">Modules</span></div>
-    <div class="stat"><span class="stat-value">${edgeCount}</span><span class="stat-label">Dependencies</span></div>
-    <div class="stat stat-pass"><span class="stat-value">${passCount}</span><span class="stat-label">Passed</span></div>
-    <div class="stat stat-warn"><span class="stat-value">${warnCount}</span><span class="stat-label">Warnings</span></div>
-    <div class="stat stat-fail"><span class="stat-value">${failCount}</span><span class="stat-label">Failures</span></div>
-  `;
+  const validationHandlers: ValidationDetailHandlers = {
+    onOpenFile: (target) => handlers.onOpenValidationTarget?.(target),
+    onShowOnGraph: (target) => handlers.onShowValidationOnGraph?.(target),
+    onShowCycleOnGraph: (cycle) => handlers.onShowCycleOnGraph?.(cycle),
+    resolveSymbol: (file, line) => {
+      const hierarchy = handlers.getHierarchy?.() ?? null;
+      if (!hierarchy || line == null) return undefined;
+      return findSymbolAtLine(hierarchy, file, line);
+    },
+  };
+
+  for (const def of statDefs) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = `${def.className} stat-clickable`;
+    card.title = `View ${def.label.toLowerCase()} details`;
+
+    const value = document.createElement("span");
+    value.className = "stat-value";
+    value.textContent = String(def.value);
+
+    const label = document.createElement("span");
+    label.className = "stat-label";
+    label.textContent = def.label;
+
+    card.append(value, label);
+    card.addEventListener("click", () => {
+      showAnalysisStatDetail(def.kind, result, {
+        onShowModuleOnGraph: handlers.onShowModuleOnGraph,
+        onShowDependencyOnGraph: handlers.onShowDependencyOnGraph,
+        validation: validationHandlers,
+      });
+    });
+
+    stats.appendChild(card);
+  }
+
   container.appendChild(stats);
 }
 
@@ -207,10 +603,12 @@ function renderValidationTab(
   }
 
   for (const item of result.validation) {
+    const cycleGroups = cycleGroupsFromValidation(item);
+    const hasDetails = item.affected.length > 0 || cycleGroups.length > 0;
     const row = document.createElement("button");
     row.type = "button";
     row.className = `validation-item validation-${item.status} validation-item-clickable`;
-    row.disabled = item.affected.length === 0;
+    row.disabled = !hasDetails;
 
     const badge = document.createElement("span");
     badge.className = `validation-badge badge-${item.status}`;
@@ -229,22 +627,26 @@ function renderValidationTab(
 
     body.append(title, msg);
 
-    if (item.affected.length > 0) {
+    if (hasDetails) {
       const affected = document.createElement("div");
       affected.className = "validation-affected";
-      const fileCount = new Set(
-        item.affected.map((a) => a.split(":")[0]),
-      ).size;
-      affected.textContent =
-        fileCount === 1
-          ? `1 file · ${item.affected.length} issue(s) — click to view`
-          : `${fileCount} files · ${item.affected.length} issue(s) — click to view`;
+      if (cycleGroups.length > 0) {
+        affected.textContent = `${cycleGroups.length} cycle group${cycleGroups.length === 1 ? "" : "s"} — click to view on graph`;
+      } else {
+        const fileCount = new Set(
+          item.affected.map((a) => a.split(":")[0]),
+        ).size;
+        affected.textContent =
+          fileCount === 1
+            ? `1 file · ${item.affected.length} issue(s) — click to view`
+            : `${fileCount} files · ${item.affected.length} issue(s) — click to view`;
+      }
       body.appendChild(affected);
     }
 
     row.append(badge, body);
 
-    if (item.affected.length > 0) {
+    if (hasDetails) {
       row.addEventListener("click", () => {
         const hierarchy = handlers.getHierarchy?.() ?? null;
         showValidationDetail(item, {
@@ -254,6 +656,9 @@ function renderValidationTab(
           onShowOnGraph: (target) => {
             handlers.onShowValidationOnGraph?.(target);
           },
+          onShowCycleOnGraph: (cycle) => {
+            handlers.onShowCycleOnGraph?.(cycle);
+          },
           resolveSymbol: (file, line) => {
             if (!hierarchy || line == null) return undefined;
             return findSymbolAtLine(hierarchy, file, line);
@@ -262,51 +667,6 @@ function renderValidationTab(
       });
     }
 
-    container.appendChild(row);
-  }
-}
-
-function renderSuggestionsTab(
-  container: HTMLElement,
-  result: AnalysisResult,
-): void {
-  if (result.suggestions.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "panel-empty";
-    empty.textContent = "No suggestions";
-    container.appendChild(empty);
-    return;
-  }
-
-  for (const item of result.suggestions) {
-    const row = document.createElement("div");
-    row.className = `suggestion-item priority-${item.priority}`;
-
-    const badge = document.createElement("span");
-    badge.className = `suggestion-priority priority-${item.priority}`;
-    badge.textContent = item.priority;
-
-    const body = document.createElement("div");
-    body.className = "suggestion-body";
-
-    const title = document.createElement("div");
-    title.className = "suggestion-title";
-    title.textContent = item.title;
-
-    const desc = document.createElement("div");
-    desc.className = "suggestion-desc";
-    desc.textContent = item.description;
-
-    body.append(title, desc);
-
-    if (item.targets.length > 0) {
-      const targets = document.createElement("div");
-      targets.className = "suggestion-targets";
-      targets.textContent = item.targets.slice(0, 3).join(", ");
-      body.appendChild(targets);
-    }
-
-    row.append(badge, body);
     container.appendChild(row);
   }
 }

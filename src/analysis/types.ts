@@ -104,6 +104,15 @@ export interface ValidationItem {
   status: "pass" | "warn" | "fail";
   message: string;
   affected: string[];
+  cycle_groups?: CycleGroup[];
+}
+
+export interface CycleGroup {
+  kind: "file_imports" | "package_imports" | "symbol_references" | string;
+  nodes: string[];
+  path: string[];
+  label: string;
+  node_count?: number;
 }
 
 export interface SuggestionItem {
@@ -121,10 +130,19 @@ export interface AnalysisResult {
   summary: string;
 }
 
+export interface RuleTaskProgress {
+  ruleId: string;
+  ruleName: string;
+  status: "pending" | "running" | "done" | "failed";
+  message?: string;
+}
+
 export interface AnalysisProgress {
+  analysisId: string;
   stage: string;
   message: string;
   current: number;
   total: number;
   percent: number;
+  ruleTasks?: RuleTaskProgress[];
 }

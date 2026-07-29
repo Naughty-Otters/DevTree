@@ -123,7 +123,7 @@ fn settings_for(kind: LanguageKind) -> Vec<LspSettingDef> {
             10000,
         ),
         bool_setting("collect_symbols", "Collect document symbols", true),
-        bool_setting("collect_references", "Collect symbol references", true),
+        bool_setting("collect_references", "Collect symbol references", false),
         bool_setting("collect_diagnostics", "Collect diagnostics", true),
     ];
 

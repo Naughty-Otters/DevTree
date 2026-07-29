@@ -5,6 +5,19 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/highlight.js")) return "vendor-hljs";
+          if (id.includes("node_modules/lucide")) return "vendor-lucide";
+          if (id.includes("/src/wasm/") || id.includes("wasm-bridge")) return "wasm-layout";
+          if (id.includes("/src/ui/fileViewer")) return "file-viewer";
+          if (id.includes("/src/boot.")) return "app-boot";
+        },
+      },
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
