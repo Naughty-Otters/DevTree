@@ -5,6 +5,7 @@ import { fitCameraToContent, focusCameraOnNodeAnimated } from "./canvas/camera";
 import type { Graph } from "./graph/types";
 import type { AnalysisResult } from "./analysis/types";
 import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
+import { mergeLspSettings, type LspSettingsMap } from "./lsp/types";
 import type { ProjectScan } from "./project/types";
 import {
   openProjectDialog,
@@ -56,6 +57,7 @@ interface AppState {
   projectScan: ProjectScan | null;
   selectedRules: Set<string>;
   ruleSettings: RuleSettingsMap;
+  lspSettings: LspSettingsMap;
   analysisResult: AnalysisResult | null;
   hierarchy: HierarchyIndex | null;
   graphNavigation: GraphNavigation;
@@ -104,6 +106,7 @@ async function main() {
     projectScan: null,
     selectedRules: rulesState.selected,
     ruleSettings: rulesState.settings,
+    lspSettings: {},
     analysisResult: null,
     hierarchy: null,
     graphNavigation: persisted.graphNavigation ?? rootNavigation(),
@@ -128,6 +131,7 @@ async function main() {
       projectPath: app.projectPath,
       selectedRuleIds: Array.from(app.selectedRules),
       ruleSettings: app.ruleSettings,
+      lspSettings: app.lspSettings,
       visibleModuleIds: Array.from(app.modulesListState.visibleIds),
       selectedNodeId: app.renderState?.selectedId ?? null,
       camera: app.renderState
@@ -174,6 +178,8 @@ async function main() {
 
   const lspState: LspServersPanelState = {
     servers: [],
+    settings: { ...persisted.lspSettings },
+    expandedServerId: null,
     installingId: null,
     errors: {},
     loading: true,
@@ -185,7 +191,13 @@ async function main() {
       createLspServersPanel(lspServersContainer, lspState, lspHandlers);
       try {
         lspState.servers = await listLspServers();
+        lspState.settings = mergeLspSettings(
+          lspState.servers,
+          lspState.settings,
+        );
+        app.lspSettings = lspState.settings;
         lspState.errors = {};
+        persist();
       } catch (err) {
         console.error(err);
       } finally {
@@ -205,8 +217,13 @@ async function main() {
         if (!result.ok) {
           lspState.errors[id] = result.message;
         } else {
-          // Re-probe all in case PATH changed
           lspState.servers = await listLspServers();
+          lspState.settings = mergeLspSettings(
+            lspState.servers,
+            lspState.settings,
+          );
+          app.lspSettings = lspState.settings;
+          persist();
         }
       } catch (err) {
         lspState.errors[id] =
@@ -215,6 +232,11 @@ async function main() {
         lspState.installingId = null;
         createLspServersPanel(lspServersContainer, lspState, lspHandlers);
       }
+    },
+    onSettingsChange: (settings: LspSettingsMap) => {
+      lspState.settings = settings;
+      app.lspSettings = settings;
+      persist();
     },
   };
 
@@ -632,6 +654,7 @@ async function main() {
         Array.from(app.selectedRules),
         (progress) => resultsPanel.setProgress(progress),
         app.ruleSettings,
+        app.lspSettings,
       );
 
       app.analysisResult = result;

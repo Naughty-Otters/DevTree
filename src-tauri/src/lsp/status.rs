@@ -8,6 +8,20 @@ use super::discover::{probe_language_server, LanguageKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LspSettingDef {
+    pub key: String,
+    pub label: String,
+    /// "number" | "boolean"
+    pub kind: String,
+    pub default: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LspServerStatus {
     pub id: String,
     pub language: String,
@@ -17,6 +31,8 @@ pub struct LspServerStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     pub install_hint: String,
+    #[serde(default)]
+    pub settings: Vec<LspSettingDef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +42,9 @@ pub struct LspInstallResult {
     pub message: String,
     pub server: LspServerStatus,
 }
+
+pub type LspSettingsMap =
+    std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>>;
 
 struct ServerDef {
     kind: LanguageKind,
@@ -56,6 +75,91 @@ const SERVERS: &[ServerDef] = &[
     },
 ];
 
+fn num_setting(key: &str, label: &str, default: u32, min: u32, max: u32) -> LspSettingDef {
+    LspSettingDef {
+        key: key.into(),
+        label: label.into(),
+        kind: "number".into(),
+        default: serde_json::json!(default),
+        min: Some(min as f64),
+        max: Some(max as f64),
+    }
+}
+
+fn bool_setting(key: &str, label: &str, default: bool) -> LspSettingDef {
+    LspSettingDef {
+        key: key.into(),
+        label: label.into(),
+        kind: "boolean".into(),
+        default: serde_json::json!(default),
+        min: None,
+        max: None,
+    }
+}
+
+fn settings_for(kind: LanguageKind) -> Vec<LspSettingDef> {
+    let mut settings = vec![
+        bool_setting("enabled", "Use during analysis", true),
+        num_setting(
+            "max_open_files",
+            "Max files to open in the server",
+            200,
+            10,
+            2000,
+        ),
+        num_setting(
+            "max_refs_per_symbol",
+            "Max references per symbol",
+            24,
+            1,
+            200,
+        ),
+        num_setting(
+            "diagnostic_wait_ms",
+            "Wait for diagnostics (ms)",
+            800,
+            0,
+            10000,
+        ),
+        bool_setting("collect_symbols", "Collect document symbols", true),
+        bool_setting("collect_references", "Collect symbol references", true),
+        bool_setting("collect_diagnostics", "Collect diagnostics", true),
+    ];
+
+    match kind {
+        LanguageKind::TypeScript => {
+            settings.push(bool_setting(
+                "include_javascript",
+                "Include .js / .jsx files",
+                true,
+            ));
+        }
+        LanguageKind::Rust => {
+            settings.push(bool_setting(
+                "cargo_all_targets",
+                "Analyze all Cargo targets",
+                false,
+            ));
+        }
+        LanguageKind::Python => {
+            settings.push(bool_setting(
+                "type_checking",
+                "Enable type checking diagnostics",
+                true,
+            ));
+        }
+        LanguageKind::Go => {
+            settings.push(bool_setting(
+                "staticcheck",
+                "Enable staticcheck diagnostics",
+                true,
+            ));
+        }
+    }
+
+    settings
+}
+
 /// Prepend common toolchain dirs so GUI-launched apps still find LSPs / package managers.
 pub fn enrich_path() {
     let current = env::var("PATH").unwrap_or_default();
@@ -66,7 +170,6 @@ pub fn enrich_path() {
         parts.push(home.join("go/bin").to_string_lossy().into());
         parts.push(home.join(".local/bin").to_string_lossy().into());
 
-        // Prefer active nvm node bin if present
         let nvm_versions = home.join(".nvm/versions/node");
         if nvm_versions.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&nvm_versions) {
@@ -109,8 +212,37 @@ pub fn list_lsp_servers() -> Vec<LspServerStatus> {
     SERVERS.iter().map(probe_def).collect()
 }
 
+pub fn lsp_cfg<'a>(
+    all: &'a LspSettingsMap,
+    id: &str,
+) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
+    all.get(id)
+}
+
+pub fn cfg_u32(
+    cfg: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+    default: u32,
+) -> u32 {
+    cfg.and_then(|m| m.get(key))
+        .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+        .map(|n| n as u32)
+        .unwrap_or(default)
+}
+
+pub fn cfg_bool(
+    cfg: Option<&serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+    default: bool,
+) -> bool {
+    cfg.and_then(|m| m.get(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(default)
+}
+
 fn probe_def(def: &ServerDef) -> LspServerStatus {
     let id = def.kind.label().to_string();
+    let settings = settings_for(def.kind);
     match probe_language_server(def.kind) {
         Some((command, _)) => LspServerStatus {
             id,
@@ -119,6 +251,7 @@ fn probe_def(def: &ServerDef) -> LspServerStatus {
             status: "installed".into(),
             command: Some(resolve_which(&command).unwrap_or(command)),
             install_hint: def.install_hint.into(),
+            settings,
         },
         None => LspServerStatus {
             id,
@@ -127,6 +260,7 @@ fn probe_def(def: &ServerDef) -> LspServerStatus {
             status: "missing".into(),
             command: None,
             install_hint: def.install_hint.into(),
+            settings,
         },
     }
 }
@@ -201,7 +335,6 @@ pub fn install_lsp_server(id: &str) -> Result<LspInstallResult, String> {
     let mut result = run_install(program, &args);
     if !result.0 && retry_force_npm && result.1.contains("EEXIST") {
         let mut forced = args.clone();
-        // npm install -g --force ...
         forced.insert(1, "--force".into());
         result = run_install(program, &forced);
     }

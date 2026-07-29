@@ -8,7 +8,7 @@ use analysis::{
     run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
 };
 use db::{init_db, DbState};
-use lsp::{LspInstallResult, LspServerStatus};
+use lsp::{LspInstallResult, LspServerStatus, LspSettingsMap};
 use project::{scan_project, ProjectScan};
 use tauri::ipc::Channel;
 
@@ -27,10 +27,11 @@ async fn run_project_analysis(
     path: String,
     rules: Vec<String>,
     rule_settings: RuleSettingsMap,
+    lsp_settings: LspSettingsMap,
     on_progress: Channel<AnalysisProgress>,
 ) -> Result<AnalysisResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_analysis_with_progress(&path, &rules, &rule_settings, |progress| {
+        run_analysis_with_progress(&path, &rules, &rule_settings, &lsp_settings, |progress| {
             let _ = on_progress.send(progress);
         })
     })

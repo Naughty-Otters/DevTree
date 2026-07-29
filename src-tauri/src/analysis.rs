@@ -673,13 +673,20 @@ pub fn run_analysis(
     project_root: &str,
     rule_ids: &[String],
 ) -> Result<AnalysisResult, String> {
-    run_analysis_with_progress(project_root, rule_ids, &RuleSettingsMap::new(), |_| {})
+    run_analysis_with_progress(
+        project_root,
+        rule_ids,
+        &RuleSettingsMap::new(),
+        &crate::lsp::LspSettingsMap::new(),
+        |_| {},
+    )
 }
 
 pub fn run_analysis_with_progress(
     project_root: &str,
     rule_ids: &[String],
     rule_settings: &RuleSettingsMap,
+    lsp_settings: &crate::lsp::LspSettingsMap,
     mut on_progress: impl FnMut(AnalysisProgress),
 ) -> Result<AnalysisResult, String> {
     let root = Path::new(project_root);
@@ -723,7 +730,12 @@ pub fn run_analysis_with_progress(
         36,
     );
 
-    let lsp_pool = crate::lsp::LspPool::start(root, &files, &contents, |message, current, total| {
+    let lsp_pool = crate::lsp::LspPool::start(
+        root,
+        &files,
+        &contents,
+        lsp_settings,
+        |message, current, total| {
         let pct = if total > 0 {
             36 + ((current as f32 / total as f32) * 14.0) as u8
         } else {
@@ -737,7 +749,8 @@ pub fn run_analysis_with_progress(
             total,
             pct.min(50),
         );
-    });
+    },
+    );
 
     let lsp_ref = if lsp_pool.server_count() > 0 {
         Some(&lsp_pool)

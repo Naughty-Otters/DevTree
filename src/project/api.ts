@@ -4,7 +4,7 @@ import type {
   AnalysisProgress,
   RuleSettingsMap,
 } from "../analysis/types";
-import type { LspInstallResult, LspServerStatus } from "../lsp/types";
+import type { LspInstallResult, LspServerStatus, LspSettingsMap } from "../lsp/types";
 import type { ProjectScan } from "./types";
 import { mockHierarchyForFixture } from "../graph/hierarchy";
 
@@ -73,6 +73,7 @@ export async function runAnalysis(
   rules: string[],
   onProgress?: (progress: AnalysisProgress) => void,
   ruleSettings?: RuleSettingsMap,
+  lspSettings?: LspSettingsMap,
 ): Promise<AnalysisResult> {
   if (isTauri()) {
     const { invoke, Channel } = await import("@tauri-apps/api/core");
@@ -84,6 +85,7 @@ export async function runAnalysis(
       path,
       rules,
       ruleSettings: ruleSettings ?? {},
+      lspSettings: lspSettings ?? {},
       onProgress: channel,
     });
   }
@@ -105,6 +107,57 @@ export async function readProjectFile(
 }
 
 function mockLspServers(): LspServerStatus[] {
+  const shared = [
+    {
+      key: "enabled",
+      label: "Use during analysis",
+      kind: "boolean" as const,
+      default: true,
+    },
+    {
+      key: "max_open_files",
+      label: "Max files to open in the server",
+      kind: "number" as const,
+      default: 200,
+      min: 10,
+      max: 2000,
+    },
+    {
+      key: "max_refs_per_symbol",
+      label: "Max references per symbol",
+      kind: "number" as const,
+      default: 24,
+      min: 1,
+      max: 200,
+    },
+    {
+      key: "diagnostic_wait_ms",
+      label: "Wait for diagnostics (ms)",
+      kind: "number" as const,
+      default: 800,
+      min: 0,
+      max: 10000,
+    },
+    {
+      key: "collect_symbols",
+      label: "Collect document symbols",
+      kind: "boolean" as const,
+      default: true,
+    },
+    {
+      key: "collect_references",
+      label: "Collect symbol references",
+      kind: "boolean" as const,
+      default: true,
+    },
+    {
+      key: "collect_diagnostics",
+      label: "Collect diagnostics",
+      kind: "boolean" as const,
+      default: true,
+    },
+  ];
+
   return [
     {
       id: "typescript",
@@ -112,6 +165,15 @@ function mockLspServers(): LspServerStatus[] {
       label: "TypeScript / JavaScript",
       status: "missing",
       installHint: "npm install -g typescript typescript-language-server",
+      settings: [
+        ...shared,
+        {
+          key: "include_javascript",
+          label: "Include .js / .jsx files",
+          kind: "boolean",
+          default: true,
+        },
+      ],
     },
     {
       id: "rust",
@@ -119,6 +181,15 @@ function mockLspServers(): LspServerStatus[] {
       label: "Rust",
       status: "missing",
       installHint: "rustup component add rust-analyzer",
+      settings: [
+        ...shared,
+        {
+          key: "cargo_all_targets",
+          label: "Analyze all Cargo targets",
+          kind: "boolean",
+          default: false,
+        },
+      ],
     },
     {
       id: "python",
@@ -126,6 +197,15 @@ function mockLspServers(): LspServerStatus[] {
       label: "Python",
       status: "missing",
       installHint: "npm install -g basedpyright",
+      settings: [
+        ...shared,
+        {
+          key: "type_checking",
+          label: "Enable type checking diagnostics",
+          kind: "boolean",
+          default: true,
+        },
+      ],
     },
     {
       id: "go",
@@ -133,6 +213,15 @@ function mockLspServers(): LspServerStatus[] {
       label: "Go",
       status: "missing",
       installHint: "go install golang.org/x/tools/gopls@latest",
+      settings: [
+        ...shared,
+        {
+          key: "staticcheck",
+          label: "Enable staticcheck diagnostics",
+          kind: "boolean",
+          default: true,
+        },
+      ],
     },
   ];
 }

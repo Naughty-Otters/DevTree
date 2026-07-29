@@ -39,6 +39,47 @@ impl LanguageKind {
             Self::Go => json!({}),
         }
     }
+
+    pub fn init_options_with_settings(
+        self,
+        cfg: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Value {
+        use super::status::cfg_bool;
+        match self {
+            Self::TypeScript => json!({}),
+            Self::Rust => json!({
+                "cargo": {
+                    "allTargets": cfg_bool(cfg, "cargo_all_targets", false)
+                }
+            }),
+            Self::Python => {
+                if cfg_bool(cfg, "type_checking", true) {
+                    json!({
+                        "python": {
+                            "analysis": {
+                                "typeCheckingMode": "basic"
+                            }
+                        }
+                    })
+                } else {
+                    json!({
+                        "python": {
+                            "analysis": {
+                                "typeCheckingMode": "off"
+                            }
+                        }
+                    })
+                }
+            }
+            Self::Go => json!({
+                "ui": {
+                    "diagnostic": {
+                        "staticcheck": cfg_bool(cfg, "staticcheck", true)
+                    }
+                }
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
