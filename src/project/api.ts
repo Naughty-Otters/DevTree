@@ -5,6 +5,11 @@ import type {
   RuleSettingsMap,
 } from "../analysis/types";
 import type { LspInstallResult, LspServerStatus, LspSettingsMap } from "../lsp/types";
+import type {
+  LanguageLinterGroup,
+  LinterInstallResult,
+  LinterSettingsMap,
+} from "../linter/types";
 import type { ProjectScan } from "./types";
 import { mockHierarchyForFixture } from "../graph/hierarchy";
 
@@ -68,12 +73,45 @@ export async function installLspServer(id: string): Promise<LspInstallResult> {
   };
 }
 
+export async function listLanguageLinters(): Promise<LanguageLinterGroup[]> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LanguageLinterGroup[]>("list_language_linters");
+  }
+  return mockLanguageLinters();
+}
+
+export async function installLinter(
+  languageId: string,
+  linterId: string,
+): Promise<LinterInstallResult> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LinterInstallResult>("install_linter", { languageId, linterId });
+  }
+  const group = mockLanguageLinters().find((g) => g.id === languageId);
+  const linter = group?.linters.find((l) => l.id === linterId);
+  return {
+    ok: false,
+    message: "Linter install requires the DevTree desktop app.",
+    languageId,
+    linter: linter ?? {
+      id: linterId,
+      label: linterId,
+      status: "missing",
+      installHint: "",
+      isDefault: false,
+    },
+  };
+}
+
 export async function runAnalysis(
   path: string,
   rules: string[],
   onProgress?: (progress: AnalysisProgress) => void,
   ruleSettings?: RuleSettingsMap,
   lspSettings?: LspSettingsMap,
+  linterSettings?: LinterSettingsMap,
 ): Promise<AnalysisResult> {
   if (isTauri()) {
     const { invoke, Channel } = await import("@tauri-apps/api/core");
@@ -86,10 +124,11 @@ export async function runAnalysis(
       rules,
       ruleSettings: ruleSettings ?? {},
       lspSettings: lspSettings ?? {},
+      linterSettings: linterSettings ?? {},
       onProgress: channel,
     });
   }
-  return mockAnalysis(path, rules, onProgress);
+  return mockAnalysis(path, rules, onProgress, linterSettings);
 }
 
 export async function readProjectFile(
@@ -104,6 +143,23 @@ export async function readProjectFile(
     });
   }
   return mockFileContent(relativePath);
+}
+
+export async function writeProjectFile(
+  projectRoot: string,
+  relativePath: string,
+  content: string,
+): Promise<void> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("write_project_file", {
+      projectRoot,
+      relativePath,
+      content,
+    });
+    return;
+  }
+  console.warn("writeProjectFile: browser mode — changes not persisted");
 }
 
 function mockLspServers(): LspServerStatus[] {
@@ -226,6 +282,89 @@ function mockLspServers(): LspServerStatus[] {
   ];
 }
 
+function mockLanguageLinters(): LanguageLinterGroup[] {
+  const levels = [
+    { id: "error", label: "Errors only" },
+    { id: "warning", label: "Warnings and errors" },
+    { id: "info", label: "Info, warnings, and errors" },
+  ];
+
+  const linter = (
+    id: string,
+    label: string,
+    installHint: string,
+    isDefault: boolean,
+  ) => ({
+    id,
+    label,
+    status: "missing" as const,
+    installHint,
+    isDefault,
+  });
+
+  return [
+    {
+      id: "typescript",
+      language: "typescript",
+      label: "TypeScript / JavaScript",
+      defaultLinterId: "eslint",
+      defaultLevel: "warning",
+      levels,
+      linters: [
+        linter("eslint", "ESLint", "npm install -g eslint", true),
+        linter("biome", "Biome", "npm install -g @biomejs/biome", false),
+        linter("oxlint", "Oxlint", "npm install -g oxlint", false),
+      ],
+    },
+    {
+      id: "rust",
+      language: "rust",
+      label: "Rust",
+      defaultLinterId: "clippy",
+      defaultLevel: "warning",
+      levels,
+      linters: [
+        linter("clippy", "Clippy (cargo clippy)", "rustup component add clippy", true),
+      ],
+    },
+    {
+      id: "python",
+      language: "python",
+      label: "Python",
+      defaultLinterId: "ruff",
+      defaultLevel: "warning",
+      levels,
+      linters: [
+        linter("ruff", "Ruff", "pip3 install ruff", true),
+        linter("pylint", "Pylint", "pip3 install pylint", false),
+        linter("flake8", "Flake8", "pip3 install flake8", false),
+      ],
+    },
+    {
+      id: "go",
+      language: "go",
+      label: "Go",
+      defaultLinterId: "golangci-lint",
+      defaultLevel: "warning",
+      levels,
+      linters: [
+        linter(
+          "golangci-lint",
+          "golangci-lint",
+          "go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest",
+          true,
+        ),
+        linter(
+          "staticcheck",
+          "staticcheck",
+          "go install honnef.co/go/tools/cmd/staticcheck@latest",
+          false,
+        ),
+      ],
+    },
+  ];
+}
+
 function mockFileContent(path: string): string {
   return `// Browser mode — file preview unavailable for ${path}\n// Run with: npm run tauri dev\n`;
 }
@@ -339,6 +478,21 @@ function mockRules(): AnalysisRule[] {
       ],
     },
     {
+      id: "language_linters",
+      name: "Language Linters",
+      description:
+        "Run configured linters (eslint, clippy, ruff, golangci-lint) and report issues in Validation.",
+      category: "quality",
+      settings: [
+        {
+          key: "enabled",
+          label: "Run linters during validation",
+          kind: "boolean",
+          default: true,
+        },
+      ],
+    },
+    {
       id: "lsp_diagnostics",
       name: "Language Diagnostics",
       description:
@@ -401,6 +555,7 @@ async function mockAnalysis(
   path: string,
   rules: string[],
   onProgress?: (progress: AnalysisProgress) => void,
+  _linterSettings?: LinterSettingsMap,
 ): Promise<AnalysisResult> {
   const stages: AnalysisProgress[] = [
     { stage: "scanning", message: "Starting breadth-first scan…", current: 0, total: 0, percent: 0 },
@@ -422,7 +577,26 @@ async function mockAnalysis(
   const fixtureGraph = loadFixtureGraph();
   const hierarchy = mockHierarchyForFixture(fixtureGraph);
   const graph = graphForNavigation(hierarchy, rootNavigation());
-  const validation = rules.map((id) => {
+  const validation = rules.flatMap((id) => {
+    if (id === "language_linters") {
+      return [
+        {
+          rule_id: "linter:typescript",
+          rule_name: "TypeScript / JavaScript (eslint)",
+          status: "warn" as const,
+          message:
+            "Mock linter result (browser mode — run in Tauri for real eslint/clippy/ruff output)",
+          affected: ["src/main.ts"],
+        },
+        {
+          rule_id: "linter:rust",
+          rule_name: "Rust (clippy)",
+          status: "pass" as const,
+          message: "No issues at warning level or above (mock)",
+          affected: [],
+        },
+      ];
+    }
     const names: Record<string, string> = {
       modularity: "Modularity",
       dependency_depth: "Dependency Depth",
@@ -430,14 +604,17 @@ async function mockAnalysis(
       test_coverage: "Test Coverage",
       file_size: "File Size",
       naming: "Naming Conventions",
+      lsp_diagnostics: "Language Diagnostics",
     };
-    return {
-      rule_id: id,
-      rule_name: names[id] ?? id,
-      status: "warn" as const,
-      message: `Mock result for ${names[id] ?? id} (browser mode — run in Tauri for real analysis)`,
-      affected: ["src/main.ts"],
-    };
+    return [
+      {
+        rule_id: id,
+        rule_name: names[id] ?? id,
+        status: "warn" as const,
+        message: `Mock result for ${names[id] ?? id} (browser mode — run in Tauri for real analysis)`,
+        affected: ["src/main.ts"],
+      },
+    ];
   });
   return {
     graph,

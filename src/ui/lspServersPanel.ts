@@ -55,6 +55,11 @@ export function createLspServersPanel(
     empty.className = "lsp-empty";
     empty.textContent = "Checking language servers…";
     list.appendChild(empty);
+  } else if (state.servers.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "lsp-empty";
+    empty.textContent = "Click Refresh to check installed language servers";
+    list.appendChild(empty);
   } else {
     for (const server of state.servers) {
       list.appendChild(serverRow(server, state, handlers, container));

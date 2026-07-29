@@ -13,8 +13,9 @@
       <header id="toolbar">
         <div class="toolbar-left">
           <button id="btn-open-project" class="btn btn-icon btn-ghost" title="Open project folder"></button>
-          <button id="btn-run-analysis" class="btn btn-icon btn-ghost btn-run" disabled title="Run analysis"></button>
+          <button id="btn-run-analysis" class="btn btn-icon btn-ghost" disabled title="Run analysis"></button>
           <button id="btn-focus-view" class="btn btn-icon btn-ghost" disabled title="Focus view"></button>
+          <button id="btn-save-file" class="btn btn-icon btn-ghost" disabled title="Save file"></button>
           <button id="btn-settings" class="btn btn-icon btn-ghost" title="Settings"></button>
         </div>
         <span id="app-title">DevTree</span>
@@ -75,6 +76,15 @@
               </button>
               <div class="settings-accordion-panel">
                 <div id="rules-panel" class="panel-body scrollable"></div>
+              </div>
+            </section>
+            <section class="settings-accordion-item" data-settings-section="linters">
+              <button type="button" class="settings-accordion-trigger" aria-expanded="false">
+                <span>Language Linters</span>
+                <span class="settings-accordion-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="settings-accordion-panel">
+                <div id="linters-panel" class="panel-body scrollable"></div>
               </div>
             </section>
             <section class="settings-accordion-item" data-settings-section="lsp">

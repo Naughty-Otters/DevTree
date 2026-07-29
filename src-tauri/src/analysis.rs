@@ -171,6 +171,19 @@ pub fn default_rules() -> Vec<AnalysisRule> {
             ],
         },
         AnalysisRule {
+            id: "language_linters".into(),
+            name: "Language Linters".into(),
+            description:
+                "Run configured linters (eslint, clippy, ruff, golangci-lint) and report issues in Validation."
+                    .into(),
+            category: "quality".into(),
+            settings: vec![bool_setting(
+                "enabled",
+                "Run linters during validation",
+                true,
+            )],
+        },
+        AnalysisRule {
             id: "lsp_diagnostics".into(),
             name: "Language Diagnostics".into(),
             description: "Surface errors and warnings from language servers (rust-analyzer, tsserver, gopls, pyright)".into(),
@@ -678,6 +691,7 @@ pub fn run_analysis(
         rule_ids,
         &RuleSettingsMap::new(),
         &crate::lsp::LspSettingsMap::new(),
+        &crate::linter::LinterSettingsMap::new(),
         |_| {},
     )
 }
@@ -687,6 +701,7 @@ pub fn run_analysis_with_progress(
     rule_ids: &[String],
     rule_settings: &RuleSettingsMap,
     lsp_settings: &crate::lsp::LspSettingsMap,
+    linter_settings: &crate::linter::LinterSettingsMap,
     mut on_progress: impl FnMut(AnalysisProgress),
 ) -> Result<AnalysisResult, String> {
     let root = Path::new(project_root);
@@ -777,8 +792,13 @@ pub fn run_analysis_with_progress(
     let graph = root_package_graph(&hierarchy);
     let mut validation = Vec::new();
     let rule_total = rule_ids.len().max(1) as u32;
+    let run_language_linters = rule_ids.iter().any(|id| id == "language_linters")
+        && cfg_bool(rule_cfg(rule_settings, "language_linters"), "enabled", true);
 
     for (i, rule_id) in rule_ids.iter().enumerate() {
+        if rule_id == "language_linters" {
+            continue;
+        }
         let current = (i + 1) as u32;
         emit_progress(
             &mut on_progress,
@@ -790,17 +810,42 @@ pub fn run_analysis_with_progress(
         );
 
         let cfg = rule_cfg(rule_settings, rule_id);
-        let item = match rule_id.as_str() {
-            "modularity" => run_modularity_check(&files, cfg),
-            "dependency_depth" => run_dependency_depth_check(&files, cfg),
-            "type_coverage" => run_type_coverage_check(&files, cfg),
-            "test_coverage" => run_test_coverage_check(root, &files, cfg),
-            "file_size" => run_file_size_check(&files, cfg),
-            "naming" => run_naming_check(&files, cfg),
-            "lsp_diagnostics" => run_lsp_diagnostics_check(&lsp_diags, cfg),
-            _ => continue,
-        };
-        validation.push(item);
+        match rule_id.as_str() {
+            "modularity" => validation.push(run_modularity_check(&files, cfg)),
+            "dependency_depth" => validation.push(run_dependency_depth_check(&files, cfg)),
+            "type_coverage" => validation.push(run_type_coverage_check(&files, cfg)),
+            "test_coverage" => validation.push(run_test_coverage_check(root, &files, cfg)),
+            "file_size" => validation.push(run_file_size_check(&files, cfg)),
+            "naming" => validation.push(run_naming_check(&files, cfg)),
+            "lsp_diagnostics" => validation.push(run_lsp_diagnostics_check(&lsp_diags, cfg)),
+            _ => {}
+        }
+    }
+
+    if run_language_linters {
+        emit_progress(
+            &mut on_progress,
+            "validating",
+            "Running language linters…",
+            rule_total,
+            rule_total,
+            92,
+        );
+        validation.extend(crate::linter::run_language_linter_checks(
+            root,
+            &files,
+            linter_settings,
+            |message| {
+                emit_progress(
+                    &mut on_progress,
+                    "validating",
+                    message,
+                    rule_total,
+                    rule_total,
+                    93,
+                );
+            },
+        ));
     }
 
     emit_progress(

@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use crate::lsp::status::build_enriched_path;
+
 pub type DiagHandler = Box<dyn FnMut(String, Vec<lsp_types::Diagnostic>) + Send>;
 
 pub struct FlatSymbol {
@@ -41,14 +43,16 @@ impl LspClient {
         cwd: &Path,
         mut on_diag: DiagHandler,
     ) -> Result<Self, String> {
+        let path_env = build_enriched_path();
         let mut child = Command::new(command)
             .args(args)
             .current_dir(cwd)
+            .env("PATH", &path_env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("spawn {command}: {e}"))?;
+            .map_err(|e| format!("spawn {command} {:?}: {e}", args))?;
 
         let stdin = child
             .stdin

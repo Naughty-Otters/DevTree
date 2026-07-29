@@ -6,6 +6,7 @@ import type { Graph } from "./graph/types";
 import type { AnalysisResult } from "./analysis/types";
 import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
 import { mergeLspSettings, type LspSettingsMap } from "./lsp/types";
+import { ensureLinterSettings, type LinterSettingsMap } from "./linter/types";
 import type { ProjectScan } from "./project/types";
 import {
   openProjectDialog,
@@ -13,8 +14,11 @@ import {
   getAnalysisRules,
   runAnalysis,
   readProjectFile,
+  writeProjectFile,
   listLspServers,
   installLspServer,
+  listLanguageLinters,
+  installLinter,
 } from "./project/api";
 import { renderProjectTree } from "./ui/projectTree";
 import { renderModulesList, type ModulesListState } from "./ui/modulesList";
@@ -23,6 +27,10 @@ import {
   createLspServersPanel,
   type LspServersPanelState,
 } from "./ui/lspServersPanel";
+import {
+  createLintersPanel,
+  type LintersPanelState,
+} from "./ui/lintersPanel";
 import { createResultsPanel } from "./ui/resultsPanel";
 import { createFileViewer } from "./ui/fileViewer";
 import { mountToolbarIcons } from "./ui/toolbar";
@@ -47,6 +55,15 @@ import {
   serializeNavigation,
   type GraphNavigation,
 } from "./graph/navigation";
+import {
+  findSymbolAtLine,
+  navigationToFile,
+  navigationToPackageFile,
+  type ValidationNavTarget,
+} from "./validation/navigation";
+import { renderFileNav } from "./ui/fileNav";
+import { collectFileIssues } from "./validation/fileIssues";
+import { hideValidationDetail } from "./ui/validationDetailPopup";
 import type { HierarchyIndex } from "./analysis/types";
 import { loadPersistedState, scheduleSaveState } from "./state/store";
 import { applyPanelSizes, readPanelSizes } from "./state/panels";
@@ -58,6 +75,7 @@ interface AppState {
   selectedRules: Set<string>;
   ruleSettings: RuleSettingsMap;
   lspSettings: LspSettingsMap;
+  linterSettings: LinterSettingsMap;
   analysisResult: AnalysisResult | null;
   hierarchy: HierarchyIndex | null;
   graphNavigation: GraphNavigation;
@@ -72,12 +90,14 @@ async function main() {
   const btnOpen = document.querySelector<HTMLButtonElement>("#btn-open-project")!;
   const btnRun = document.querySelector<HTMLButtonElement>("#btn-run-analysis")!;
   const btnFocus = document.querySelector<HTMLButtonElement>("#btn-focus-view")!;
+  const btnSaveFile = document.querySelector<HTMLButtonElement>("#btn-save-file")!;
   const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings")!;
   const projectPathEl = document.querySelector<HTMLElement>("#project-path")!;
   const treeContainer = document.querySelector<HTMLElement>("#project-tree")!;
   const modulesContainer = document.querySelector<HTMLElement>("#modules-list")!;
   const rulesContainer = document.querySelector<HTMLElement>("#rules-panel")!;
   const lspServersContainer = document.querySelector<HTMLElement>("#lsp-servers-panel")!;
+  const lintersContainer = document.querySelector<HTMLElement>("#linters-panel")!;
   const settingsOverlay = document.querySelector<HTMLElement>("#settings-overlay")!;
   const resultsContainer = document.querySelector<HTMLElement>("#results-panel")!;
   const graphOverlay = document.querySelector<HTMLElement>("#graph-overlay")!;
@@ -90,16 +110,26 @@ async function main() {
   applyPanelSizes(persisted.panelSizes);
 
   const rules = await getAnalysisRules();
+  const selectedRuleIds =
+    persisted.selectedRuleIds.length > 0
+      ? persisted.selectedRuleIds
+      : rules.map((r) => r.id);
+  const selected = new Set(selectedRuleIds);
+  if (
+    persisted.selectedRuleIds.length > 0 &&
+    !selected.has("language_linters") &&
+    rules.some((r) => r.id === "language_linters")
+  ) {
+    selected.add("language_linters");
+  }
   const rulesState: RulesPanelState = {
     rules,
-    selected: new Set(
-      persisted.selectedRuleIds.length > 0
-        ? persisted.selectedRuleIds
-        : rules.map((r) => r.id),
-    ),
+    selected,
     settings: mergeRuleSettings(rules, persisted.ruleSettings),
     expandedRuleId: null,
   };
+
+  const initialLinterSettings = ensureLinterSettings(persisted.linterSettings);
 
   const app: AppState = {
     projectPath: null,
@@ -107,6 +137,7 @@ async function main() {
     selectedRules: rulesState.selected,
     ruleSettings: rulesState.settings,
     lspSettings: {},
+    linterSettings: initialLinterSettings,
     analysisResult: null,
     hierarchy: null,
     graphNavigation: persisted.graphNavigation ?? rootNavigation(),
@@ -118,11 +149,38 @@ async function main() {
     },
   };
 
-  const resultsPanel = createResultsPanel(resultsContainer);
-
-  const fileViewer = createFileViewer(fileViewerEl, () => {
-    showGraphView();
+  const resultsPanel = createResultsPanel(resultsContainer, {
+    getHierarchy: () => app.hierarchy,
+    onOpenValidationTarget: (target) => {
+      void openValidationTarget(target);
+    },
+    onShowValidationOnGraph: (target) => {
+      void showValidationTargetOnGraph(target);
+    },
   });
+
+  const fileViewer = createFileViewer(
+    fileViewerEl,
+    () => {
+      showGraphView();
+    },
+    {
+      saveButton: btnSaveFile,
+      onSave: async (path, content) => {
+        if (!app.projectPath) return;
+        await writeProjectFile(app.projectPath, path, content);
+      },
+    },
+  );
+
+  function refreshFileNav(path: string) {
+    const issues = collectFileIssues(app.analysisResult, path);
+    renderFileNav(graphNavContainer, {
+      path,
+      issues,
+      onIssueClick: (line) => fileViewer.scrollToLine(line),
+    });
+  }
 
   function collectState(): PersistedAppState {
     return {
@@ -132,6 +190,7 @@ async function main() {
       selectedRuleIds: Array.from(app.selectedRules),
       ruleSettings: app.ruleSettings,
       lspSettings: app.lspSettings,
+      linterSettings: app.linterSettings,
       visibleModuleIds: Array.from(app.modulesListState.visibleIds),
       selectedNodeId: app.renderState?.selectedId ?? null,
       camera: app.renderState
@@ -152,6 +211,10 @@ async function main() {
     viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((t) => {
       t.classList.toggle("active", t.dataset.view === "graph");
     });
+    if (app.hierarchy) {
+      const graph = graphForNavigation(app.hierarchy, app.graphNavigation);
+      refreshGraphNav(graph);
+    }
   }
 
   function showFileView() {
@@ -160,6 +223,8 @@ async function main() {
     viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((t) => {
       t.classList.toggle("active", t.dataset.view === "file");
     });
+    const path = fileViewer.getPath();
+    if (path) refreshFileNav(path);
   }
 
   viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((tab) => {
@@ -178,15 +243,17 @@ async function main() {
 
   const lspState: LspServersPanelState = {
     servers: [],
-    settings: { ...persisted.lspSettings },
+    settings: mergeLspSettings([], persisted.lspSettings),
     expandedServerId: null,
     installingId: null,
     errors: {},
-    loading: true,
+    loading: false,
   };
 
+  let lspLoaded = false;
   const lspHandlers = {
     onRefresh: async () => {
+      if (lspState.loading) return;
       lspState.loading = true;
       createLspServersPanel(lspServersContainer, lspState, lspHandlers);
       try {
@@ -197,6 +264,7 @@ async function main() {
         );
         app.lspSettings = lspState.settings;
         lspState.errors = {};
+        lspLoaded = true;
         persist();
       } catch (err) {
         console.error(err);
@@ -242,11 +310,85 @@ async function main() {
 
   createLspServersPanel(lspServersContainer, lspState, lspHandlers);
 
+  const lintersState: LintersPanelState = {
+    groups: [],
+    settings: initialLinterSettings,
+    expandedLanguageId: null,
+    installingKey: null,
+    errors: {},
+    loading: false,
+  };
+
+  let lintersLoaded = false;
+  const lintersHandlers = {
+    onRefresh: async () => {
+      if (lintersState.loading) return;
+      lintersState.loading = true;
+      createLintersPanel(lintersContainer, lintersState, lintersHandlers);
+      try {
+        lintersState.groups = await listLanguageLinters();
+        lintersState.settings = ensureLinterSettings(
+          lintersState.settings,
+          lintersState.groups,
+        );
+        app.linterSettings = lintersState.settings;
+        lintersState.errors = {};
+        lintersLoaded = true;
+        persist();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        lintersState.loading = false;
+        createLintersPanel(lintersContainer, lintersState, lintersHandlers);
+      }
+    },
+    onInstall: async (languageId: string, linterId: string) => {
+      const key = `${languageId}:${linterId}`;
+      lintersState.installingKey = key;
+      delete lintersState.errors[key];
+      createLintersPanel(lintersContainer, lintersState, lintersHandlers);
+      try {
+        const result = await installLinter(languageId, linterId);
+        if (!result.ok) {
+          lintersState.errors[key] = result.message;
+        } else {
+          lintersState.groups = await listLanguageLinters();
+          if (!lintersState.settings[languageId]) {
+            lintersState.settings[languageId] = {};
+          }
+          lintersState.settings[languageId].linter_id = linterId;
+          lintersState.settings = ensureLinterSettings(
+            lintersState.settings,
+            lintersState.groups,
+          );
+          app.linterSettings = lintersState.settings;
+          persist();
+        }
+      } catch (err) {
+        lintersState.errors[key] =
+          err instanceof Error ? err.message : String(err);
+      } finally {
+        lintersState.installingKey = null;
+        createLintersPanel(lintersContainer, lintersState, lintersHandlers);
+      }
+    },
+    onSettingsChange: (settings: LinterSettingsMap) => {
+      lintersState.settings = settings;
+      app.linterSettings = settings;
+      persist();
+    },
+  };
+
+  createLintersPanel(lintersContainer, lintersState, lintersHandlers);
+
   const settings = createSettingsPanel(settingsOverlay, () => {
-    void lspHandlers.onRefresh();
+    // Paint the drawer first, then load tool metadata in the background.
+    requestAnimationFrame(() => {
+      if (!lspLoaded) void lspHandlers.onRefresh();
+      if (!lintersLoaded) void lintersHandlers.onRefresh();
+    });
   });
   btnSettings.addEventListener("click", () => settings.toggle());
-  void lspHandlers.onRefresh();
 
   initResizers(
     () => resize(),
@@ -354,7 +496,9 @@ async function main() {
       const content = await readProjectFile(app.projectPath, node.path);
       fileViewer.open(node.path, content, {
         line: node.line && node.line > 0 ? node.line : undefined,
+        issues: collectFileIssues(app.analysisResult, node.path),
       });
+      refreshFileNav(node.path);
       showFileView();
     } catch (err) {
       console.error(err);
@@ -520,17 +664,65 @@ async function main() {
     }
   }
 
-  async function handleFileOpen(relativePath: string) {
+  async function handleFileOpen(relativePath: string, line?: number) {
     if (!app.projectPath) return;
     try {
       const content = await readProjectFile(app.projectPath, relativePath);
-      fileViewer.open(relativePath, content);
+      const issues = collectFileIssues(app.analysisResult, relativePath);
+      fileViewer.open(relativePath, content, {
+        line: line && line > 0 ? line : undefined,
+        issues,
+      });
+      refreshFileNav(relativePath);
       showFileView();
     } catch (err) {
       console.error(err);
       alert(`Could not open file: ${err}`);
     }
   }
+
+  async function openValidationTarget(target: ValidationNavTarget) {
+    hideValidationDetail();
+    await handleFileOpen(target.file, target.line);
+  }
+
+  async function showValidationTargetOnGraph(target: ValidationNavTarget) {
+    if (!app.hierarchy) return;
+    hideValidationDetail();
+    hideGraphPopup();
+    showGraphView();
+
+    const wantsSymbol =
+      Boolean(target.symbolId) || (target.line != null && target.line > 0);
+
+    if (wantsSymbol) {
+      app.graphNavigation = navigationToFile(app.hierarchy, target.file);
+      let symbolId = target.symbolId;
+      if (!symbolId && target.line != null) {
+        symbolId = findSymbolAtLine(
+          app.hierarchy,
+          target.file,
+          target.line,
+        )?.id;
+      }
+      const graph = graphForNavigation(app.hierarchy, app.graphNavigation);
+      await loadGraph(graph, { selectedId: symbolId ?? undefined });
+      if (symbolId && app.renderState) {
+        focusCameraOnNodeAnimated(app.renderState, canvas, symbolId, draw);
+        setHighlight(symbolId);
+      }
+    } else {
+      app.graphNavigation = navigationToPackageFile(app.hierarchy, target.file);
+      const graph = graphForNavigation(app.hierarchy, app.graphNavigation);
+      await loadGraph(graph, { selectedId: target.file });
+      if (app.renderState?.nodes.some((n) => n.id === target.file)) {
+        focusCameraOnNodeAnimated(app.renderState, canvas, target.file, draw);
+        setHighlight(target.file);
+      }
+    }
+    persist();
+  }
+
 
   window.addEventListener("resize", resize);
 
@@ -649,12 +841,20 @@ async function main() {
       resultsPanel.setRunning(true);
       showGraphView();
 
+      const linterSettings = ensureLinterSettings(
+        app.linterSettings,
+        lintersState.groups.length > 0 ? lintersState.groups : undefined,
+      );
+      app.linterSettings = linterSettings;
+      lintersState.settings = linterSettings;
+
       const result = await runAnalysis(
         app.projectPath,
         Array.from(app.selectedRules),
         (progress) => resultsPanel.setProgress(progress),
         app.ruleSettings,
         app.lspSettings,
+        linterSettings,
       );
 
       app.analysisResult = result;
@@ -678,6 +878,15 @@ async function main() {
       fitCameraToContent(app.renderState, canvas);
       draw();
       persist();
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      if (fileViewer.isOpen() && fileViewer.isDirty()) {
+        e.preventDefault();
+        void fileViewer.save();
+      }
     }
   });
 

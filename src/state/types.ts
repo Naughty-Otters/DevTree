@@ -1,5 +1,6 @@
 import type { AnalysisResult, RuleSettingsMap } from "../analysis/types";
 import type { LspSettingsMap } from "../lsp/types";
+import type { LinterSettingsMap } from "../linter/types";
 import type { GraphNavigation } from "../graph/navigation";
 
 export interface PanelSizes {
@@ -22,6 +23,7 @@ export interface PersistedAppState {
   selectedRuleIds: string[];
   ruleSettings: RuleSettingsMap;
   lspSettings: LspSettingsMap;
+  linterSettings: LinterSettingsMap;
   visibleModuleIds: string[];
   selectedNodeId: string | null;
   camera: CameraState | null;
@@ -44,6 +46,7 @@ export function defaultPersistedState(): PersistedAppState {
     selectedRuleIds: [],
     ruleSettings: {},
     lspSettings: {},
+    linterSettings: {},
     visibleModuleIds: [],
     selectedNodeId: null,
     camera: null,

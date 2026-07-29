@@ -1,8 +1,23 @@
 import type { AnalysisResult, AnalysisProgress } from "../analysis/types";
+import type { HierarchyIndex } from "../analysis/types";
+import { findSymbolAtLine } from "../validation/navigation";
+import {
+  showValidationDetail,
+  type ValidationDetailHandlers,
+} from "./validationDetailPopup";
 
 type TabId = "analysis" | "validation" | "suggestions";
 
-export function createResultsPanel(container: HTMLElement): {
+export interface ResultsPanelHandlers {
+  onOpenValidationTarget?: ValidationDetailHandlers["onOpenFile"];
+  onShowValidationOnGraph?: ValidationDetailHandlers["onShowOnGraph"];
+  getHierarchy?: () => HierarchyIndex | null;
+}
+
+export function createResultsPanel(
+  container: HTMLElement,
+  handlers: ResultsPanelHandlers = {},
+): {
   setResult: (result: AnalysisResult | null) => void;
   setRunning: (running: boolean) => void;
   setProgress: (progress: AnalysisProgress) => void;
@@ -112,7 +127,7 @@ export function createResultsPanel(container: HTMLElement): {
         renderAnalysisTab(content, currentResult);
         break;
       case "validation":
-        renderValidationTab(content, currentResult);
+        renderValidationTab(content, currentResult, handlers);
         break;
       case "suggestions":
         renderSuggestionsTab(content, currentResult);
@@ -181,6 +196,7 @@ function renderAnalysisTab(
 function renderValidationTab(
   container: HTMLElement,
   result: AnalysisResult,
+  handlers: ResultsPanelHandlers,
 ): void {
   if (result.validation.length === 0) {
     const empty = document.createElement("div");
@@ -191,8 +207,10 @@ function renderValidationTab(
   }
 
   for (const item of result.validation) {
-    const row = document.createElement("div");
-    row.className = `validation-item validation-${item.status}`;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `validation-item validation-${item.status} validation-item-clickable`;
+    row.disabled = item.affected.length === 0;
 
     const badge = document.createElement("span");
     badge.className = `validation-badge badge-${item.status}`;
@@ -214,14 +232,36 @@ function renderValidationTab(
     if (item.affected.length > 0) {
       const affected = document.createElement("div");
       affected.className = "validation-affected";
-      affected.textContent = item.affected.slice(0, 5).join(", ");
-      if (item.affected.length > 5) {
-        affected.textContent += ` (+${item.affected.length - 5} more)`;
-      }
+      const fileCount = new Set(
+        item.affected.map((a) => a.split(":")[0]),
+      ).size;
+      affected.textContent =
+        fileCount === 1
+          ? `1 file · ${item.affected.length} issue(s) — click to view`
+          : `${fileCount} files · ${item.affected.length} issue(s) — click to view`;
       body.appendChild(affected);
     }
 
     row.append(badge, body);
+
+    if (item.affected.length > 0) {
+      row.addEventListener("click", () => {
+        const hierarchy = handlers.getHierarchy?.() ?? null;
+        showValidationDetail(item, {
+          onOpenFile: (target) => {
+            handlers.onOpenValidationTarget?.(target);
+          },
+          onShowOnGraph: (target) => {
+            handlers.onShowValidationOnGraph?.(target);
+          },
+          resolveSymbol: (file, line) => {
+            if (!hierarchy || line == null) return undefined;
+            return findSymbolAtLine(hierarchy, file, line);
+          },
+        });
+      });
+    }
+
     container.appendChild(row);
   }
 }

@@ -1,10 +1,11 @@
 use std::env;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use super::discover::{probe_language_server, LanguageKind};
+use super::discover::{resolve_which, LanguageKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,39 +161,33 @@ fn settings_for(kind: LanguageKind) -> Vec<LspSettingDef> {
     settings
 }
 
-/// Prepend common toolchain dirs so GUI-launched apps still find LSPs / package managers.
-pub fn enrich_path() {
+/// Build a PATH string that includes common toolchain locations (for GUI apps).
+pub fn build_enriched_path() -> String {
     let current = env::var("PATH").unwrap_or_default();
     let mut parts: Vec<String> = Vec::new();
-
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        parts.push(home.join(".cargo/bin").to_string_lossy().into());
-        parts.push(home.join("go/bin").to_string_lossy().into());
-        parts.push(home.join(".local/bin").to_string_lossy().into());
-
-        let nvm_versions = home.join(".nvm/versions/node");
-        if nvm_versions.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&nvm_versions) {
-                let mut versions: Vec<PathBuf> = entries
-                    .filter_map(|e| e.ok())
-                    .map(|e| e.path())
-                    .filter(|p| p.is_dir())
-                    .collect();
-                versions.sort();
-                if let Some(latest) = versions.last() {
-                    parts.push(latest.join("bin").to_string_lossy().into());
-                }
-            }
-        }
-    }
 
     for p in [
         "/opt/homebrew/bin",
         "/opt/homebrew/sbin",
         "/usr/local/bin",
-        "/usr/bin",
-        "/bin",
     ] {
+        parts.push(p.to_string());
+    }
+
+    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        parts.push(home.join(".cargo/bin").to_string_lossy().into());
+        parts.push(home.join("go/bin").to_string_lossy().into());
+        parts.push(home.join(".local/bin").to_string_lossy().into());
+        parts.push(home.join(".volta/bin").to_string_lossy().into());
+
+        if let Some(nvm_node) = super::discover::newest_nvm_node_bin(&home) {
+            if let Some(parent) = PathBuf::from(&nvm_node).parent() {
+                parts.push(parent.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    for p in ["/usr/bin", "/bin"] {
         parts.push(p.to_string());
     }
 
@@ -202,7 +197,12 @@ pub fn enrich_path() {
         }
     }
 
-    let joined = parts.join(":");
+    parts.join(":")
+}
+
+/// Prepend common toolchain dirs so GUI-launched apps still find LSPs / package managers.
+pub fn enrich_path() {
+    let joined = build_enriched_path();
     // SAFETY: single-threaded at command entry; PATH update is intentional for LSP tooling.
     unsafe { env::set_var("PATH", &joined) };
 }
@@ -243,13 +243,13 @@ pub fn cfg_bool(
 fn probe_def(def: &ServerDef) -> LspServerStatus {
     let id = def.kind.label().to_string();
     let settings = settings_for(def.kind);
-    match probe_language_server(def.kind) {
-        Some((command, _)) => LspServerStatus {
+    match super::discover::probe_language_server(def.kind) {
+        Some((command, args)) => LspServerStatus {
             id,
             language: def.kind.label().into(),
             label: def.label.into(),
             status: "installed".into(),
-            command: Some(resolve_which(&command).unwrap_or(command)),
+            command: Some(format_server_command(def.kind, &command, &args)),
             install_hint: def.install_hint.into(),
             settings,
         },
@@ -265,21 +265,28 @@ fn probe_def(def: &ServerDef) -> LspServerStatus {
     }
 }
 
-fn resolve_which(name: &str) -> Option<String> {
-    #[cfg(windows)]
-    let output = Command::new("where").arg(name).output().ok()?;
-    #[cfg(not(windows))]
-    let output = Command::new("which").arg(name).output().ok()?;
-    if !output.status.success() {
-        return None;
+fn format_server_command(
+    lang: LanguageKind,
+    command: &str,
+    args: &[String],
+) -> String {
+    if command.ends_with("node") || command.contains("/node") {
+        if let Some(script) = args.first() {
+            let name = Path::new(script)
+                .parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("language-server");
+            return format!("{command} ({name})");
+        }
+        return match lang {
+            LanguageKind::TypeScript => "node (typescript-language-server)".into(),
+            LanguageKind::Python => "node (pyright/basedpyright)".into(),
+            _ => command.to_string(),
+        };
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let first = text.lines().next()?.trim();
-    if first.is_empty() {
-        None
-    } else {
-        Some(first.to_string())
-    }
+    resolve_which(command).unwrap_or_else(|| command.to_string())
 }
 
 pub fn install_lsp_server(id: &str) -> Result<LspInstallResult, String> {

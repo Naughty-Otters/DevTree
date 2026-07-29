@@ -14,8 +14,8 @@ use crate::hierarchy::{SymbolEdge, SymbolInfo};
 
 pub use discover::LanguageKind;
 pub use status::{
-    cfg_bool, cfg_u32, enrich_path, install_lsp_server, list_lsp_servers, lsp_cfg, LspInstallResult,
-    LspServerStatus, LspSettingsMap,
+    build_enriched_path, cfg_bool, cfg_u32, enrich_path, install_lsp_server, list_lsp_servers,
+    lsp_cfg, LspInstallResult, LspServerStatus, LspSettingsMap,
 };
 
 use client::LspClient;
@@ -107,6 +107,7 @@ impl LspPool {
                 (i + 1) as u32,
                 0,
             );
+            let lang_label = spec.language.label().to_string();
             let runtime = LangRuntime::from_settings(spec.language, settings);
             let cfg = lsp_cfg(settings, spec.language.label());
             match spawn_server(
@@ -118,7 +119,9 @@ impl LspPool {
             ) {
                 Ok(server) => servers.push(server),
                 Err(err) => {
-                    eprintln!("[devtree lsp] failed to start server: {err}");
+                    eprintln!(
+                        "[devtree lsp] failed to start {lang_label}: {err}"
+                    );
                 }
             }
         }

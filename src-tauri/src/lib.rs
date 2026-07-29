@@ -1,6 +1,7 @@
 mod analysis;
 mod db;
 mod hierarchy;
+mod linter;
 mod lsp;
 mod project;
 
@@ -8,6 +9,7 @@ use analysis::{
     run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
 };
 use db::{init_db, DbState};
+use linter::{LinterInstallResult, LinterSettingsMap, LanguageLinterGroup};
 use lsp::{LspInstallResult, LspServerStatus, LspSettingsMap};
 use project::{scan_project, ProjectScan};
 use tauri::ipc::Channel;
@@ -28,15 +30,37 @@ async fn run_project_analysis(
     rules: Vec<String>,
     rule_settings: RuleSettingsMap,
     lsp_settings: LspSettingsMap,
+    linter_settings: LinterSettingsMap,
     on_progress: Channel<AnalysisProgress>,
 ) -> Result<AnalysisResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        run_analysis_with_progress(&path, &rules, &rule_settings, &lsp_settings, |progress| {
-            let _ = on_progress.send(progress);
-        })
+        run_analysis_with_progress(
+            &path,
+            &rules,
+            &rule_settings,
+            &lsp_settings,
+            &linter_settings,
+            |progress| {
+                let _ = on_progress.send(progress);
+            },
+        )
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn list_language_linters() -> Vec<LanguageLinterGroup> {
+    tauri::async_runtime::spawn_blocking(linter::list_language_linters)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn install_linter(language_id: String, linter_id: String) -> Result<LinterInstallResult, String> {
+    tauri::async_runtime::spawn_blocking(move || linter::install_linter(&language_id, &linter_id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -54,8 +78,28 @@ fn read_project_file(project_root: String, relative_path: String) -> Result<Stri
 }
 
 #[tauri::command]
-fn list_lsp_servers() -> Vec<LspServerStatus> {
-    lsp::list_lsp_servers()
+fn write_project_file(
+    project_root: String,
+    relative_path: String,
+    content: String,
+) -> Result<(), String> {
+    use std::path::PathBuf;
+    let root = PathBuf::from(&project_root);
+    let file = root.join(&relative_path);
+    if !file.starts_with(&root) {
+        return Err("Path escapes project root".into());
+    }
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&file, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_lsp_servers() -> Vec<LspServerStatus> {
+    tauri::async_runtime::spawn_blocking(lsp::list_lsp_servers)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -77,8 +121,11 @@ pub fn run() {
             scan_project_dir,
             run_project_analysis,
             read_project_file,
+            write_project_file,
             list_lsp_servers,
             install_lsp_server,
+            list_language_linters,
+            install_linter,
             db::load_persisted_state,
             db::save_persisted_state,
             db::get_db_path,
