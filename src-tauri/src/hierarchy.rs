@@ -1100,6 +1100,15 @@ pub fn build_hierarchy(
     files: &[(String, u32)],
     contents: &HashMap<String, String>,
 ) -> HierarchyIndex {
+    build_hierarchy_with_progress(root, files, contents, |_, _| {})
+}
+
+pub fn build_hierarchy_with_progress(
+    root: &Path,
+    files: &[(String, u32)],
+    contents: &HashMap<String, String>,
+    mut on_progress: impl FnMut(usize, usize),
+) -> HierarchyIndex {
     let all_files: HashSet<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let mut file_imports: HashMap<String, Vec<String>> = HashMap::new();
     let mut symbols: HashMap<String, Vec<SymbolInfo>> = HashMap::new();
@@ -1127,7 +1136,12 @@ pub fn build_hierarchy(
         })
         .collect();
 
-    for (path, _) in files {
+    let total = files.len();
+    for (i, (path, _)) in files.iter().enumerate() {
+        if i == 0 || (i + 1) % 4 == 0 || i + 1 == total {
+            on_progress(i + 1, total);
+        }
+
         let content = contents.get(path).cloned().unwrap_or_default();
         let ext = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("");
 
@@ -1217,8 +1231,20 @@ pub fn root_package_graph(hierarchy: &HierarchyIndex) -> Graph {
 }
 
 pub fn read_file_contents(root: &Path, files: &[(String, u32)]) -> HashMap<String, String> {
+    read_file_contents_with_progress(root, files, |_, _| {})
+}
+
+pub fn read_file_contents_with_progress(
+    root: &Path,
+    files: &[(String, u32)],
+    mut on_progress: impl FnMut(usize, usize),
+) -> HashMap<String, String> {
     let mut map = HashMap::new();
-    for (rel, _) in files {
+    let total = files.len();
+    for (i, (rel, _)) in files.iter().enumerate() {
+        if i == 0 || (i + 1) % 8 == 0 || i + 1 == total {
+            on_progress(i + 1, total);
+        }
         let path = root.join(rel);
         if let Ok(content) = std::fs::read_to_string(&path) {
             map.insert(rel.clone(), content);

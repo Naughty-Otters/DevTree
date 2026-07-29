@@ -630,6 +630,57 @@ body.is-resizing-v {
   color: var(--accent-bright);
 }
 
+.analysis-progress {
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analysis-progress-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-bright);
+}
+
+.analysis-progress-message {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  min-height: 1.4em;
+}
+
+.analysis-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.analysis-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: var(--accent-bright);
+  transition: width 120ms ease-out;
+}
+
+.analysis-progress-fill-indeterminate {
+  width: 35% !important;
+  animation: analysis-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes analysis-progress-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+.analysis-progress-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Center / Canvas ── */
 #view-tabs {
   display: flex;
@@ -736,6 +787,15 @@ body.is-resizing-v {
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.graph-nav-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  opacity: 0.85;
+  flex-shrink: 0;
 }
 
 .graph-nav-warning {

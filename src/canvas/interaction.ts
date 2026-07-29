@@ -7,7 +7,10 @@ export interface InteractionCallbacks {
   onChange: () => void;
   onSelect: (id: string | null) => void;
   onHover?: (id: string | null) => void;
-  onNodeClick?: (id: string | null, clientX: number, clientY: number, shiftKey: boolean) => void;
+  /** Single click (no drag): open details / clear selection on empty space. */
+  onNodeClick?: (id: string | null, clientX: number, clientY: number) => void;
+  /** Double click a node: drill into the next hierarchy level. */
+  onNodeDoubleClick?: (id: string, clientX: number, clientY: number) => void;
 }
 
 export function attachInteraction(
@@ -86,7 +89,7 @@ export function attachInteraction(
       const clicked = hitTest(state, canvas, sx, sy);
       state.selectedId = clicked;
       callbacks.onSelect(clicked);
-      callbacks.onNodeClick?.(clicked, e.clientX, e.clientY, e.shiftKey);
+      callbacks.onNodeClick?.(clicked, e.clientX, e.clientY);
       callbacks.onChange();
     }
 
@@ -94,6 +97,24 @@ export function attachInteraction(
     panning = false;
     draggingNodeId = null;
     canvas.style.cursor = state?.hoveredId ? "pointer" : "default";
+  });
+
+  canvas.addEventListener("dblclick", (e) => {
+    if (e.button !== 0) return;
+    const state = getState();
+    if (!state) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const sx = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const sy = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const hit = hitTest(state, canvas, sx, sy);
+    if (!hit) return;
+
+    e.preventDefault();
+    state.selectedId = hit;
+    callbacks.onSelect(hit);
+    callbacks.onNodeDoubleClick?.(hit, e.clientX, e.clientY);
+    callbacks.onChange();
   });
 
   canvas.addEventListener("mouseleave", () => {

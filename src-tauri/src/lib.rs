@@ -3,9 +3,10 @@ mod db;
 mod hierarchy;
 mod project;
 
-use analysis::{run_analysis, AnalysisResult, AnalysisRule};
+use analysis::{run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule};
 use db::{init_db, DbState};
 use project::{scan_project, ProjectScan};
+use tauri::ipc::Channel;
 
 #[tauri::command]
 fn get_analysis_rules() -> Vec<AnalysisRule> {
@@ -18,11 +19,18 @@ fn scan_project_dir(path: String) -> Result<ProjectScan, String> {
 }
 
 #[tauri::command]
-fn run_project_analysis(
+async fn run_project_analysis(
     path: String,
     rules: Vec<String>,
+    on_progress: Channel<AnalysisProgress>,
 ) -> Result<AnalysisResult, String> {
-    run_analysis(&path, &rules)
+    tauri::async_runtime::spawn_blocking(move || {
+        run_analysis_with_progress(&path, &rules, |progress| {
+            let _ = on_progress.send(progress);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

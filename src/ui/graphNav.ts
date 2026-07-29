@@ -80,7 +80,10 @@ export function renderGraphNav(
     crumbs.appendChild(stats);
   }
 
-  bar.append(controls, crumbs);
+  const hint = document.createElement("span");
+  hint.className = "graph-nav-hint";
+  hint.textContent = "click · details  ·  double-click · drill in";
+  bar.append(controls, crumbs, hint);
   container.appendChild(bar);
 
   if (options.staleImports) {

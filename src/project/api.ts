@@ -1,4 +1,4 @@
-import type { AnalysisResult, AnalysisRule } from "../analysis/types";
+import type { AnalysisResult, AnalysisRule, AnalysisProgress } from "../analysis/types";
 import type { ProjectScan } from "./types";
 import { mockHierarchyForFixture } from "../graph/hierarchy";
 
@@ -39,15 +39,21 @@ export async function getAnalysisRules(): Promise<AnalysisRule[]> {
 export async function runAnalysis(
   path: string,
   rules: string[],
+  onProgress?: (progress: AnalysisProgress) => void,
 ): Promise<AnalysisResult> {
   if (isTauri()) {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke, Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<AnalysisProgress>();
+    channel.onmessage = (progress) => {
+      onProgress?.(progress);
+    };
     return invoke<AnalysisResult>("run_project_analysis", {
       path,
       rules,
+      onProgress: channel,
     });
   }
-  return mockAnalysis(path, rules);
+  return mockAnalysis(path, rules, onProgress);
 }
 
 export async function readProjectFile(
@@ -139,7 +145,23 @@ function mockProjectScan(path: string): ProjectScan {
 async function mockAnalysis(
   path: string,
   rules: string[],
+  onProgress?: (progress: AnalysisProgress) => void,
 ): Promise<AnalysisResult> {
+  const stages: AnalysisProgress[] = [
+    { stage: "scanning", message: "Starting breadth-first scan…", current: 0, total: 0, percent: 0 },
+    { stage: "scanning", message: "Found 12 source files", current: 12, total: 12, percent: 15 },
+    { stage: "reading", message: "Reading file contents (6/12)", current: 6, total: 12, percent: 28 },
+    { stage: "reading", message: "Reading file contents (12/12)", current: 12, total: 12, percent: 40 },
+    { stage: "analyzing", message: "Resolving imports & symbols (6/12)", current: 6, total: 12, percent: 62 },
+    { stage: "analyzing", message: "Resolving imports & symbols (12/12)", current: 12, total: 12, percent: 85 },
+    { stage: "validating", message: "Running validation rules…", current: rules.length, total: rules.length || 1, percent: 95 },
+    { stage: "done", message: "Analysis complete", current: 12, total: 12, percent: 100 },
+  ];
+  for (const stage of stages) {
+    onProgress?.(stage);
+    await new Promise((r) => setTimeout(r, 80));
+  }
+
   const { loadFixtureGraph } = await import("../graph/loadFixture");
   const { graphForNavigation, rootNavigation } = await import("../graph/navigation");
   const fixtureGraph = loadFixtureGraph();

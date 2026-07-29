@@ -17,7 +17,8 @@
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2",
     "highlight.js": "^11.11.1",
-    "lucide": "^1.27.0"
+    "lucide": "^1.27.0",
+    "wasm-pack": "^0.15.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

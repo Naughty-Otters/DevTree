@@ -1,13 +1,16 @@
-import type { AnalysisResult } from "../analysis/types";
+import type { AnalysisResult, AnalysisProgress } from "../analysis/types";
 
 type TabId = "analysis" | "validation" | "suggestions";
 
 export function createResultsPanel(container: HTMLElement): {
   setResult: (result: AnalysisResult | null) => void;
   setRunning: (running: boolean) => void;
+  setProgress: (progress: AnalysisProgress) => void;
 } {
   let activeTab: TabId = "analysis";
   let currentResult: AnalysisResult | null = null;
+  let running = false;
+  let progress: AnalysisProgress | null = null;
 
   const tabs = document.createElement("div");
   tabs.className = "results-tabs";
@@ -44,7 +47,57 @@ export function createResultsPanel(container: HTMLElement): {
 
   container.append(tabs, content);
 
+  function renderProgress(): void {
+    content.innerHTML = "";
+    const wrap = document.createElement("div");
+    wrap.className = "analysis-progress";
+
+    const title = document.createElement("div");
+    title.className = "analysis-progress-title";
+    title.textContent = "Running analysis…";
+
+    const message = document.createElement("div");
+    message.className = "analysis-progress-message";
+    message.textContent = progress?.message ?? "Preparing…";
+
+    const track = document.createElement("div");
+    track.className = "analysis-progress-track";
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    const pct = Math.max(0, Math.min(100, progress?.percent ?? 0));
+    track.setAttribute("aria-valuenow", String(pct));
+
+    const fill = document.createElement("div");
+    fill.className = "analysis-progress-fill";
+    fill.style.width = `${pct}%`;
+    if (!progress || progress.total === 0) {
+      fill.classList.add("analysis-progress-fill-indeterminate");
+    }
+
+    track.appendChild(fill);
+
+    const meta = document.createElement("div");
+    meta.className = "analysis-progress-meta";
+    const stage = progress?.stage ? progress.stage : "…";
+    const counts =
+      progress && progress.total > 0
+        ? `${progress.current}/${progress.total}`
+        : progress
+          ? `${progress.current} found`
+          : "";
+    meta.textContent = counts ? `${stage} · ${counts} · ${pct}%` : `${stage} · ${pct}%`;
+
+    wrap.append(title, message, track, meta);
+    content.appendChild(wrap);
+  }
+
   function renderContent(): void {
+    if (running) {
+      renderProgress();
+      return;
+    }
+
     content.innerHTML = "";
     if (!currentResult) {
       const empty = document.createElement("div");
@@ -69,14 +122,30 @@ export function createResultsPanel(container: HTMLElement): {
 
   return {
     setResult(result: AnalysisResult | null) {
+      running = false;
+      progress = null;
       currentResult = result;
       renderContent();
     },
-    setRunning(running: boolean) {
-      if (running) {
-        content.innerHTML =
-          '<div class="panel-empty panel-loading">Running analysis…</div>';
+    setRunning(isRunning: boolean) {
+      running = isRunning;
+      if (isRunning) {
+        progress = {
+          stage: "starting",
+          message: "Preparing analysis…",
+          current: 0,
+          total: 0,
+          percent: 0,
+        };
+      } else {
+        progress = null;
       }
+      renderContent();
+    },
+    setProgress(next: AnalysisProgress) {
+      running = true;
+      progress = next;
+      renderProgress();
     },
   };
 }

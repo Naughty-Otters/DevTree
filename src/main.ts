@@ -381,6 +381,15 @@ async function main() {
 
   window.addEventListener("resize", resize);
 
+  let pendingPopupTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearPendingPopup() {
+    if (pendingPopupTimer != null) {
+      clearTimeout(pendingPopupTimer);
+      pendingPopupTimer = null;
+    }
+  }
+
   attachInteraction(canvas, () => app.renderState, {
     onChange: () => {
       draw();
@@ -395,20 +404,24 @@ async function main() {
       if (!app.renderState) return;
       setHighlight(id);
     },
-    onNodeClick: (id, clientX, clientY, shiftKey) => {
+    onNodeClick: (id, clientX, clientY) => {
+      clearPendingPopup();
       if (!id) {
         hideGraphPopup();
         setHighlight(null);
         persist();
         return;
       }
-      const node = app.renderState?.nodes.find((n) => n.id === id);
-      if (!node) return;
-      if (!shiftKey && isDrillableNode(node, app.graphNavigation)) {
-        drillIntoNode(id);
-        return;
-      }
-      openModulePopup(id, clientX, clientY);
+      // Delay so a double-click can cancel and drill instead of flashing the popup.
+      pendingPopupTimer = setTimeout(() => {
+        pendingPopupTimer = null;
+        openModulePopup(id, clientX, clientY);
+      }, 220);
+    },
+    onNodeDoubleClick: (id) => {
+      clearPendingPopup();
+      hideGraphPopup();
+      drillIntoNode(id);
     },
   });
 
@@ -468,6 +481,7 @@ async function main() {
       const result = await runAnalysis(
         app.projectPath,
         Array.from(app.selectedRules),
+        (progress) => resultsPanel.setProgress(progress),
       );
 
       app.analysisResult = result;

@@ -80,3 +80,11 @@ export interface AnalysisResult {
   suggestions: SuggestionItem[];
   summary: string;
 }
+
+export interface AnalysisProgress {
+  stage: string;
+  message: string;
+  current: number;
+  total: number;
+  percent: number;
+}

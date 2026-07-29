@@ -10,7 +10,7 @@ export function showAnalysisDialog(ruleCount: number): Promise<boolean> {
 
     dialog.innerHTML = `
       <h2 id="analysis-dialog-title" class="modal-title">Run Analysis</h2>
-      <p class="modal-subtitle">${ruleCount} rule(s) selected. Builds a package-level dependency map — drill into packages and files to explore.</p>
+      <p class="modal-subtitle">${ruleCount} rule(s) selected. Builds a package-level dependency map — click a node for details, double-click to drill in.</p>
     `;
 
     const actions = document.createElement("div");

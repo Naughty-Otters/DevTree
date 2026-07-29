@@ -1,10 +1,12 @@
 use devtree_core::Graph;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::hierarchy::{
-    build_hierarchy, read_file_contents, root_package_graph, HierarchyIndex,
+    build_hierarchy_with_progress, read_file_contents_with_progress, root_package_graph,
+    HierarchyIndex,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,47 +84,122 @@ pub fn default_rules() -> Vec<AnalysisRule> {
     ]
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisProgress {
+    pub stage: String,
+    pub message: String,
+    pub current: u32,
+    pub total: u32,
+    pub percent: u8,
+}
+
+const SKIP_DIRS: &[&str] = &[
+    "node_modules", "target", "dist", "build", ".git", ".next", ".nuxt",
+    ".cache", "coverage", "__pycache__", ".venv", "venv", ".idea", ".vscode", "pkg", "wasm",
+];
+
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "py", "go"];
+
+fn should_skip_dir(name: &str) -> bool {
+    SKIP_DIRS.contains(&name) || name.starts_with('.')
+}
+
+fn is_source_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|ext| SOURCE_EXTENSIONS.contains(&ext))
+        .unwrap_or(false)
+}
+
 fn count_lines(path: &Path) -> u32 {
     fs::read_to_string(path)
         .map(|s| s.lines().count() as u32)
         .unwrap_or(0)
 }
 
-fn scan_source_files(root: &Path) -> Vec<(String, u32)> {
-    let mut files = Vec::new();
-    scan_dir_recursive(root, root, &mut files);
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    files
+fn emit_progress(
+    on_progress: &mut impl FnMut(AnalysisProgress),
+    stage: &str,
+    message: &str,
+    current: u32,
+    total: u32,
+    percent: u8,
+) {
+    on_progress(AnalysisProgress {
+        stage: stage.into(),
+        message: message.into(),
+        current,
+        total,
+        percent,
+    });
 }
 
-fn scan_dir_recursive(dir: &Path, root: &Path, files: &mut Vec<(String, u32)>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if path.is_dir() {
-            if !name.starts_with('.')
-                && !matches!(
-                    name.as_str(),
-                    "node_modules" | "target" | "dist" | "build" | ".git" | "wasm"
-                )
-            {
-                scan_dir_recursive(&path, root, files);
+/// Breadth-first walk of the project tree, collecting source files level by level.
+fn scan_source_files(
+    root: &Path,
+    on_progress: &mut impl FnMut(AnalysisProgress),
+) -> Vec<(String, u32)> {
+    let mut files = Vec::new();
+    let mut queue: VecDeque<PathBuf> = VecDeque::new();
+    queue.push_back(root.to_path_buf());
+
+    let mut dirs_visited = 0u32;
+
+    while let Some(dir) = queue.pop_front() {
+        dirs_visited += 1;
+        if dirs_visited == 1 || dirs_visited % 8 == 0 {
+            emit_progress(
+                on_progress,
+                "scanning",
+                &format!("Scanning directories… ({} files found)", files.len()),
+                files.len() as u32,
+                0,
+                5,
+            );
+        }
+
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            if path.is_dir() {
+                if !should_skip_dir(&name) {
+                    queue.push_back(path);
+                }
+                continue;
             }
-        } else {
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if matches!(ext, "ts" | "tsx" | "js" | "jsx" | "rs" | "py" | "go") {
-                let rel = path
-                    .strip_prefix(root)
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or(name);
-                let loc = count_lines(&path);
-                files.push((rel, loc));
+
+            if !is_source_file(&path) {
+                continue;
             }
+
+            let rel = path
+                .strip_prefix(root)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| name);
+            let loc = count_lines(&path);
+            files.push((rel, loc));
         }
     }
+
+    emit_progress(
+        on_progress,
+        "scanning",
+        &format!("Found {} source files", files.len()),
+        files.len() as u32,
+        files.len() as u32,
+        15,
+    );
+
+    files
 }
 
 fn run_modularity_check(files: &[(String, u32)]) -> ValidationItem {
@@ -350,22 +427,73 @@ pub fn run_analysis(
     project_root: &str,
     rule_ids: &[String],
 ) -> Result<AnalysisResult, String> {
+    run_analysis_with_progress(project_root, rule_ids, |_| {})
+}
+
+pub fn run_analysis_with_progress(
+    project_root: &str,
+    rule_ids: &[String],
+    mut on_progress: impl FnMut(AnalysisProgress),
+) -> Result<AnalysisResult, String> {
     let root = Path::new(project_root);
     if !root.is_dir() {
         return Err(format!("Not a directory: {project_root}"));
     }
 
-    let files = scan_source_files(root);
+    emit_progress(
+        &mut on_progress,
+        "scanning",
+        "Starting breadth-first scan…",
+        0,
+        0,
+        0,
+    );
+
+    let files = scan_source_files(root, &mut on_progress);
     if files.is_empty() {
         return Err("No source files found in project".to_string());
     }
 
-    let contents = read_file_contents(root, &files);
-    let hierarchy = build_hierarchy(root, &files, &contents);
+    let file_total = files.len() as u32;
+    let contents = read_file_contents_with_progress(root, &files, |current, total| {
+        let pct = 15 + ((current as f32 / total.max(1) as f32) * 25.0) as u8;
+        emit_progress(
+            &mut on_progress,
+            "reading",
+            &format!("Reading file contents ({current}/{total})"),
+            current as u32,
+            total as u32,
+            pct.min(40),
+        );
+    });
+
+    let hierarchy = build_hierarchy_with_progress(root, &files, &contents, |current, total| {
+        let pct = 40 + ((current as f32 / total.max(1) as f32) * 45.0) as u8;
+        emit_progress(
+            &mut on_progress,
+            "analyzing",
+            &format!("Resolving imports & symbols ({current}/{total})"),
+            current as u32,
+            total as u32,
+            pct.min(85),
+        );
+    });
+
     let graph = root_package_graph(&hierarchy);
     let mut validation = Vec::new();
+    let rule_total = rule_ids.len().max(1) as u32;
 
-    for rule_id in rule_ids {
+    for (i, rule_id) in rule_ids.iter().enumerate() {
+        let current = (i + 1) as u32;
+        emit_progress(
+            &mut on_progress,
+            "validating",
+            &format!("Running rule: {rule_id}"),
+            current,
+            rule_total,
+            (85 + ((current as f32 / rule_total as f32) * 10.0) as u8).min(95),
+        );
+
         let item = match rule_id.as_str() {
             "modularity" => run_modularity_check(&files),
             "dependency_depth" => run_dependency_depth_check(&files),
@@ -377,6 +505,15 @@ pub fn run_analysis(
         };
         validation.push(item);
     }
+
+    emit_progress(
+        &mut on_progress,
+        "finalizing",
+        "Generating suggestions…",
+        file_total,
+        file_total,
+        97,
+    );
 
     let pass_count = validation.iter().filter(|v| v.status == "pass").count();
     let warn_count = validation.iter().filter(|v| v.status == "warn").count();
@@ -393,6 +530,15 @@ pub fn run_analysis(
     );
 
     let suggestions = generate_suggestions(&validation);
+
+    emit_progress(
+        &mut on_progress,
+        "done",
+        "Analysis complete",
+        file_total,
+        file_total,
+        100,
+    );
 
     Ok(AnalysisResult {
         graph,
