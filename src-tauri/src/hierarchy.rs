@@ -82,7 +82,6 @@ fn parent_dir(path: &str) -> String {
 #[derive(Debug, Clone)]
 struct PackageRoot {
     path: String,
-    name: String,
     crate_names: Vec<String>,
 }
 
@@ -138,7 +137,6 @@ fn discover_package_roots(root: &Path, dir: &Path, out: &mut Vec<PackageRoot>) {
                 crate_names.dedup();
                 out.push(PackageRoot {
                     path: rel.clone(),
-                    name: pkg_name,
                     crate_names,
                 });
             }
@@ -146,11 +144,9 @@ fn discover_package_roots(root: &Path, dir: &Path, out: &mut Vec<PackageRoot>) {
     }
 
     if pkg_json_path.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&pkg_json_path) {
-            let pkg_name = parse_json_name(&content).unwrap_or_else(|| name.clone());
+        if std::fs::read_to_string(&pkg_json_path).is_ok() {
             out.push(PackageRoot {
                 path: rel.clone(),
-                name: pkg_name,
                 crate_names: vec![],
             });
         }
@@ -189,18 +185,6 @@ fn parse_toml_lib_name(content: &str) -> Option<String> {
         }
         if in_lib && trimmed.starts_with("name = ") {
             return extract_quoted(trimmed.trim_start_matches("name = ").trim());
-        }
-    }
-    None
-}
-
-fn parse_json_name(content: &str) -> Option<String> {
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("\"name\"") {
-            if let Some(idx) = trimmed.find(':') {
-                return extract_quoted(trimmed[idx + 1..].trim());
-            }
         }
     }
     None
@@ -1098,16 +1082,6 @@ fn build_all_scope_graphs(
         .collect()
 }
 
-pub fn build_hierarchy(
-    root: &Path,
-    files: &[(String, u32)],
-    contents: &HashMap<String, String>,
-) -> HierarchyIndex {
-    let cancel = AtomicBool::new(false);
-    build_hierarchy_with_progress(root, files, contents, None, &cancel, |_, _| {})
-        .expect("hierarchy build")
-}
-
 pub fn build_hierarchy_with_progress(
     root: &Path,
     files: &[(String, u32)],
@@ -1126,7 +1100,6 @@ pub fn build_hierarchy_with_progress(
     if package_roots.is_empty() {
         package_roots.push(PackageRoot {
             path: ".".into(),
-            name: "root".into(),
             crate_names: vec![],
         });
     }
@@ -1258,12 +1231,6 @@ pub fn root_package_graph(hierarchy: &HierarchyIndex) -> Graph {
     }
 
     Graph { nodes, edges }
-}
-
-pub fn read_file_contents(root: &Path, files: &[(String, u32)]) -> HashMap<String, String> {
-    let cancel = AtomicBool::new(false);
-    read_file_contents_with_progress(root, files, &cancel, |_, _| {})
-        .expect("read file contents")
 }
 
 pub fn read_file_contents_with_progress(
@@ -1401,88 +1368,6 @@ pub fn cyclic_components_sampled(
     }
 
     (total_cyclic, samples)
-}
-
-/// Tarjan's algorithm — returns strongly connected components (each sorted).
-pub fn strongly_connected_components(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
-    let mut index = 0usize;
-    let mut stack: Vec<String> = Vec::new();
-    let mut on_stack: HashSet<String> = HashSet::new();
-    let mut indices: HashMap<String, usize> = HashMap::new();
-    let mut lowlink: HashMap<String, usize> = HashMap::new();
-    let mut sccs: Vec<Vec<String>> = Vec::new();
-
-    fn strongconnect(
-        v: &str,
-        adj: &HashMap<String, Vec<String>>,
-        index: &mut usize,
-        stack: &mut Vec<String>,
-        on_stack: &mut HashSet<String>,
-        indices: &mut HashMap<String, usize>,
-        lowlink: &mut HashMap<String, usize>,
-        sccs: &mut Vec<Vec<String>>,
-    ) {
-        indices.insert(v.to_string(), *index);
-        lowlink.insert(v.to_string(), *index);
-        *index += 1;
-        stack.push(v.to_string());
-        on_stack.insert(v.to_string());
-
-        for w in adj.get(v).into_iter().flatten() {
-            if !indices.contains_key(w) {
-                strongconnect(w, adj, index, stack, on_stack, indices, lowlink, sccs);
-                let v_low = *lowlink.get(v).unwrap();
-                let w_low = *lowlink.get(w).unwrap();
-                lowlink.insert(v.to_string(), v_low.min(w_low));
-            } else if on_stack.contains(w) {
-                let v_low = *lowlink.get(v).unwrap();
-                let w_idx = *indices.get(w).unwrap();
-                lowlink.insert(v.to_string(), v_low.min(w_idx));
-            }
-        }
-
-        if lowlink.get(v) == indices.get(v) {
-            let mut component = Vec::new();
-            loop {
-                let w = stack.pop().expect("tarjan stack");
-                on_stack.remove(&w);
-                let done = w == v;
-                component.push(w);
-                if done {
-                    break;
-                }
-            }
-            component.sort();
-            sccs.push(component);
-        }
-    }
-
-    for node in adj.keys() {
-        if !indices.contains_key(node) {
-            strongconnect(node, adj, &mut index, &mut stack, &mut on_stack, &mut indices, &mut lowlink, &mut sccs);
-        }
-    }
-
-    sccs
-}
-
-/// SCCs that represent cycles (size > 1, or a single node with a self-edge).
-pub fn cyclic_components(adj: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
-    strongly_connected_components(adj)
-        .into_iter()
-        .filter(|component| {
-            if component.len() > 1 {
-                return true;
-            }
-            if let Some(node) = component.first() {
-                return adj
-                    .get(node)
-                    .map(|neighbors| neighbors.iter().any(|n| n == node))
-                    .unwrap_or(false);
-            }
-            false
-        })
-        .collect()
 }
 
 pub fn extract_cycle_path(component: &[String], adj: &HashMap<String, Vec<String>>) -> Vec<String> {
@@ -1673,7 +1558,6 @@ mod tests {
         .collect();
         let roots = vec![PackageRoot {
             path: ".".into(),
-            name: "devtree".into(),
             crate_names: vec![],
         }];
         assert_eq!(

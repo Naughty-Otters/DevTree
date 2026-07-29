@@ -1,4 +1,16 @@
 import type { AnalysisRule, RuleSettingDef, RuleSettingsMap } from "../analysis/types";
+import type { LlmConfiguration } from "../validation/aiValidation";
+import {
+  AI_LLM_SETTING_KEYS,
+  configuredLlmConfigurations,
+  getGlobalConfiguration,
+  isAiValidationRuleId,
+  isArchitectureAssessmentKey,
+  shouldShowAiRuleSetting,
+} from "../validation/aiValidation";
+import type { LlmProviderInfo } from "../agent/types";
+import { effectiveLlmModel } from "../validation/llmCatalog";
+import { createLlmConfigurationPicker } from "./llmConfigurationPicker";
 import { lucideIcon } from "./icons";
 import { ChevronDown } from "lucide";
 
@@ -13,10 +25,16 @@ export interface RulesPanelState {
   loadError?: string | null;
 }
 
+export interface RulesPanelContext {
+  llmProviders: LlmProviderInfo[];
+  llmConfigurations: LlmConfiguration[];
+}
+
 export function createRulesPanel(
   container: HTMLElement,
   state: RulesPanelState,
   onChange: (selected: Set<string>, settings: RuleSettingsMap) => void,
+  context?: RulesPanelContext,
 ): void {
   if (state.expandedRuleId === undefined) {
     state.expandedRuleId = null;
@@ -57,7 +75,7 @@ export function createRulesPanel(
   selectAll.addEventListener("click", () => {
     state.rules.forEach((r) => state.selected.add(r.id));
     onChange(new Set(state.selected), { ...state.settings });
-    renderRules(container, state, onChange);
+    renderRules(container, state, onChange, context);
   });
 
   const clearAll = document.createElement("button");
@@ -66,19 +84,20 @@ export function createRulesPanel(
   clearAll.addEventListener("click", () => {
     state.selected.clear();
     onChange(new Set(state.selected), { ...state.settings });
-    renderRules(container, state, onChange);
+    renderRules(container, state, onChange, context);
   });
 
   header.append(selectAll, clearAll);
   container.appendChild(header);
 
-  renderRules(container, state, onChange);
+  renderRules(container, state, onChange, context);
 }
 
 function renderRules(
   container: HTMLElement,
   state: RulesPanelState,
   onChange: (selected: Set<string>, settings: RuleSettingsMap) => void,
+  context?: RulesPanelContext,
 ): void {
   const existing = container.querySelector(".rules-list");
   if (existing) existing.remove();
@@ -90,11 +109,11 @@ function renderRules(
   for (const [category, rules] of Object.entries(byCategory)) {
     const catHeader = document.createElement("div");
     catHeader.className = "rules-category";
-    catHeader.textContent = category;
+    catHeader.textContent = category === "ai" ? "AI Validation" : category;
     list.appendChild(catHeader);
 
     for (const rule of rules) {
-      list.appendChild(ruleItem(rule, state, onChange, container));
+      list.appendChild(ruleItem(rule, state, onChange, container, context));
     }
   }
 
@@ -106,14 +125,28 @@ function renderRules(
   }
 }
 
+function ruleSettingsFor(
+  rule: AnalysisRule,
+  context?: RulesPanelContext,
+): RuleSettingDef[] {
+  if ((rule.settings?.length ?? 0) > 0) {
+    return rule.settings ?? [];
+  }
+  if (isAiValidationRuleId(rule.id) && context?.llmProviders.length) {
+    return [];
+  }
+  return rule.settings ?? [];
+}
+
 function ruleItem(
   rule: AnalysisRule,
   state: RulesPanelState,
   onChange: (selected: Set<string>, settings: RuleSettingsMap) => void,
   container: HTMLElement,
+  context?: RulesPanelContext,
 ): HTMLElement {
   const enabled = state.selected.has(rule.id);
-  const settings = rule.settings ?? [];
+  const settings = ruleSettingsFor(rule, context);
   const expanded = state.expandedRuleId === rule.id;
   const wrap = document.createElement("div");
   wrap.className = `rule-item${enabled ? "" : " rule-item-disabled"}${
@@ -135,7 +168,7 @@ function ruleItem(
       state.selected.delete(rule.id);
     }
     onChange(new Set(state.selected), { ...state.settings });
-    renderRules(container, state, onChange);
+    renderRules(container, state, onChange, context);
   });
 
   const toggle = document.createElement("button");
@@ -175,7 +208,7 @@ function ruleItem(
     if (settings.length === 0) return;
     state.expandedRuleId =
       state.expandedRuleId === rule.id ? null : rule.id;
-    renderRules(container, state, onChange);
+    renderRules(container, state, onChange, context);
   });
 
   row.append(checkbox, toggle);
@@ -184,10 +217,97 @@ function ruleItem(
   if (settings.length > 0 && expanded) {
     const settingsEl = document.createElement("div");
     settingsEl.className = "rule-settings";
+
+    if (isAiValidationRuleId(rule.id) && context) {
+      const hint = document.createElement("p");
+      hint.className = "rule-settings-hint";
+      const global = getGlobalConfiguration(context.llmConfigurations);
+      if (global) {
+        const providerLabel =
+          context.llmProviders.find((p) => p.id === global.provider)?.label ??
+          global.provider;
+        const modelLabel = effectiveLlmModel(global.model) || "No model selected";
+        const name = global.name.trim();
+        hint.textContent = name
+          ? `Global LLM: ${name} (${providerLabel} / ${modelLabel})`
+          : `Global LLM: ${providerLabel} / ${modelLabel}`;
+      } else {
+        hint.className = "rule-settings-hint settings-hint-warn";
+        hint.textContent =
+          "No global LLM configured. Add one in Settings → LLM Configurations.";
+      }
+      settingsEl.appendChild(hint);
+    }
+
+    const overrideEnabled = Boolean(
+      state.settings[rule.id]?.[AI_LLM_SETTING_KEYS.override],
+    );
+
+    let archAssessmentHeaderAdded = false;
+
     for (const def of settings) {
+      if (isAiValidationRuleId(rule.id) && !shouldShowAiRuleSetting(rule.id, def.key)) {
+        continue;
+      }
+
+      if (
+        rule.id === "ai_architecture" &&
+        isArchitectureAssessmentKey(def.key) &&
+        !archAssessmentHeaderAdded
+      ) {
+        archAssessmentHeaderAdded = true;
+        const archHeader = document.createElement("p");
+        archHeader.className = "rule-settings-hint";
+        archHeader.textContent =
+          "Architecture assessments to run (after discovering and mapping the project):";
+        settingsEl.appendChild(archHeader);
+      }
+
       settingsEl.appendChild(
-        settingControl(rule.id, def, state, onChange, !enabled),
+        settingControl(
+          rule.id,
+          def,
+          state,
+          onChange,
+          !enabled,
+          () => renderRules(container, state, onChange, context),
+        ),
       );
+    }
+
+    if (isAiValidationRuleId(rule.id) && context && overrideEnabled) {
+      const available = configuredLlmConfigurations(context.llmConfigurations);
+      if (available.length === 0) {
+        const noProviders = document.createElement("p");
+        noProviders.className = "rule-settings-hint settings-hint-warn";
+        noProviders.textContent =
+          "No configured LLM entries. Add API keys in Settings → LLM Configurations.";
+        settingsEl.appendChild(noProviders);
+      } else {
+        const llmHost = document.createElement("div");
+        llmHost.className = "rule-llm-config";
+        settingsEl.appendChild(llmHost);
+
+        const configId = String(
+          state.settings[rule.id]?.[AI_LLM_SETTING_KEYS.configId] ?? "",
+        );
+
+        createLlmConfigurationPicker(llmHost, {
+          configurations: available,
+          providers: context.llmProviders,
+          value: configId,
+          allowGlobal: true,
+          disabled: !enabled,
+          classPrefix: "rule-setting",
+          onChange: (nextConfigId) => {
+            if (!state.settings[rule.id]) state.settings[rule.id] = {};
+            state.settings[rule.id][AI_LLM_SETTING_KEYS.configId] = nextConfigId;
+            delete state.settings[rule.id][AI_LLM_SETTING_KEYS.provider];
+            delete state.settings[rule.id][AI_LLM_SETTING_KEYS.model];
+            onChange(new Set(state.selected), { ...state.settings });
+          },
+        });
+      }
     }
     wrap.appendChild(settingsEl);
   }
@@ -201,6 +321,7 @@ function settingControl(
   state: RulesPanelState,
   onChange: (selected: Set<string>, settings: RuleSettingsMap) => void,
   disabled: boolean,
+  onUpdated?: () => void,
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = "rule-setting";
@@ -212,6 +333,13 @@ function settingControl(
   const current =
     state.settings[ruleId]?.[def.key] ?? def.default;
 
+  const setValue = (value: string | number | boolean) => {
+    if (!state.settings[ruleId]) state.settings[ruleId] = {};
+    state.settings[ruleId][def.key] = value;
+    onChange(new Set(state.selected), { ...state.settings });
+    onUpdated?.();
+  };
+
   if (def.kind === "boolean") {
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -219,9 +347,40 @@ function settingControl(
     input.checked = Boolean(current);
     input.disabled = disabled;
     input.addEventListener("change", () => {
-      if (!state.settings[ruleId]) state.settings[ruleId] = {};
-      state.settings[ruleId][def.key] = input.checked;
-      onChange(new Set(state.selected), { ...state.settings });
+      setValue(input.checked);
+    });
+    row.append(label, input);
+  } else if (def.kind === "select") {
+    const select = document.createElement("select");
+    select.className = "rule-setting-input rule-setting-select";
+    select.disabled = disabled;
+
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "Use global";
+    select.appendChild(empty);
+
+    for (const option of def.options ?? []) {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = option.label;
+      select.appendChild(opt);
+    }
+
+    select.value = String(current ?? "");
+    select.addEventListener("change", () => {
+      setValue(select.value);
+    });
+    row.append(label, select);
+  } else if (def.kind === "string" || def.kind === "password") {
+    const input = document.createElement("input");
+    input.type = def.kind === "password" ? "password" : "text";
+    input.className = "rule-setting-input rule-setting-text";
+    input.value = String(current ?? "");
+    input.disabled = disabled;
+    input.autocomplete = def.kind === "password" ? "off" : "on";
+    input.addEventListener("input", () => {
+      setValue(input.value);
     });
     row.append(label, input);
   } else {
@@ -238,9 +397,7 @@ function settingControl(
       if (def.min != null) n = Math.max(def.min, n);
       if (def.max != null) n = Math.min(def.max, n);
       input.value = String(n);
-      if (!state.settings[ruleId]) state.settings[ruleId] = {};
-      state.settings[ruleId][def.key] = n;
-      onChange(new Set(state.selected), { ...state.settings });
+      setValue(n);
     });
     row.append(label, input);
   }

@@ -1,6 +1,11 @@
 import type { AnalysisResult, RuleSettingsMap } from "../analysis/types";
 import type { LspSettingsMap } from "../lsp/types";
 import type { LinterSettingsMap } from "../linter/types";
+import type { LlmConfiguration, AiValidationRuntimeSettings } from "../validation/aiValidation";
+import {
+  defaultAiValidationRuntimeSettings,
+  defaultLlmConfigurations,
+} from "../validation/aiValidation";
 import type { GraphNavigation } from "../graph/navigation";
 
 export interface PanelSizes {
@@ -24,6 +29,8 @@ export interface PersistedUiState {
   ruleSettings: RuleSettingsMap;
   lspSettings: LspSettingsMap;
   linterSettings: LinterSettingsMap;
+  llmConfigurations: LlmConfiguration[];
+  aiValidationRuntime: AiValidationRuntimeSettings;
   visibleModuleIds: string[];
   selectedNodeId: string | null;
   camera: CameraState | null;
@@ -50,6 +57,8 @@ export function defaultPersistedState(): PersistedAppState {
     ruleSettings: {},
     lspSettings: {},
     linterSettings: {},
+    llmConfigurations: defaultLlmConfigurations(),
+    aiValidationRuntime: defaultAiValidationRuntimeSettings(),
     visibleModuleIds: [],
     selectedNodeId: null,
     camera: null,

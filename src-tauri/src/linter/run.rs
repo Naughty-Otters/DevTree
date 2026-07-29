@@ -1,16 +1,14 @@
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::analysis::ValidationItem;
-use crate::analysis_session::check_cancelled;
 
 use super::discover::{
-    default_linter_id, file_language, languages_in_files, probe_linter, LanguageKind,
+    default_linter_id, file_language, probe_linter, LanguageKind,
 };
 use super::status::{cfg_bool, cfg_str, cfg_u32, linter_cfg, LinterSettingsMap};
 
@@ -122,22 +120,6 @@ pub fn run_language_linter_for_lang(
         sample_limit,
         &findings,
     ))
-}
-
-pub fn run_language_linter_checks(
-    root: &Path,
-    files: &[(String, u32)],
-    settings: &LinterSettingsMap,
-    cancel: &AtomicBool,
-    mut on_progress: impl FnMut(&str),
-) -> Result<Vec<ValidationItem>, String> {
-    let mut items = Vec::new();
-    for lang in languages_in_files(files) {
-        check_cancelled(cancel)?;
-        on_progress(&format!("Running {} linters…", lang.label()));
-        items.push(run_language_linter_for_lang(root, files, settings, lang)?);
-    }
-    Ok(items)
 }
 
 fn build_validation_item(

@@ -65,6 +65,15 @@ pub struct RuleSettingDef {
     pub min: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<RuleSettingOption>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleSettingOption {
+    pub value: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +95,7 @@ fn num_setting(key: &str, label: &str, default: u32, min: u32, max: u32) -> Rule
         default: serde_json::json!(default),
         min: Some(min as f64),
         max: Some(max as f64),
+        options: None,
     }
 }
 
@@ -97,11 +107,12 @@ fn bool_setting(key: &str, label: &str, default: bool) -> RuleSettingDef {
         default: serde_json::json!(default),
         min: None,
         max: None,
+        options: None,
     }
 }
 
 pub fn default_rules() -> Vec<AnalysisRule> {
-    vec![
+    let mut rules = vec![
         AnalysisRule {
             id: "modularity".into(),
             name: "Modularity".into(),
@@ -242,7 +253,9 @@ pub fn default_rules() -> Vec<AnalysisRule> {
                 ),
             ],
         },
-    ]
+    ];
+    rules.extend(crate::agent::ai_validation::rule_definitions());
+    rules
 }
 
 pub type RuleSettingsMap = std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>>;
@@ -279,6 +292,17 @@ pub struct RuleTaskProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AiValidationStream {
+    pub rule_id: String,
+    pub rule_name: String,
+    pub thinking: String,
+    pub text: String,
+    pub activity: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AnalysisProgress {
     pub analysis_id: String,
     pub stage: String,
@@ -288,6 +312,8 @@ pub struct AnalysisProgress {
     pub percent: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_tasks: Option<Vec<RuleTaskProgress>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_stream: Option<AiValidationStream>,
 }
 
 const SKIP_DIRS: &[&str] = &[
@@ -324,6 +350,30 @@ fn emit_progress(
     percent: u8,
     rule_tasks: Option<Vec<RuleTaskProgress>>,
 ) {
+    emit_progress_with_ai(
+        emit,
+        analysis_id,
+        stage,
+        message,
+        current,
+        total,
+        percent,
+        rule_tasks,
+        None,
+    );
+}
+
+fn emit_progress_with_ai(
+    emit: &Arc<dyn Fn(AnalysisProgress) + Send + Sync>,
+    analysis_id: &str,
+    stage: &str,
+    message: &str,
+    current: u32,
+    total: u32,
+    percent: u8,
+    rule_tasks: Option<Vec<RuleTaskProgress>>,
+    ai_stream: Option<AiValidationStream>,
+) {
     emit(AnalysisProgress {
         analysis_id: analysis_id.into(),
         stage: stage.into(),
@@ -332,6 +382,7 @@ fn emit_progress(
         total,
         percent,
         rule_tasks,
+        ai_stream,
     });
 }
 
@@ -383,6 +434,7 @@ fn emit_rule_tasks_progress(
         total: total as u32,
         percent: (85 + ((done as f32 / total as f32) * 10.0) as u8).min(95),
         rule_tasks: Some(tasks),
+        ai_stream: None,
     });
 }
 
@@ -430,7 +482,7 @@ fn run_validation_rules_parallel(
 ) -> Result<Vec<ValidationItem>, String> {
     let mut initial_tasks = Vec::new();
     for rule_id in rule_ids {
-        if rule_id == "language_linters" {
+        if rule_id == "language_linters" || crate::agent::ai_validation::is_ai_validation_rule(rule_id) {
             continue;
         }
         initial_tasks.push(RuleTaskProgress {
@@ -478,7 +530,7 @@ fn run_validation_rules_parallel(
     let linter_settings = linter_settings.clone();
     let rule_ids_vec: Vec<String> = rule_ids
         .iter()
-        .filter(|id| *id != "language_linters")
+        .filter(|id| *id != "language_linters" && !crate::agent::ai_validation::is_ai_validation_rule(id))
         .cloned()
         .collect();
 
@@ -1158,6 +1210,7 @@ fn trim_analysis_result_for_transport(
     }
 }
 
+#[cfg(test)]
 pub fn run_analysis(
     project_root: &str,
     rule_ids: &[String],
@@ -1169,6 +1222,8 @@ pub fn run_analysis(
         &RuleSettingsMap::new(),
         &crate::lsp::LspSettingsMap::new(),
         &crate::linter::LinterSettingsMap::new(),
+        &crate::agent::ai_validation::LlmConfigurations::new(),
+        &crate::agent::ai_validation::AiValidationRuntimeSettings::default(),
         &cancel,
         "test",
         |_| {},
@@ -1181,6 +1236,8 @@ pub fn run_analysis_with_progress(
     rule_settings: &RuleSettingsMap,
     lsp_settings: &crate::lsp::LspSettingsMap,
     linter_settings: &crate::linter::LinterSettingsMap,
+    llm_configurations: &crate::agent::ai_validation::LlmConfigurations,
+    ai_validation_runtime: &crate::agent::ai_validation::AiValidationRuntimeSettings,
     cancel: &AtomicBool,
     analysis_id: &str,
     on_progress: impl FnMut(AnalysisProgress) + Send + 'static,
@@ -1317,7 +1374,7 @@ pub fn run_analysis_with_progress(
         Vec::new()
     };
 
-    let validation = run_validation_rules_parallel(
+    let mut validation = run_validation_rules_parallel(
         rule_ids,
         run_language_linters,
         linter_languages,
@@ -1334,7 +1391,38 @@ pub fn run_analysis_with_progress(
 
     check_cancelled(cancel)?;
 
-    let mut validation = validation;
+    let ai_rule_ids: Vec<String> = rule_ids
+        .iter()
+        .filter(|id| crate::agent::ai_validation::is_ai_validation_rule(id))
+        .cloned()
+        .collect();
+    if !ai_rule_ids.is_empty() {
+        emit_progress(
+            &emit,
+            analysis_id,
+            "validating",
+            "Running AI validation rules…",
+            0,
+            ai_rule_ids.len() as u32,
+            92,
+            None,
+        );
+        let ai_items = crate::agent::ai_validation::run_ai_validation_rules(
+            &ai_rule_ids,
+            root,
+            &hierarchy,
+            &validation,
+            llm_configurations,
+            ai_validation_runtime,
+            rule_settings,
+            cancel,
+            analysis_id,
+            emit.clone(),
+        );
+        validation.extend(ai_items);
+    }
+
+    check_cancelled(cancel)?;
 
     let pass_count = validation.iter().filter(|v| v.status == "pass").count();
     let warn_count = validation.iter().filter(|v| v.status == "warn").count();

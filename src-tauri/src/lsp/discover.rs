@@ -33,15 +33,6 @@ impl LanguageKind {
         }
     }
 
-    pub fn init_options(self) -> Value {
-        match self {
-            Self::TypeScript => json!({}),
-            Self::Rust => json!({}),
-            Self::Python => json!({}),
-            Self::Go => json!({}),
-        }
-    }
-
     pub fn init_options_with_settings(
         self,
         cfg: Option<&serde_json::Map<String, serde_json::Value>>,
@@ -149,11 +140,6 @@ fn resolve_server(
         args,
         root,
     })
-}
-
-/// Fast install check for settings UI — delegates to the same resolver used at analysis time.
-pub fn probe_language_server_installed(lang: LanguageKind) -> Option<(String, Vec<String>)> {
-    probe_language_server(lang)
 }
 
 /// Resolve the preferred language-server binary for a language (no project root).

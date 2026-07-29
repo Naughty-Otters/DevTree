@@ -5,14 +5,31 @@ import type {
   RuleSettingsMap,
   RuleTaskProgress,
 } from "../analysis/types";
+import type {
+  LlmProviderId,
+  LlmProviderInfo,
+} from "../agent/types";
+import { mockLlmProviders } from "../validation/llmCatalog";
 import type { LspInstallResult, LspServerStatus, LspSettingsMap } from "../lsp/types";
 import type {
   LanguageLinterGroup,
   LinterInstallResult,
   LinterSettingsMap,
 } from "../linter/types";
+import type {
+  LlmConfiguration,
+  AiValidationRuntimeSettings,
+} from "../validation/aiValidation";
+import {
+  defaultAiValidationRuntimeSettings,
+} from "../validation/aiValidation";
+import {
+  aiRuleLlmSettingDefs,
+  architectureAssessmentSettingDefs,
+} from "../validation/aiValidation";
 import type { ProjectScan } from "./types";
 import { mockHierarchyForFixture } from "../graph/hierarchy";
+import { graphForNavigation, rootNavigation } from "../graph/navigation";
 
 function isTauri(): boolean {
   return "__TAURI_INTERNALS__" in window;
@@ -114,6 +131,8 @@ export async function runAnalysis(
   ruleSettings?: RuleSettingsMap,
   lspSettings?: LspSettingsMap,
   linterSettings?: LinterSettingsMap,
+  llmConfigurations?: LlmConfiguration[],
+  aiValidationRuntime?: AiValidationRuntimeSettings,
 ): Promise<AnalysisResult> {
   if (isTauri()) {
     const { invoke, Channel } = await import("@tauri-apps/api/core");
@@ -128,6 +147,8 @@ export async function runAnalysis(
       ruleSettings: ruleSettings ?? {},
       lspSettings: lspSettings ?? {},
       linterSettings: linterSettings ?? {},
+      llmConfigurations: llmConfigurations ?? [],
+      aiValidationRuntime: aiValidationRuntime ?? defaultAiValidationRuntimeSettings(),
       onProgress: channel,
     });
   }
@@ -140,6 +161,28 @@ export async function cancelAnalysis(analysisId: string): Promise<boolean> {
     return invoke<boolean>("cancel_project_analysis", { analysisId });
   }
   return mockCancelAnalysis(analysisId);
+}
+
+export async function getLlmProviders(): Promise<LlmProviderInfo[]> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LlmProviderInfo[]>("get_llm_providers");
+  }
+  return mockLlmProviders();
+}
+
+export async function listLlmModels(
+  provider: LlmProviderId,
+  apiKey: string,
+): Promise<string[]> {
+  if (!apiKey.trim()) {
+    return [];
+  }
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string[]>("list_llm_models", { provider, apiKey });
+  }
+  return [];
 }
 
 export async function readProjectFile(
@@ -381,6 +424,11 @@ function mockFileContent(path: string): string {
 }
 
 function mockRules(): AnalysisRule[] {
+  const aiLlmSettings = aiRuleLlmSettingDefs();
+  const aiArchitectureSettings = [
+    ...aiLlmSettings,
+    ...architectureAssessmentSettingDefs(),
+  ];
   return [
     {
       id: "modularity",
@@ -567,6 +615,28 @@ function mockRules(): AnalysisRule[] {
         },
       ],
     },
+    {
+      id: "ai_architecture",
+      name: "AI Architecture Review",
+      description:
+        "Map project architecture from source, then evaluate selected assessment areas (patterns, design, security, debt, etc.).",
+      category: "ai",
+      settings: aiArchitectureSettings,
+    },
+    {
+      id: "ai_maintainability",
+      name: "AI Maintainability Review",
+      description: "LLM review of naming, duplication, and navigability issues.",
+      category: "ai",
+      settings: aiLlmSettings,
+    },
+    {
+      id: "ai_test_gaps",
+      name: "AI Test Gap Review",
+      description: "LLM review of missing or weak test coverage in critical modules.",
+      category: "ai",
+      settings: aiLlmSettings,
+    },
   ];
 }
 
@@ -685,7 +755,6 @@ async function mockAnalysis(
   mockCancelledAnalyses.delete(analysisId);
 
   const { loadFixtureGraph } = await import("../graph/loadFixture");
-  const { graphForNavigation, rootNavigation } = await import("../graph/navigation");
   const fixtureGraph = loadFixtureGraph();
   const hierarchy = mockHierarchyForFixture(fixtureGraph);
   const graph = graphForNavigation(hierarchy, rootNavigation());

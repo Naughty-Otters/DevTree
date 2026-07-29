@@ -1,6 +1,7 @@
 import type { AnalysisProgress, AnalysisResult, RuleSettingsMap, RuleTaskProgress } from "./types";
 import type { LspSettingsMap } from "../lsp/types";
 import type { LinterSettingsMap } from "../linter/types";
+import type { LlmConfiguration, AiValidationRuntimeSettings } from "../validation/aiValidation";
 import { cancelAnalysis, runAnalysis } from "../project/api";
 
 export type AnalysisRunStatus =
@@ -26,6 +27,8 @@ export interface StartAnalysisParams {
   ruleSettings: RuleSettingsMap;
   lspSettings: LspSettingsMap;
   linterSettings: LinterSettingsMap;
+  llmConfigurations: LlmConfiguration[];
+  aiValidationRuntime: AiValidationRuntimeSettings;
 }
 
 export interface AnalysisManagerHandlers {
@@ -167,43 +170,78 @@ export function createAnalysisManager(
       params.ruleSettings,
       params.lspSettings,
       params.linterSettings,
+      params.llmConfigurations,
+      params.aiValidationRuntime,
     )
       .then((result) => {
         const current = getRun(id);
         if (!current || current.status !== "running") return;
+        const prevProgress = current.progress;
         current.status = "completed";
         current.progress = {
           analysisId: id,
           stage: "done",
           message: "Analysis complete",
-          current: 0,
-          total: 0,
+          current: prevProgress?.current ?? current.ruleTasks.length,
+          total: prevProgress?.total ?? current.ruleTasks.length,
           percent: 100,
+          ruleTasks: current.ruleTasks,
+          aiStream: prevProgress?.aiStream
+            ? { ...prevProgress.aiStream, status: "done" }
+            : undefined,
         };
         current.result = result;
         notify(true);
         handlers.onRunCompleted(current);
-        runs.delete(id);
-        notify(true);
       })
       .catch((err) => {
         const current = getRun(id);
         if (!current) return;
+        const prevProgress = current.progress;
         if (current.status === "cancelled") {
-          runs.delete(id);
           notify(true);
           return;
         }
         if (isCancelledError(err)) {
           current.status = "cancelled";
           current.error = null;
+          current.progress = {
+            ...(prevProgress ?? {
+              analysisId: id,
+              stage: "cancelled",
+              message: "Cancelled",
+              current: 0,
+              total: 0,
+              percent: 0,
+            }),
+            stage: "cancelled",
+            message: "Cancelled",
+            ruleTasks: current.ruleTasks,
+            aiStream: prevProgress?.aiStream
+              ? { ...prevProgress.aiStream, status: "done" }
+              : undefined,
+          };
         } else {
           current.status = "failed";
           current.error = String(err);
+          current.progress = {
+            ...(prevProgress ?? {
+              analysisId: id,
+              stage: "failed",
+              message: String(err),
+              current: 0,
+              total: 0,
+              percent: 0,
+            }),
+            stage: "failed",
+            message: String(err),
+            ruleTasks: current.ruleTasks,
+            aiStream: prevProgress?.aiStream
+              ? { ...prevProgress.aiStream, status: "failed" }
+              : undefined,
+          };
           handlers.onRunFailed?.(current);
         }
-        notify(true);
-        runs.delete(id);
         notify(true);
       });
 
@@ -228,8 +266,6 @@ export function createAnalysisManager(
     };
     notify(true);
     void cancelAnalysis(id);
-    runs.delete(id);
-    notify(true);
   }
 
   function cancelAll(): void {

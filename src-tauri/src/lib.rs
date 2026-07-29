@@ -1,3 +1,4 @@
+mod agent;
 mod analysis;
 mod analysis_session;
 mod db;
@@ -6,9 +7,12 @@ mod linter;
 mod lsp;
 mod project;
 
+use agent::ai_validation::{AiValidationRuntimeSettings, LlmConfigurations};
 use analysis::{
     run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
 };
+use agent::{cancel_agent_run, list_agent_skills, list_llm_provider_models, list_llm_providers, run_agent_skill};
+use agent::types::{AgentEvent, AgentRunRequest, AgentRunResult, AgentSkillInfo, LlmProvider, LlmProviderInfo};
 use analysis_session::AnalysisSessionRegistry;
 use db::{init_db, DbState};
 use linter::{LinterInstallResult, LinterSettingsMap, LanguageLinterGroup};
@@ -34,6 +38,8 @@ async fn run_project_analysis(
     rule_settings: RuleSettingsMap,
     lsp_settings: LspSettingsMap,
     linter_settings: LinterSettingsMap,
+    llm_configurations: LlmConfigurations,
+    ai_validation_runtime: AiValidationRuntimeSettings,
     on_progress: Channel<AnalysisProgress>,
     registry: tauri::State<'_, AnalysisSessionRegistry>,
 ) -> Result<AnalysisResult, String> {
@@ -46,6 +52,8 @@ async fn run_project_analysis(
             &rule_settings,
             &lsp_settings,
             &linter_settings,
+            &llm_configurations,
+            &ai_validation_runtime.normalized(),
             &cancel,
             &progress_id,
             move |progress| {
@@ -57,6 +65,38 @@ async fn run_project_analysis(
     .map_err(|e| e.to_string())?;
     registry.unregister(&analysis_id);
     result
+}
+
+#[tauri::command]
+fn get_agent_skills() -> Vec<AgentSkillInfo> {
+    list_agent_skills()
+}
+
+#[tauri::command]
+fn get_llm_providers() -> Vec<LlmProviderInfo> {
+    list_llm_providers()
+}
+
+#[tauri::command]
+async fn list_llm_models(provider: LlmProvider, api_key: String) -> Result<Vec<String>, String> {
+    list_llm_provider_models(provider, api_key).await
+}
+
+#[tauri::command]
+async fn run_agent_skill_command(
+    request: AgentRunRequest,
+    on_event: Channel<AgentEvent>,
+    registry: tauri::State<'_, AnalysisSessionRegistry>,
+) -> Result<AgentRunResult, String> {
+    run_agent_skill(request, on_event, registry).await
+}
+
+#[tauri::command]
+fn cancel_agent_run_command(
+    run_id: String,
+    registry: tauri::State<'_, AnalysisSessionRegistry>,
+) -> bool {
+    cancel_agent_run(run_id, registry)
 }
 
 #[tauri::command]
@@ -136,6 +176,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            get_agent_skills,
+            get_llm_providers,
+            list_llm_models,
+            run_agent_skill_command,
+            cancel_agent_run_command,
             get_analysis_rules,
             scan_project_dir,
             run_project_analysis,

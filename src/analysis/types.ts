@@ -51,13 +51,19 @@ export interface HierarchyIndex {
   scope_graphs?: Record<string, ScopeGraph>;
 }
 
+export interface RuleSettingOption {
+  value: string;
+  label: string;
+}
+
 export interface RuleSettingDef {
   key: string;
   label: string;
-  kind: "number" | "boolean";
-  default: number | boolean;
+  kind: "number" | "boolean" | "string" | "password" | "select";
+  default: number | boolean | string;
   min?: number;
   max?: number;
+  options?: RuleSettingOption[];
 }
 
 export interface AnalysisRule {
@@ -68,13 +74,15 @@ export interface AnalysisRule {
   settings?: RuleSettingDef[];
 }
 
+export type RuleSettingValue = number | boolean | string;
+
 /** Per-rule setting values, keyed by rule id then setting key. */
-export type RuleSettingsMap = Record<string, Record<string, number | boolean>>;
+export type RuleSettingsMap = Record<string, Record<string, RuleSettingValue>>;
 
 export function defaultRuleSettings(rules: AnalysisRule[]): RuleSettingsMap {
   const out: RuleSettingsMap = {};
   for (const rule of rules) {
-    const vals: Record<string, number | boolean> = {};
+    const vals: Record<string, RuleSettingValue> = {};
     for (const s of rule.settings ?? []) {
       vals[s.key] = s.default;
     }
@@ -137,6 +145,15 @@ export interface RuleTaskProgress {
   message?: string;
 }
 
+export interface AiValidationStream {
+  ruleId: string;
+  ruleName: string;
+  thinking: string;
+  text: string;
+  activity?: string;
+  status: "running" | "done" | "failed";
+}
+
 export interface AnalysisProgress {
   analysisId: string;
   stage: string;
@@ -145,4 +162,5 @@ export interface AnalysisProgress {
   total: number;
   percent: number;
   ruleTasks?: RuleTaskProgress[];
+  aiStream?: AiValidationStream;
 }

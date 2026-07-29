@@ -3,13 +3,21 @@ import { render, createRenderState, type RenderState } from "./canvas/renderer";
 import { attachInteraction } from "./canvas/interaction";
 import { fitCameraToContent, focusCameraOnNodeAnimated, focusCameraOnNodesAnimated } from "./canvas/camera";
 import type { Graph } from "./graph/types";
+import { hierarchyFromGraph } from "./graph/hierarchy";
 import type { AnalysisResult, CycleGroup } from "./analysis/types";
 import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
 import { createAnalysisManager } from "./analysis/manager";
+import type { LlmProviderInfo } from "./agent/types";
+import type { LlmConfiguration, AiValidationRuntimeSettings } from "./validation/aiValidation";
+import {
+  migratePersistedAiSettings,
+  migrateRuntimeSettings,
+} from "./validation/aiValidation";
 import { mergeLspSettings, type LspSettingsMap } from "./lsp/types";
 import { ensureLinterSettings, type LinterSettingsMap } from "./linter/types";
 import type { ProjectScan } from "./project/types";
 import {
+  getLlmProviders,
   openProjectDialog,
   scanProject,
   readProjectFile,
@@ -21,7 +29,7 @@ import {
 } from "./project/api";
 import { renderProjectTree } from "./ui/projectTree";
 import { renderModulesList, type ModulesListState } from "./ui/modulesList";
-import { createRulesPanel, type RulesPanelState } from "./ui/rulesPanel";
+import { createRulesPanel, type RulesPanelState, type RulesPanelContext } from "./ui/rulesPanel";
 import {
   createLspServersPanel,
   type LspServersPanelState,
@@ -31,6 +39,8 @@ import {
   type LintersPanelState,
 } from "./ui/lintersPanel";
 import { createResultsPanel } from "./ui/resultsPanel";
+import { createLlmProviderConfigsPanel } from "./ui/llmProviderConfigsPanel";
+import { createLlmRuntimeSettingsPanel } from "./ui/llmRuntimeSettingsPanel";
 import { createLazyFileViewer } from "./lazy/fileViewer";
 import { mountToolbarIcons } from "./ui/toolbar";
 import { createSettingsPanel } from "./ui/settingsPanel";
@@ -60,6 +70,7 @@ import {
   navigationToPackageFile,
   type ValidationNavTarget,
 } from "./validation/navigation";
+import { isOpenableValidationPath } from "./validation/parseAffected";
 import { renderFileNav } from "./ui/fileNav";
 import { collectFileIssues } from "./validation/fileIssues";
 import { hideValidationDetail } from "./ui/validationDetailPopup";
@@ -83,6 +94,9 @@ interface AppState {
   ruleSettings: RuleSettingsMap;
   lspSettings: LspSettingsMap;
   linterSettings: LinterSettingsMap;
+  llmConfigurations: LlmConfiguration[];
+  aiValidationRuntime: AiValidationRuntimeSettings;
+  llmProviders: LlmProviderInfo[];
   analysisResult: AnalysisResult | null;
   hierarchy: HierarchyIndex | null;
   graphNavigation: GraphNavigation;
@@ -114,6 +128,12 @@ export async function startApp(): Promise<void> {
   const lintersContainer = document.querySelector<HTMLElement>("#linters-panel")!;
   const settingsOverlay = document.querySelector<HTMLElement>("#settings-overlay")!;
   const resultsContainer = document.querySelector<HTMLElement>("#results-panel")!;
+  const llmProviderConfigsContainer = document.querySelector<HTMLElement>(
+    "#llm-provider-configs-panel",
+  )!;
+  const llmRuntimeSettingsContainer = document.querySelector<HTMLElement>(
+    "#llm-runtime-settings-panel",
+  )!;
   const graphOverlay = document.querySelector<HTMLElement>("#graph-overlay")!;
   const graphOverlayText = document.querySelector<HTMLElement>("#graph-overlay-text")!;
   const fileViewerEl = document.querySelector<HTMLElement>("#file-viewer")!;
@@ -134,6 +154,24 @@ export async function startApp(): Promise<void> {
     loadError: null,
   };
 
+  const migratedAi = migratePersistedAiSettings(persisted);
+
+  function rulesPanelContext(): RulesPanelContext {
+    return {
+      llmProviders: app.llmProviders,
+      llmConfigurations: app.llmConfigurations,
+    };
+  }
+
+  function renderRulesPanel(): void {
+    createRulesPanel(
+      rulesContainer,
+      rulesState,
+      onRulesPanelChange,
+      rulesPanelContext(),
+    );
+  }
+
   const app: AppState = {
     projectPath: null,
     projectScan: null,
@@ -141,6 +179,9 @@ export async function startApp(): Promise<void> {
     ruleSettings: rulesState.settings,
     lspSettings: {},
     linterSettings: initialLinterSettings,
+    llmConfigurations: migratedAi.llmConfigurations,
+    aiValidationRuntime: migrateRuntimeSettings(persisted.aiValidationRuntime),
+    llmProviders: [],
     analysisResult: null,
     hierarchy: null,
     graphNavigation: persisted.graphNavigation ?? rootNavigation(),
@@ -157,7 +198,7 @@ export async function startApp(): Promise<void> {
     if (!rulesState.loading && rulesState.rules.length > 0) return;
     rulesState.loading = true;
     rulesState.loadError = null;
-    createRulesPanel(rulesContainer, rulesState, onRulesPanelChange);
+    renderRulesPanel();
 
     try {
       const rules = await loadAnalysisRules();
@@ -187,12 +228,12 @@ export async function startApp(): Promise<void> {
       rulesState.loading = false;
       app.selectedRules = rulesState.selected;
       app.ruleSettings = rulesState.settings;
-      createRulesPanel(rulesContainer, rulesState, onRulesPanelChange);
+      renderRulesPanel();
     } catch (err) {
       rulesState.loading = false;
       rulesState.loadError =
         err instanceof Error ? err.message : String(err);
-      createRulesPanel(rulesContainer, rulesState, onRulesPanelChange);
+      renderRulesPanel();
     }
   }
 
@@ -207,6 +248,36 @@ export async function startApp(): Promise<void> {
   }
 
   let resultsPanel!: ReturnType<typeof createResultsPanel>;
+  let settingsApi!: ReturnType<typeof createSettingsPanel>;
+
+  const llmProviderConfigsPanel = createLlmProviderConfigsPanel(
+    llmProviderConfigsContainer,
+    {
+      onChange: (configs) => {
+        app.llmConfigurations = configs;
+        renderRulesPanel();
+        persist();
+      },
+    },
+  );
+  llmProviderConfigsPanel.setConfigs(app.llmConfigurations);
+
+  const llmRuntimeSettingsPanel = createLlmRuntimeSettingsPanel(
+    llmRuntimeSettingsContainer,
+    {
+      onChange: (settings) => {
+        app.aiValidationRuntime = settings;
+        persist();
+      },
+    },
+  );
+  llmRuntimeSettingsPanel.setSettings(app.aiValidationRuntime);
+
+  void getLlmProviders().then((providers) => {
+    app.llmProviders = providers;
+    llmProviderConfigsPanel.setProviders(providers);
+    renderRulesPanel();
+  });
 
   const analysisManager = createAnalysisManager({
     onRunsChanged: (runs) => {
@@ -301,7 +372,6 @@ export async function startApp(): Promise<void> {
       }
 
       if (app.analysisResult.graph?.nodes?.length) {
-        const { hierarchyFromGraph } = await import("./graph/hierarchy");
         const rebuilt = hierarchyFromGraph(app.analysisResult.graph);
         app.hierarchy = rebuilt;
         app.analysisResult = { ...app.analysisResult, hierarchy: rebuilt };
@@ -335,6 +405,8 @@ export async function startApp(): Promise<void> {
       ruleSettings: app.ruleSettings,
       lspSettings: app.lspSettings,
       linterSettings: app.linterSettings,
+      llmConfigurations: app.llmConfigurations,
+      aiValidationRuntime: app.aiValidationRuntime,
       visibleModuleIds: Array.from(app.modulesListState.visibleIds),
       selectedNodeId: app.renderState?.selectedId ?? null,
       camera: app.renderState
@@ -527,7 +599,7 @@ export async function startApp(): Promise<void> {
 
   createLintersPanel(lintersContainer, lintersState, lintersHandlers);
 
-  const settings = createSettingsPanel(settingsOverlay, () => {
+  settingsApi = createSettingsPanel(settingsOverlay, () => {
     requestAnimationFrame(() => {
       if (rulesState.loading || rulesState.rules.length === 0) {
         void initRulesPanel();
@@ -536,7 +608,7 @@ export async function startApp(): Promise<void> {
       if (!lintersLoaded) void lintersHandlers.onRefresh();
     });
   });
-  btnSettings.addEventListener("click", () => settings.toggle());
+  btnSettings.addEventListener("click", () => settingsApi.toggle());
 
   initResizers(
     () => resize(),
@@ -839,6 +911,9 @@ export async function startApp(): Promise<void> {
 
   async function openValidationTarget(target: ValidationNavTarget) {
     hideValidationDetail();
+    if (!isOpenableValidationPath(target.file)) {
+      return;
+    }
     await handleFileOpen(target.file, target.line);
   }
 
@@ -1114,6 +1189,8 @@ export async function startApp(): Promise<void> {
       ruleSettings: app.ruleSettings,
       lspSettings: app.lspSettings,
       linterSettings,
+      llmConfigurations: app.llmConfigurations,
+      aiValidationRuntime: app.aiValidationRuntime,
     });
   }
 

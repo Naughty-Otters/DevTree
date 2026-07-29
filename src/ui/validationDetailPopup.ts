@@ -2,6 +2,7 @@ import type { CycleGroup, ValidationItem } from "../analysis/types";
 import type { SymbolInfo } from "../analysis/types";
 import {
   groupAffectedByFile,
+  isOpenableValidationPath,
   type ValidationAffectedEntry,
 } from "../validation/parseAffected";
 import { cycleGroupsFromValidation, cycleKindLabel } from "../validation/cycles";
@@ -186,18 +187,27 @@ export function showValidationDetail(
       filePath.type = "button";
       filePath.className = "validation-detail-file-path";
       filePath.textContent = file;
-      filePath.title = "Open file";
-      filePath.addEventListener("click", () => {
-        handlers.onOpenFile({ file });
-      });
+      filePath.title = isOpenableValidationPath(file) ? "Open file" : file;
+      if (isOpenableValidationPath(file)) {
+        filePath.addEventListener("click", () => {
+          handlers.onOpenFile({ file });
+        });
+      } else {
+        filePath.disabled = true;
+        filePath.classList.add("validation-detail-file-path-static");
+      }
 
       const graphFileBtn = document.createElement("button");
       graphFileBtn.type = "button";
       graphFileBtn.className = "btn-text validation-detail-action";
       graphFileBtn.textContent = "Show file on graph";
-      graphFileBtn.addEventListener("click", () => {
-        handlers.onShowOnGraph({ file });
-      });
+      if (isOpenableValidationPath(file)) {
+        graphFileBtn.addEventListener("click", () => {
+          handlers.onShowOnGraph({ file });
+        });
+      } else {
+        graphFileBtn.disabled = true;
+      }
 
       fileHeader.append(filePath, graphFileBtn);
       section.appendChild(fileHeader);

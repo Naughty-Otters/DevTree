@@ -6,11 +6,45 @@ export interface ValidationAffectedEntry {
   message?: string;
 }
 
+/** Whether an affected entry looks like a project-relative file path. */
+export function isOpenableValidationPath(path: string): boolean {
+  const trimmed = path.trim();
+  if (!trimmed) return false;
+  if (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    trimmed.startsWith("```") ||
+    trimmed.includes("\n") ||
+    trimmed.includes("\"items\"")
+  ) {
+    return false;
+  }
+  return trimmed.includes("/") || trimmed.includes(".");
+}
+
+function looksLikeFilePath(path: string): boolean {
+  return isOpenableValidationPath(path);
+}
+
 /** Parse backend `affected` strings (paths, `path:line — msg`, linter/LSP formats). */
 export function parseAffectedEntry(raw: string): ValidationAffectedEntry {
   const trimmed = raw.trim();
   if (!trimmed) {
     return { raw, file: trimmed };
+  }
+
+  if (!looksLikeFilePath(trimmed) && (trimmed.startsWith("{") || trimmed.startsWith("["))) {
+    return { raw: trimmed, file: trimmed, message: trimmed };
+  }
+
+  // path — detail  (AI validation)
+  const pathDetailMatch = trimmed.match(/^(.+?)\s+[—–]\s+(.+)$/);
+  if (pathDetailMatch && looksLikeFilePath(pathDetailMatch[1])) {
+    return {
+      raw: trimmed,
+      file: pathDetailMatch[1].trim(),
+      message: pathDetailMatch[2].trim(),
+    };
   }
 
   // path:line — [severity] message  (linter)
@@ -52,6 +86,10 @@ export function parseAffectedEntry(raw: string): ValidationAffectedEntry {
         message: rest || undefined,
       };
     }
+  }
+
+  if (looksLikeFilePath(trimmed)) {
+    return { raw: trimmed, file: trimmed };
   }
 
   return { raw: trimmed, file: trimmed, message: trimmed };
