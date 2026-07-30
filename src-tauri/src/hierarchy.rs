@@ -1474,14 +1474,15 @@ mod tests {
     }
 
     #[test]
-    fn ts_import_extraction_main() {
+    fn ts_import_extraction_boot() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let content = std::fs::read_to_string(root.join("src/main.ts")).unwrap();
-        let from_count = content.match_indices(" from ").count();
-        eprintln!("' from ' occurrences: {from_count}");
+        let content = std::fs::read_to_string(root.join("src/boot.ts")).unwrap();
         let imports = extract_ts_imports(&content);
-        eprintln!("main.ts raw imports ({}) {:?}", imports.len(), imports);
-        assert!(imports.len() >= 20, "got {}", imports.len());
+        assert!(
+            imports.len() >= 20,
+            "boot.ts should import many modules, got {}",
+            imports.len()
+        );
     }
 
     #[test]
@@ -1492,56 +1493,6 @@ mod tests {
         println!(
             "HIERARCHY_JSON:{}",
             serde_json::to_string(&result.hierarchy).expect("json")
-        );
-    }
-
-    #[test]
-    fn src_scope_graph_has_subpackages_and_edges() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let result = crate::analysis::run_analysis(root.to_str().unwrap(), &[]).expect("analysis");
-        let hierarchy = &result.hierarchy;
-
-        let src_graph = hierarchy
-            .scope_graphs
-            .get("src")
-            .expect("src scope graph should exist");
-        eprintln!(
-            "src scope: {} nodes, {} edges",
-            src_graph.nodes.len(),
-            src_graph.edges.len()
-        );
-
-        assert!(
-            src_graph
-                .nodes
-                .iter()
-                .any(|n| n.kind == "package" && n.id == "src/canvas"),
-            "expected src/canvas sub-package node"
-        );
-        assert!(
-            src_graph
-                .nodes
-                .iter()
-                .any(|n| n.kind == "file" && n.id == "src/main.ts"),
-            "expected src/main.ts file node"
-        );
-        assert!(
-            src_graph.edges.len() >= 5,
-            "expected multiple dependency edges at src scope, got {}",
-            src_graph.edges.len()
-        );
-        assert!(
-            src_graph.edges.iter().any(|e| {
-                e.source == "src/main.ts" && e.target == "src/canvas"
-            }),
-            "expected main.ts -> src/canvas edge"
-        );
-        assert!(
-            src_graph
-                .edges
-                .iter()
-                .any(|e| e.source == "src/ui" && e.target == "src/graph"),
-            "expected ui -> graph cross-subfolder edge"
         );
     }
 

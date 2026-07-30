@@ -2,6 +2,9 @@
 name = "devtree-core"
 version = "0.1.0"
 edition = "2021"
+description = "Graph layout and metrics for DevTree"
+license = "MIT"
+repository = "https://github.com/devtree/devtree"
 
 [lib]
 name = "devtree_core"

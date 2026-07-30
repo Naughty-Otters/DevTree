@@ -1,6 +1,10 @@
 # DevTree
 
-DevTree is a desktop tool for visualizing a codebase's module/dependency graph and (eventually) scoring its architectural health — modularity, cleanliness, type coverage, and test coverage. The client is a [Tauri](https://tauri.app/) app; heavy computation (graph layout, metrics) is written in Rust and compiled to WebAssembly so it runs inside the webview, and the graph itself is rendered on an HTML5 Canvas.
+[![CI](https://github.com/devtree/devtree/actions/workflows/ci.yml/badge.svg)](https://github.com/devtree/devtree/actions/workflows/ci.yml)
+
+DevTree is a desktop tool for visualizing a codebase's module/dependency graph and scoring its architectural health — modularity, cleanliness, type coverage, and test coverage. The client is a [Tauri](https://tauri.app/) app; heavy computation (graph layout, metrics) is written in Rust and compiled to WebAssembly so it runs inside the webview, and the graph itself is rendered on an HTML5 Canvas.
+
+**License:** [MIT](LICENSE) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Open source checklist:** [OPEN_SOURCE.md](OPEN_SOURCE.md)
 
 **Current status**: desktop analysis builds a package → file → symbol dependency map. Symbol extraction and the **Language Diagnostics** rule use system language servers when available (`rust-analyzer`, `typescript-language-server` / `vtsls`, `gopls`, `basedpyright` / `pyright` / `pylsp`); otherwise heuristics are used.
 
@@ -48,6 +52,32 @@ npm run dev
 
 then open the printed `http://localhost:1420` URL.
 
+## Testing
+
+```bash
+# Rust unit tests (workspace)
+npm run test:rust
+
+# TypeScript unit tests (Vitest)
+npm test
+
+# Both
+npm run test:all
+```
+
+CI runs tests and builds macOS (Apple Silicon + Intel) and Windows artifacts on every push to `main`.
+
+## Releasing
+
+Push a version tag to create a draft GitHub Release with platform binaries:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+See [.github/workflows/release.yml](.github/workflows/release.yml).
+
 ## Building
 
 ```bash
@@ -76,6 +106,9 @@ DevTree/
 | `npm run dev` | Start the Vite dev server only (browser, no Tauri window) |
 | `npm run build:wasm` | Rebuild `devtree-core` to wasm and copy bindings into `src/wasm` |
 | `npm run build` | Type-check and build the frontend |
+| `npm run test` | Run TypeScript unit tests (Vitest) |
+| `npm run test:rust` | Run Rust unit tests |
+| `npm run test:all` | Run Rust + TypeScript tests |
 | `npm run tauri dev` | Run the full Tauri app (rebuilds wasm automatically via `predev`) |
 | `npm run tauri build` | Build a distributable native app |
 

@@ -37,16 +37,6 @@ export function parseAffectedEntry(raw: string): ValidationAffectedEntry {
     return { raw: trimmed, file: trimmed, message: trimmed };
   }
 
-  // path — detail  (AI validation)
-  const pathDetailMatch = trimmed.match(/^(.+?)\s+[—–]\s+(.+)$/);
-  if (pathDetailMatch && looksLikeFilePath(pathDetailMatch[1])) {
-    return {
-      raw: trimmed,
-      file: pathDetailMatch[1].trim(),
-      message: pathDetailMatch[2].trim(),
-    };
-  }
-
   // path:line — [severity] message  (linter)
   const linterMatch = trimmed.match(
     /^(.+?):(\d+)\s+—\s+(?:\[(\w+)\]\s+)?(.+)$/,
@@ -58,6 +48,16 @@ export function parseAffectedEntry(raw: string): ValidationAffectedEntry {
       line: Number.parseInt(linterMatch[2], 10),
       severity: linterMatch[3],
       message: linterMatch[4],
+    };
+  }
+
+  // path — detail  (AI validation)
+  const pathDetailMatch = trimmed.match(/^(.+?)\s+[—–]\s+(.+)$/);
+  if (pathDetailMatch && looksLikeFilePath(pathDetailMatch[1])) {
+    return {
+      raw: trimmed,
+      file: pathDetailMatch[1].trim(),
+      message: pathDetailMatch[2].trim(),
     };
   }
 
