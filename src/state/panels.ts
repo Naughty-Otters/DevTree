@@ -24,7 +24,7 @@ export function readPanelSizes(): PanelSizes {
 
   return {
     leftWidth: read("--left-width", 240),
-    rightWidth: read("--right-width", 260),
+    rightWidth: read("--right-width", 360),
     bottomHeight: read("--bottom-height", 200),
     leftTreeHeight: read("--left-tree-height", 50),
   };

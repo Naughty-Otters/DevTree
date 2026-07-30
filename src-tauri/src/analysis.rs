@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::analysis_session::check_cancelled;
+    use crate::analysis_session::check_cancelled;
+use crate::design_rules::{check_design_rules, DesignRule};
+use crate::dsm::{compute_dsm, DsmOptions, DsmResult};
 use crate::hierarchy::{
     adjacency_from_edges, build_hierarchy_with_progress, cyclic_components_sampled,
     extract_cycle_path, format_dependency_cycle, read_file_contents_with_progress,
@@ -51,6 +53,8 @@ pub struct AnalysisResult {
     pub validation: Vec<ValidationItem>,
     pub suggestions: Vec<SuggestionItem>,
     pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsm: Option<DsmResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1224,6 +1228,7 @@ pub fn run_analysis(
         &crate::linter::LinterSettingsMap::new(),
         &crate::agent::ai_validation::LlmConfigurations::new(),
         &crate::agent::ai_validation::AiValidationRuntimeSettings::default(),
+        &[],
         &cancel,
         "test",
         |_| {},
@@ -1238,6 +1243,7 @@ pub fn run_analysis_with_progress(
     linter_settings: &crate::linter::LinterSettingsMap,
     llm_configurations: &crate::agent::ai_validation::LlmConfigurations,
     ai_validation_runtime: &crate::agent::ai_validation::AiValidationRuntimeSettings,
+    design_rules: &[DesignRule],
     cancel: &AtomicBool,
     analysis_id: &str,
     on_progress: impl FnMut(AnalysisProgress) + Send + 'static,
@@ -1424,18 +1430,65 @@ pub fn run_analysis_with_progress(
 
     check_cancelled(cancel)?;
 
+    let mut dsm = Some(compute_dsm(
+        &hierarchy,
+        &DsmOptions {
+            level: "package".into(),
+            scope: None,
+            ordering: "partitioned".into(),
+        },
+    ));
+
+    let design_violations = check_design_rules(&hierarchy, design_rules);
+    if let Some(ref mut d) = dsm {
+        d.violations = design_violations.clone();
+    }
+    if !design_rules.is_empty() {
+        let status = if design_violations.is_empty() {
+            "pass"
+        } else if design_violations.len() > 5 {
+            "fail"
+        } else {
+            "warn"
+        };
+        let message = if design_violations.is_empty() {
+            "No design-rule violations".to_string()
+        } else {
+            format!("{} design-rule violation(s)", design_violations.len())
+        };
+        let affected: Vec<String> = design_violations
+            .iter()
+            .take(40)
+            .map(|v| format!("{} → {}", v.from, v.to))
+            .collect();
+        validation.push(ValidationItem {
+            rule_id: "architecture_conformance".into(),
+            rule_name: "Architecture Conformance (LDM)".into(),
+            status: status.into(),
+            message,
+            affected,
+            cycle_groups: None,
+        });
+    }
+
     let pass_count = validation.iter().filter(|v| v.status == "pass").count();
     let warn_count = validation.iter().filter(|v| v.status == "warn").count();
     let fail_count = validation.iter().filter(|v| v.status == "fail").count();
 
+    let health = dsm
+        .as_ref()
+        .map(|d| d.metrics.health_score.round() as i32)
+        .unwrap_or(100);
+
     let summary = format!(
-        "Analyzed {} packages ({} source files) with {} rule(s): {} passed, {} warnings, {} failures",
+        "Analyzed {} packages ({} source files) with {} rule(s): {} passed, {} warnings, {} failures · modularity health {}",
         hierarchy.packages.len(),
         files.len(),
         validation.len(),
         pass_count,
         warn_count,
-        fail_count
+        fail_count,
+        health
     );
 
     trim_analysis_result_for_transport(&mut hierarchy, &mut validation);
@@ -1457,6 +1510,7 @@ pub fn run_analysis_with_progress(
         validation,
         suggestions: vec![],
         summary,
+        dsm,
     })
 }
 

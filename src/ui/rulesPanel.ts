@@ -171,14 +171,10 @@ function ruleItem(
     renderRules(container, state, onChange, context);
   });
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "rule-item-toggle";
-  toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-  toggle.disabled = settings.length === 0;
-
-  const info = document.createElement("div");
+  const info = document.createElement("button");
+  info.type = "button";
   info.className = "rule-info";
+  info.title = enabled ? "Disable rule" : "Enable rule";
 
   const name = document.createElement("div");
   name.className = "rule-name";
@@ -189,11 +185,33 @@ function ruleItem(
   desc.textContent = rule.description;
 
   info.append(name, desc);
+  info.addEventListener("click", () => {
+    checkbox.checked = !checkbox.checked;
+    checkbox.dispatchEvent(new Event("change"));
+  });
 
-  const chevron = document.createElement("span");
-  chevron.className = "rule-item-chevron";
-  chevron.setAttribute("aria-hidden", "true");
+  const expandBtn = document.createElement("button");
+  expandBtn.type = "button";
+  expandBtn.className = "rule-item-expand";
+  expandBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  expandBtn.disabled = settings.length === 0;
+  expandBtn.title =
+    settings.length === 0
+      ? "No settings"
+      : expanded
+        ? "Collapse settings"
+        : "Expand settings";
+  expandBtn.setAttribute(
+    "aria-label",
+    settings.length === 0
+      ? "No settings"
+      : `Expand or collapse settings for ${rule.name}`,
+  );
+
   if (settings.length > 0) {
+    const chevron = document.createElement("span");
+    chevron.className = "rule-item-chevron";
+    chevron.setAttribute("aria-hidden", "true");
     chevron.appendChild(
       lucideIcon(ChevronDown, {
         size: 14,
@@ -201,17 +219,15 @@ function ruleItem(
         "stroke-width": 1.75,
       }),
     );
+    expandBtn.appendChild(chevron);
+    expandBtn.addEventListener("click", () => {
+      state.expandedRuleId =
+        state.expandedRuleId === rule.id ? null : rule.id;
+      renderRules(container, state, onChange, context);
+    });
   }
 
-  toggle.append(info, chevron);
-  toggle.addEventListener("click", () => {
-    if (settings.length === 0) return;
-    state.expandedRuleId =
-      state.expandedRuleId === rule.id ? null : rule.id;
-    renderRules(container, state, onChange, context);
-  });
-
-  row.append(checkbox, toggle);
+  row.append(checkbox, info, expandBtn);
   wrap.appendChild(row);
 
   if (settings.length > 0 && expanded) {

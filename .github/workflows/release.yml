@@ -18,9 +18,6 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             name: macOS-arm64
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            name: macOS-x64
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             name: Windows-x64
@@ -56,7 +53,6 @@ jobs:
             See the assets below to download DevTree for your platform.
 
             **macOS (Apple Silicon)** — `aarch64` build from `macos-latest`
-            **macOS (Intel)** — `x86_64` build from `macos-13`
             **Windows** — `x86_64-pc-windows-msvc` installer
 
             > **Note:** Builds are currently unsigned. macOS may require right-click → Open on first launch.

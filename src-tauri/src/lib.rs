@@ -2,10 +2,13 @@ mod agent;
 mod analysis;
 mod analysis_session;
 mod db;
+mod design_rules;
+mod dsm;
 mod hierarchy;
 mod linter;
 mod lsp;
 mod project;
+mod schedule;
 
 use agent::ai_validation::{AiValidationRuntimeSettings, LlmConfigurations};
 use analysis::{
@@ -15,9 +18,13 @@ use agent::{cancel_agent_run, list_agent_skills, list_llm_provider_models, list_
 use agent::types::{AgentEvent, AgentRunRequest, AgentRunResult, AgentSkillInfo, LlmProvider, LlmProviderInfo};
 use analysis_session::AnalysisSessionRegistry;
 use db::{init_db, DbState};
+use dsm::{compute_dsm, DsmOptions, DsmResult};
+use design_rules::DesignRule;
+use hierarchy::HierarchyIndex;
 use linter::{LinterInstallResult, LinterSettingsMap, LanguageLinterGroup};
 use lsp::{LspInstallResult, LspServerStatus, LspSettingsMap};
 use project::{scan_project, ProjectScan};
+use schedule::AnalysisTriggerState;
 use tauri::ipc::Channel;
 
 #[tauri::command]
@@ -40,11 +47,13 @@ async fn run_project_analysis(
     linter_settings: LinterSettingsMap,
     llm_configurations: LlmConfigurations,
     ai_validation_runtime: AiValidationRuntimeSettings,
+    design_rules: Option<Vec<DesignRule>>,
     on_progress: Channel<AnalysisProgress>,
     registry: tauri::State<'_, AnalysisSessionRegistry>,
 ) -> Result<AnalysisResult, String> {
     let cancel = registry.register(analysis_id.clone());
     let progress_id = analysis_id.clone();
+    let design_rules = design_rules.unwrap_or_default();
     let result = tauri::async_runtime::spawn_blocking(move || {
         run_analysis_with_progress(
             &path,
@@ -54,6 +63,7 @@ async fn run_project_analysis(
             &linter_settings,
             &llm_configurations,
             &ai_validation_runtime.normalized(),
+            &design_rules,
             &cancel,
             &progress_id,
             move |progress| {
@@ -154,6 +164,11 @@ fn write_project_file(
 }
 
 #[tauri::command]
+fn compute_project_dsm(hierarchy: HierarchyIndex, options: DsmOptions) -> DsmResult {
+    compute_dsm(&hierarchy, &options)
+}
+
+#[tauri::command]
 async fn list_lsp_servers() -> Vec<LspServerStatus> {
     tauri::async_runtime::spawn_blocking(lsp::list_lsp_servers)
         .await
@@ -173,6 +188,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(DbState(std::sync::Mutex::new(conn)))
         .manage(AnalysisSessionRegistry::new())
+        .manage(AnalysisTriggerState::new())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -187,10 +203,16 @@ pub fn run() {
             cancel_project_analysis,
             read_project_file,
             write_project_file,
+            compute_project_dsm,
             list_lsp_servers,
             install_lsp_server,
             list_language_linters,
             install_linter,
+            schedule::get_analysis_triggers,
+            schedule::start_analysis_watch,
+            schedule::stop_analysis_watch,
+            schedule::start_analysis_schedule,
+            schedule::stop_analysis_schedule,
             db::load_persisted_state,
             db::save_persisted_state,
             db::get_db_path,

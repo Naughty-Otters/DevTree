@@ -1,5 +1,6 @@
 import type { AnalysisResult, HierarchyIndex, RuleTaskProgress } from "../analysis/types";
 import type { AnalysisRun } from "../analysis/manager";
+import { healthStatus } from "../analysis/dsm";
 import { renderAiStreamPreview } from "./aiStreamPreview";
 import {
   effectiveRuleStatus,
@@ -22,7 +23,7 @@ import {
   type AnalysisStatKind,
 } from "./analysisDetailPopup";
 
-type TabId = "analysis" | "validation" | "progress";
+type TabId = "analysis" | "validation" | "health" | "progress";
 
 export interface ResultsPanelHandlers {
   onOpenValidationTarget?: ValidationDetailHandlers["onOpenFile"];
@@ -30,6 +31,7 @@ export interface ResultsPanelHandlers {
   onShowCycleOnGraph?: ValidationDetailHandlers["onShowCycleOnGraph"];
   onShowModuleOnGraph?: AnalysisDetailHandlers["onShowModuleOnGraph"];
   onShowDependencyOnGraph?: AnalysisDetailHandlers["onShowDependencyOnGraph"];
+  onShowDsm?: (highlightIds?: string[]) => void;
   getHierarchy?: () => HierarchyIndex | null;
   onCancelRun?: (id: string) => void;
   onCancelAllRuns?: () => void;
@@ -52,6 +54,7 @@ export function createResultsPanel(
 
   const tabDefs: { id: TabId; label: string }[] = [
     { id: "analysis", label: "Analysis" },
+    { id: "health", label: "Health" },
     { id: "validation", label: "Validation" },
     { id: "progress", label: "Validation progress" },
   ];
@@ -528,6 +531,9 @@ export function createResultsPanel(
       case "analysis":
         renderAnalysisTab(resultsHost, currentResult, handlers);
         break;
+      case "health":
+        renderHealthTab(resultsHost, currentResult, handlers);
+        break;
       case "validation":
         renderValidationTab(resultsHost, currentResult, handlers);
         break;
@@ -660,6 +666,166 @@ function renderAnalysisTab(
   }
 
   container.appendChild(stats);
+}
+
+function renderHealthTab(
+  container: HTMLElement,
+  result: AnalysisResult,
+  handlers: ResultsPanelHandlers,
+): void {
+  const dsm = result.dsm ?? null;
+  if (!dsm || dsm.elements.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "panel-empty";
+    empty.textContent =
+      "No DSM health data yet. Run analysis, then open the DSM view.";
+    container.appendChild(empty);
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "btn btn-ghost";
+    openBtn.textContent = "Open DSM view";
+    openBtn.addEventListener("click", () => handlers.onShowDsm?.());
+    container.appendChild(openBtn);
+    return;
+  }
+
+  const score = Math.round(dsm.metrics.healthScore);
+  const status = healthStatus(dsm.metrics.healthScore);
+
+  const scorecard = document.createElement("div");
+  scorecard.className = `health-scorecard health-${status}`;
+
+  const scoreEl = document.createElement("div");
+  scoreEl.className = "health-score";
+  scoreEl.innerHTML = `<span class="health-score-value">${score}</span><span class="health-score-label">Modularity health</span>`;
+
+  const statusEl = document.createElement("div");
+  statusEl.className = "health-status-label";
+  statusEl.textContent =
+    status === "healthy"
+      ? "Healthy structure"
+      : status === "fair"
+        ? "Fair — some coupling or layering issues"
+        : "Poor — cycles or dense upward dependencies";
+
+  scorecard.append(scoreEl, statusEl);
+  container.appendChild(scorecard);
+
+  const metrics = document.createElement("div");
+  metrics.className = "health-metrics";
+
+  const metricRows: { label: string; value: string; hint: string }[] = [
+    {
+      label: "Cycles",
+      value: String(dsm.metrics.cycleCount),
+      hint: `${dsm.metrics.nodesInCycles} nodes in cycles`,
+    },
+    {
+      label: "Upper-triangle density",
+      value: `${(dsm.metrics.upperTriangleDensity * 100).toFixed(1)}%`,
+      hint: "Backward / upward deps after partitioning",
+    },
+    {
+      label: "Coupling density",
+      value: `${(dsm.metrics.couplingDensity * 100).toFixed(1)}%`,
+      hint: "Nonzero off-diagonal cells",
+    },
+    {
+      label: "Propagation cost",
+      value: `${(dsm.metrics.propagationCost * 100).toFixed(1)}%`,
+      hint: "MacCormack visibility density (change blast radius)",
+    },
+    {
+      label: "Clustered cost",
+      value: `${(dsm.metrics.clusteredCostNormalized * 100).toFixed(1)}%`,
+      hint: `MacCormack normalized (λ=2) · abs ${Math.round(dsm.metrics.clusteredCost ?? 0)}`,
+    },
+    {
+      label: "Vertical buses",
+      value: String(dsm.metrics.busCount ?? dsm.busIds?.length ?? 0),
+      hint: "High fan-in shared modules (≥10% callers)",
+    },
+    {
+      label: "DSM size",
+      value: `${dsm.elements.length} × ${dsm.elements.length}`,
+      hint: `${dsm.level} level · ${dsm.ordering} order`,
+    },
+  ];
+
+  for (const row of metricRows) {
+    const item = document.createElement("div");
+    item.className = "health-metric";
+    item.innerHTML = `
+      <div class="health-metric-label">${row.label}</div>
+      <div class="health-metric-value">${row.value}</div>
+      <div class="health-metric-hint">${row.hint}</div>
+    `;
+    metrics.appendChild(item);
+  }
+  container.appendChild(metrics);
+
+  const actions = document.createElement("div");
+  actions.className = "health-actions";
+
+  const showDsmBtn = document.createElement("button");
+  showDsmBtn.type = "button";
+  showDsmBtn.className = "btn btn-ghost";
+  showDsmBtn.textContent = "Show in DSM";
+  showDsmBtn.addEventListener("click", () =>
+    handlers.onShowDsm?.(dsm.cycleNodes),
+  );
+  actions.appendChild(showDsmBtn);
+
+  const violations = dsm.violations ?? [];
+  if (violations.length > 0) {
+    const conf = document.createElement("div");
+    conf.className = "health-conformance";
+    conf.innerHTML = `<strong>LDM conformance:</strong> ${violations.length} violation(s)`;
+    container.appendChild(conf);
+
+    const showViol = document.createElement("button");
+    showViol.type = "button";
+    showViol.className = "btn btn-ghost";
+    showViol.textContent = "Show violations in DSM";
+    const ids = [...new Set(violations.flatMap((v) => [v.from, v.to]))];
+    showViol.addEventListener("click", () => handlers.onShowDsm?.(ids));
+    actions.appendChild(showViol);
+  } else if (
+    result.validation.some((v) => v.rule_id === "architecture_conformance")
+  ) {
+    const conf = document.createElement("div");
+    conf.className = "health-conformance health-conformance-ok";
+    conf.textContent = "LDM conformance: no design-rule violations";
+    container.appendChild(conf);
+  }
+
+  const circular = result.validation.find(
+    (v) => v.rule_id === "circular_dependencies",
+  );
+  const cycles = circular ? cycleGroupsFromValidation(circular) : [];
+  if (cycles.length === 0 && dsm.cycleNodes.length > 0) {
+    cycles.push({
+      kind: dsm.level === "file" ? "file_imports" : "package_imports",
+      nodes: dsm.cycleNodes.slice(0, 16),
+      path: dsm.cycleNodes.slice(0, 16),
+      label: "DSM cycles",
+      node_count: dsm.cycleNodes.length,
+    });
+  }
+
+  if (cycles.length > 0) {
+    const showCycleBtn = document.createElement("button");
+    showCycleBtn.type = "button";
+    showCycleBtn.className = "btn btn-ghost";
+    showCycleBtn.textContent = "Show cycles on graph";
+    showCycleBtn.addEventListener("click", () => {
+      handlers.onShowCycleOnGraph?.(cycles[0]!);
+    });
+    actions.appendChild(showCycleBtn);
+  }
+
+  container.appendChild(actions);
 }
 
 function renderValidationTab(

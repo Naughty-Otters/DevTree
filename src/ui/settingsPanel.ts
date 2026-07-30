@@ -8,25 +8,44 @@ export interface SettingsPanelApi {
   isOpen: () => boolean;
 }
 
+export interface SettingsPanelOptions {
+  onOpen?: () => void;
+  onToggle?: (open: boolean) => void;
+  initiallyOpen?: boolean;
+}
+
 export function createSettingsPanel(
   root: HTMLElement,
-  onOpen?: () => void,
+  onOpenOrOptions?: (() => void) | SettingsPanelOptions,
 ): SettingsPanelApi {
-  let open = false;
+  const options: SettingsPanelOptions =
+    typeof onOpenOrOptions === "function"
+      ? { onOpen: onOpenOrOptions }
+      : (onOpenOrOptions ?? {});
 
-  const backdrop = root.querySelector<HTMLElement>(".settings-backdrop");
+  let open = Boolean(options.initiallyOpen);
   const closeBtn = root.querySelector<HTMLButtonElement>("#btn-close-settings");
   const accordion = root.querySelector<HTMLElement>(".settings-accordion");
+  const resizeHandle = document.querySelector<HTMLElement>("#right-resize-handle");
 
-  function setOpen(next: boolean): void {
+  function applyOpen(next: boolean): void {
     open = next;
     root.classList.toggle("hidden", !open);
     root.setAttribute("aria-hidden", open ? "false" : "true");
+    resizeHandle?.classList.toggle("hidden", !open);
     document.body.classList.toggle("settings-open", open);
-    if (open) onOpen?.();
+    document
+      .querySelector("#btn-settings")
+      ?.classList.toggle("is-active", open);
   }
 
-  backdrop?.addEventListener("click", () => setOpen(false));
+  function setOpen(next: boolean): void {
+    if (open === next) return;
+    applyOpen(next);
+    options.onToggle?.(open);
+    if (open) options.onOpen?.();
+  }
+
   closeBtn?.addEventListener("click", () => setOpen(false));
 
   if (closeBtn && closeBtn.childElementCount === 0) {
@@ -40,6 +59,10 @@ export function createSettingsPanel(
   }
 
   initSettingsAccordion(accordion);
+  applyOpen(open);
+  if (open) {
+    options.onOpen?.();
+  }
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && open) {
@@ -62,11 +85,18 @@ function initSettingsAccordion(root: HTMLElement | null): void {
     ...root.querySelectorAll<HTMLElement>(".settings-accordion-item"),
   ];
 
+  function setItemOpen(item: HTMLElement, open: boolean): void {
+    item.classList.toggle("is-open", open);
+    item
+      .querySelector(".settings-accordion-expand")
+      ?.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
   for (const item of items) {
-    const trigger = item.querySelector<HTMLButtonElement>(
-      ".settings-accordion-trigger",
+    const expandBtn = item.querySelector<HTMLButtonElement>(
+      ".settings-accordion-expand",
     );
-    const chevron = trigger?.querySelector(".settings-accordion-chevron");
+    const chevron = expandBtn?.querySelector(".settings-accordion-chevron");
     if (chevron && chevron.childElementCount === 0) {
       chevron.appendChild(
         lucideIcon(ChevronDown, {
@@ -77,15 +107,11 @@ function initSettingsAccordion(root: HTMLElement | null): void {
       );
     }
 
-    trigger?.addEventListener("click", () => {
-      // Exclusive accordion: always keep exactly one section open.
-      if (item.classList.contains("is-open")) return;
+    // Expand/collapse only via the chevron button — not the label.
+    expandBtn?.addEventListener("click", () => {
+      const willOpen = !item.classList.contains("is-open");
       for (const other of items) {
-        const open = other === item;
-        other.classList.toggle("is-open", open);
-        other
-          .querySelector(".settings-accordion-trigger")
-          ?.setAttribute("aria-expanded", open ? "true" : "false");
+        setItemOpen(other, willOpen && other === item);
       }
     });
   }

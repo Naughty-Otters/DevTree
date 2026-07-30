@@ -1,4 +1,5 @@
 import type { Graph } from "../graph/types";
+import type { DsmResult } from "./dsm";
 
 export interface SymbolInfo {
   id: string;
@@ -136,6 +137,8 @@ export interface AnalysisResult {
   validation: ValidationItem[];
   suggestions: SuggestionItem[];
   summary: string;
+  /** Package-level DSM from last analysis; may be recomputed in the UI for scope/level. */
+  dsm?: DsmResult | null;
 }
 
 export interface RuleTaskProgress {

@@ -36,4 +36,7 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "process"
 futures = "0.3.33"
 reqwest = { version = "0.12", features = ["json"] }
 regex = "1.13.1"
+notify = "6"
+cron = "0.15"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 

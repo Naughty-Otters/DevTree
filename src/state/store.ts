@@ -1,4 +1,5 @@
 import type { AnalysisResult, HierarchyIndex } from "../analysis/types";
+import type { DsmResult } from "../analysis/dsm";
 import type { Graph } from "../graph/types";
 import type { SuggestionItem, ValidationItem } from "../analysis/types";
 import {
@@ -20,6 +21,7 @@ export interface PersistedAnalysisMeta {
   validation: ValidationItem[];
   suggestions: SuggestionItem[];
   summary: string;
+  dsm?: DsmResult | null;
 }
 
 function isTauri(): boolean {
@@ -68,7 +70,7 @@ function migrateLegacy(): Partial<PersistedUiState> | null {
       const sizes = JSON.parse(panels) as Record<string, number>;
       partial.panelSizes = {
         leftWidth: sizes["--left-width"] ?? 240,
-        rightWidth: sizes["--right-width"] ?? 260,
+        rightWidth: sizes["--right-width"] ?? 360,
         bottomHeight: sizes["--bottom-height"] ?? 200,
         leftTreeHeight: sizes["--left-tree-height"] ?? 50,
       };
@@ -148,6 +150,7 @@ async function saveSplitAnalysis(result: AnalysisResult | null): Promise<void> {
     validation: result.validation,
     suggestions: result.suggestions,
     summary: result.summary,
+    dsm: result.dsm ?? null,
   };
   await Promise.all([
     saveRaw(ANALYSIS_META_KEY, JSON.stringify(meta)),
@@ -180,6 +183,7 @@ export async function loadPersistedAnalysisMeta(): Promise<PersistedAnalysisMeta
     validation: legacy.validation,
     suggestions: legacy.suggestions,
     summary: legacy.summary,
+    dsm: legacy.dsm ?? null,
   };
 }
 

@@ -4,7 +4,9 @@ import type {
   AnalysisProgress,
   RuleSettingsMap,
   RuleTaskProgress,
+  ValidationItem,
 } from "../analysis/types";
+import type { DesignRule } from "../analysis/designRules";
 import type {
   LlmProviderId,
   LlmProviderInfo,
@@ -30,6 +32,10 @@ import {
 import type { ProjectScan } from "./types";
 import { mockHierarchyForFixture } from "../graph/hierarchy";
 import { graphForNavigation, rootNavigation } from "../graph/navigation";
+import type {
+  AnalysisTriggerEvent,
+  AnalysisTriggerStatus,
+} from "../analysis/triggers";
 
 function isTauri(): boolean {
   return "__TAURI_INTERNALS__" in window;
@@ -133,6 +139,7 @@ export async function runAnalysis(
   linterSettings?: LinterSettingsMap,
   llmConfigurations?: LlmConfiguration[],
   aiValidationRuntime?: AiValidationRuntimeSettings,
+  designRules?: DesignRule[],
 ): Promise<AnalysisResult> {
   if (isTauri()) {
     const { invoke, Channel } = await import("@tauri-apps/api/core");
@@ -149,10 +156,11 @@ export async function runAnalysis(
       linterSettings: linterSettings ?? {},
       llmConfigurations: llmConfigurations ?? [],
       aiValidationRuntime: aiValidationRuntime ?? defaultAiValidationRuntimeSettings(),
+      designRules: designRules ?? [],
       onProgress: channel,
     });
   }
-  return mockAnalysis(path, rules, analysisId, onProgress, linterSettings);
+  return mockAnalysis(path, rules, analysisId, onProgress, linterSettings, designRules);
 }
 
 export async function cancelAnalysis(analysisId: string): Promise<boolean> {
@@ -161,6 +169,75 @@ export async function cancelAnalysis(analysisId: string): Promise<boolean> {
     return invoke<boolean>("cancel_project_analysis", { analysisId });
   }
   return mockCancelAnalysis(analysisId);
+}
+
+export async function getAnalysisTriggers(): Promise<AnalysisTriggerStatus> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<AnalysisTriggerStatus>("get_analysis_triggers");
+  }
+  return {
+    watchActive: false,
+    watchDebounceMs: 0,
+    scheduleActive: false,
+  };
+}
+
+export async function startAnalysisWatch(
+  path: string,
+  debounceMs: number,
+): Promise<AnalysisTriggerStatus> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<AnalysisTriggerStatus>("start_analysis_watch", {
+      path,
+      debounceMs,
+    });
+  }
+  throw new Error("File-watch triggers require the DevTree desktop app.");
+}
+
+export async function stopAnalysisWatch(): Promise<boolean> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<boolean>("stop_analysis_watch");
+  }
+  return false;
+}
+
+export async function startAnalysisSchedule(
+  path: string,
+  cron: string,
+): Promise<AnalysisTriggerStatus> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<AnalysisTriggerStatus>("start_analysis_schedule", {
+      path,
+      cron,
+    });
+  }
+  throw new Error("Scheduled triggers require the DevTree desktop app.");
+}
+
+export async function stopAnalysisSchedule(): Promise<boolean> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<boolean>("stop_analysis_schedule");
+  }
+  return false;
+}
+
+export async function listenAnalysisTriggers(
+  handler: (event: AnalysisTriggerEvent) => void,
+): Promise<() => void> {
+  if (!isTauri()) {
+    return () => {};
+  }
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<AnalysisTriggerEvent>("analysis-trigger", (e) => {
+    handler(e.payload);
+  });
+  return unlisten;
 }
 
 export async function getLlmProviders(): Promise<LlmProviderInfo[]> {
@@ -680,6 +757,7 @@ async function mockAnalysis(
   analysisId: string,
   onProgress?: (progress: AnalysisProgress) => void,
   _linterSettings?: LinterSettingsMap,
+  designRules?: DesignRule[],
 ): Promise<AnalysisResult> {
   const stages: AnalysisProgress[] = [
     { analysisId, stage: "scanning", message: "Starting breadth-first scan…", current: 0, total: 0, percent: 0 },
@@ -758,7 +836,15 @@ async function mockAnalysis(
   const fixtureGraph = loadFixtureGraph();
   const hierarchy = mockHierarchyForFixture(fixtureGraph);
   const graph = graphForNavigation(hierarchy, rootNavigation());
-  const validation = rules.flatMap((id) => {
+  const { computeDsm } = await import("../analysis/dsm");
+  const {
+    checkDesignRules,
+    designRulesValidationItem,
+  } = await import("../analysis/designRules");
+  const dsm = computeDsm(hierarchy);
+  const violations = checkDesignRules(hierarchy, designRules ?? []);
+  dsm.violations = violations;
+  const validation: ValidationItem[] = rules.flatMap((id) => {
     if (id === "language_linters") {
       return [
         {
@@ -798,11 +884,15 @@ async function mockAnalysis(
       },
     ];
   });
+  if ((designRules ?? []).length > 0) {
+    validation.push(designRulesValidationItem(violations));
+  }
   return {
     graph,
     hierarchy,
     validation,
     summary: `Mock analysis of ${path} with ${rules.length} rule(s) (browser mode)`,
     suggestions: [],
+    dsm,
   };
 }

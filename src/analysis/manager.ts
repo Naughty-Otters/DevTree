@@ -1,4 +1,5 @@
 import type { AnalysisProgress, AnalysisResult, RuleSettingsMap, RuleTaskProgress } from "./types";
+import type { DesignRule } from "./designRules";
 import type { LspSettingsMap } from "../lsp/types";
 import type { LinterSettingsMap } from "../linter/types";
 import type { LlmConfiguration, AiValidationRuntimeSettings } from "../validation/aiValidation";
@@ -29,6 +30,7 @@ export interface StartAnalysisParams {
   linterSettings: LinterSettingsMap;
   llmConfigurations: LlmConfiguration[];
   aiValidationRuntime: AiValidationRuntimeSettings;
+  designRules?: DesignRule[];
 }
 
 export interface AnalysisManagerHandlers {
@@ -172,6 +174,7 @@ export function createAnalysisManager(
       params.linterSettings,
       params.llmConfigurations,
       params.aiValidationRuntime,
+      params.designRules,
     )
       .then((result) => {
         const current = getRun(id);

@@ -26,6 +26,11 @@ import {
   installLspServer,
   listLanguageLinters,
   installLinter,
+  startAnalysisWatch,
+  stopAnalysisWatch,
+  startAnalysisSchedule,
+  stopAnalysisSchedule,
+  listenAnalysisTriggers,
 } from "./project/api";
 import { renderProjectTree } from "./ui/projectTree";
 import { renderModulesList, type ModulesListState } from "./ui/modulesList";
@@ -39,6 +44,16 @@ import {
   type LintersPanelState,
 } from "./ui/lintersPanel";
 import { createResultsPanel } from "./ui/resultsPanel";
+import { createDsmView } from "./ui/dsmView";
+import { createDesignRulesPanel } from "./ui/designRulesPanel";
+import { computeDsm } from "./analysis/dsm";
+import {
+  checkDesignRules,
+  designRulesValidationItem,
+  suggestLayersFromPartition,
+  type DesignRule,
+} from "./analysis/designRules";
+import { defaultDesignRules } from "./analysis/designRules";
 import { createLlmProviderConfigsPanel } from "./ui/llmProviderConfigsPanel";
 import { createLlmRuntimeSettingsPanel } from "./ui/llmRuntimeSettingsPanel";
 import { createLazyFileViewer } from "./lazy/fileViewer";
@@ -46,6 +61,10 @@ import { mountToolbarIcons } from "./ui/toolbar";
 import { createSettingsPanel } from "./ui/settingsPanel";
 import { initResizers } from "./ui/resizer";
 import { showAnalysisDialog } from "./ui/analysisDialog";
+import {
+  defaultAnalysisTriggerConfig,
+  type AnalysisTriggerConfig,
+} from "./analysis/triggers";
 import { initTooltips } from "./ui/tooltip";
 import { hideGraphPopup, isGraphPopupOpen, toggleGraphPopup } from "./ui/graphPopup";
 import { renderGraphNav } from "./ui/graphNav";
@@ -96,6 +115,7 @@ interface AppState {
   linterSettings: LinterSettingsMap;
   llmConfigurations: LlmConfiguration[];
   aiValidationRuntime: AiValidationRuntimeSettings;
+  analysisTriggers: AnalysisTriggerConfig;
   llmProviders: LlmProviderInfo[];
   analysisResult: AnalysisResult | null;
   hierarchy: HierarchyIndex | null;
@@ -103,6 +123,10 @@ interface AppState {
   renderState: RenderState | null;
   modulesListState: ModulesListState;
   hierarchyLoading: boolean;
+  dsmLevel: "package" | "file";
+  dsmOrdering: "partitioned" | "hierarchical";
+  designRules: DesignRule[];
+  centerView: "graph" | "dsm" | "file";
 }
 
 function hierarchyIsHydrated(hierarchy: HierarchyIndex | null | undefined): boolean {
@@ -126,7 +150,7 @@ export async function startApp(): Promise<void> {
   const rulesContainer = document.querySelector<HTMLElement>("#rules-panel")!;
   const lspServersContainer = document.querySelector<HTMLElement>("#lsp-servers-panel")!;
   const lintersContainer = document.querySelector<HTMLElement>("#linters-panel")!;
-  const settingsOverlay = document.querySelector<HTMLElement>("#settings-overlay")!;
+  const settingsPanel = document.querySelector<HTMLElement>("#right-panel")!;
   const resultsContainer = document.querySelector<HTMLElement>("#results-panel")!;
   const llmProviderConfigsContainer = document.querySelector<HTMLElement>(
     "#llm-provider-configs-panel",
@@ -134,9 +158,13 @@ export async function startApp(): Promise<void> {
   const llmRuntimeSettingsContainer = document.querySelector<HTMLElement>(
     "#llm-runtime-settings-panel",
   )!;
+  const designRulesContainer = document.querySelector<HTMLElement>(
+    "#design-rules-panel",
+  )!;
   const graphOverlay = document.querySelector<HTMLElement>("#graph-overlay")!;
   const graphOverlayText = document.querySelector<HTMLElement>("#graph-overlay-text")!;
   const fileViewerEl = document.querySelector<HTMLElement>("#file-viewer")!;
+  const dsmViewEl = document.querySelector<HTMLElement>("#dsm-view")!;
   const graphNavContainer = document.querySelector<HTMLElement>("#graph-nav")!;
   const viewTabs = document.querySelector<HTMLElement>("#view-tabs")!;
 
@@ -181,6 +209,10 @@ export async function startApp(): Promise<void> {
     linterSettings: initialLinterSettings,
     llmConfigurations: migratedAi.llmConfigurations,
     aiValidationRuntime: migrateRuntimeSettings(persisted.aiValidationRuntime),
+    analysisTriggers: {
+      ...defaultAnalysisTriggerConfig(),
+      ...(persisted.analysisTriggers ?? {}),
+    },
     llmProviders: [],
     analysisResult: null,
     hierarchy: null,
@@ -192,6 +224,11 @@ export async function startApp(): Promise<void> {
       searchQuery: "",
     },
     hierarchyLoading: false,
+    dsmLevel: persisted.dsmLevel === "file" ? "file" : "package",
+    dsmOrdering:
+      persisted.dsmOrdering === "hierarchical" ? "hierarchical" : "partitioned",
+    designRules: persisted.designRules ?? defaultDesignRules(),
+    centerView: "graph",
   };
 
   async function initRulesPanel(): Promise<void> {
@@ -249,6 +286,7 @@ export async function startApp(): Promise<void> {
 
   let resultsPanel!: ReturnType<typeof createResultsPanel>;
   let settingsApi!: ReturnType<typeof createSettingsPanel>;
+  let settingsPanelOpen = Boolean(persisted.settingsPanelOpen);
 
   const llmProviderConfigsPanel = createLlmProviderConfigsPanel(
     llmProviderConfigsContainer,
@@ -311,6 +349,12 @@ export async function startApp(): Promise<void> {
     onShowDependencyOnGraph: (source, target) => {
       void showDependencyOnGraph(source, target);
     },
+    onShowDsm: (highlightIds) => {
+      showDsmView();
+      if (highlightIds && highlightIds.length > 0) {
+        dsmView.highlight(highlightIds);
+      }
+    },
     onCancelRun: (id) => analysisManager.cancel(id),
     onCancelAllRuns: () => analysisManager.cancelAll(),
     onApplyRun: (id) => {
@@ -323,12 +367,30 @@ export async function startApp(): Promise<void> {
 
   async function applyAnalysisResult(result: AnalysisResult): Promise<void> {
     clearHierarchyLoadCache();
+    if (!result.dsm && result.hierarchy) {
+      result = { ...result, dsm: computeDsm(result.hierarchy) };
+    }
+    if (result.hierarchy && app.designRules.length > 0) {
+      const violations = checkDesignRules(result.hierarchy, app.designRules);
+      if (result.dsm) {
+        result = {
+          ...result,
+          dsm: { ...result.dsm, violations },
+        };
+      }
+      const item = designRulesValidationItem(violations);
+      const without = result.validation.filter(
+        (v) => v.rule_id !== "architecture_conformance",
+      );
+      result = { ...result, validation: [...without, item] };
+    }
     app.analysisResult = result;
     app.hierarchy = result.hierarchy;
     app.graphNavigation = rootNavigation();
     resultsPanel.setResult(result);
     persist();
     persistAnalysis();
+    refreshDsmView();
     runWhenIdle(() => {
       void navigateGraph();
     }, 1500);
@@ -400,6 +462,7 @@ export async function startApp(): Promise<void> {
     return {
       version: 1,
       panelSizes: readPanelSizes(),
+      settingsPanelOpen,
       projectPath: app.projectPath,
       selectedRuleIds: Array.from(app.selectedRules),
       ruleSettings: app.ruleSettings,
@@ -407,12 +470,16 @@ export async function startApp(): Promise<void> {
       linterSettings: app.linterSettings,
       llmConfigurations: app.llmConfigurations,
       aiValidationRuntime: app.aiValidationRuntime,
+      analysisTriggers: app.analysisTriggers,
       visibleModuleIds: Array.from(app.modulesListState.visibleIds),
       selectedNodeId: app.renderState?.selectedId ?? null,
       camera: app.renderState
         ? { ...app.renderState.camera }
         : null,
       graphNavigation: serializeNavigation(app.graphNavigation),
+      dsmLevel: app.dsmLevel,
+      dsmOrdering: app.dsmOrdering,
+      designRules: app.designRules,
     };
   }
 
@@ -424,12 +491,106 @@ export async function startApp(): Promise<void> {
     scheduleSaveAnalysis(app.analysisResult);
   }
 
-  function showGraphView() {
-    fileViewerEl.classList.add("hidden");
-    canvas.classList.remove("hidden");
+  function setActiveViewTab(view: "graph" | "dsm" | "file"): void {
     viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((t) => {
-      t.classList.toggle("active", t.dataset.view === "graph");
+      t.classList.toggle("active", t.dataset.view === view);
     });
+  }
+
+  function refreshDsmView(): void {
+    const hierarchy = app.hierarchy ?? app.analysisResult?.hierarchy ?? null;
+    let preferred = app.analysisResult?.dsm ?? null;
+    if (hierarchy && preferred) {
+      const violations = checkDesignRules(hierarchy, app.designRules);
+      preferred = { ...preferred, violations };
+    } else if (hierarchy) {
+      const computed = computeDsm(hierarchy, {
+        level: app.dsmLevel,
+        scope: null,
+        ordering: app.dsmOrdering,
+      });
+      computed.violations = checkDesignRules(hierarchy, app.designRules);
+      preferred = computed;
+    }
+    dsmView.setData(
+      hierarchy,
+      app.graphNavigation,
+      { level: app.dsmLevel, ordering: app.dsmOrdering },
+      preferred,
+    );
+  }
+
+  function renderDesignRulesPanel(): void {
+    createDesignRulesPanel(designRulesContainer, app.designRules, {
+      packageIds: app.hierarchy?.packages ?? app.analysisResult?.hierarchy?.packages ?? [],
+      onChange: (rules) => {
+        app.designRules = rules;
+        persist();
+        recheckDesignRulesInPlace();
+      },
+      onSuggestLayers: () => {
+        const hierarchy = app.hierarchy ?? app.analysisResult?.hierarchy;
+        if (!hierarchy) {
+          alert("Run analysis first to suggest layers from the DSM.");
+          return;
+        }
+        const dsm = computeDsm(hierarchy, {
+          level: "package",
+          ordering: "partitioned",
+        });
+        const suggested = suggestLayersFromPartition(dsm.elements.map((e) => e.id));
+        app.designRules = [
+          ...app.designRules.filter((r) => r.kind !== "layers"),
+          suggested,
+        ];
+        persist();
+        renderDesignRulesPanel();
+        recheckDesignRulesInPlace();
+      },
+    });
+  }
+
+  function recheckDesignRulesInPlace(): void {
+    if (!app.analysisResult?.hierarchy) {
+      refreshDsmView();
+      return;
+    }
+    const violations = checkDesignRules(
+      app.analysisResult.hierarchy,
+      app.designRules,
+    );
+    let result = app.analysisResult;
+    if (result.dsm) {
+      result = { ...result, dsm: { ...result.dsm, violations } };
+    }
+    if (app.designRules.length > 0) {
+      const item = designRulesValidationItem(violations);
+      const without = result.validation.filter(
+        (v) => v.rule_id !== "architecture_conformance",
+      );
+      result = { ...result, validation: [...without, item] };
+    } else {
+      result = {
+        ...result,
+        validation: result.validation.filter(
+          (v) => v.rule_id !== "architecture_conformance",
+        ),
+      };
+    }
+    app.analysisResult = result;
+    resultsPanel.setResult(result);
+    persistAnalysis();
+    refreshDsmView();
+  }
+
+  renderDesignRulesPanel();
+
+  function showGraphView() {
+    app.centerView = "graph";
+    fileViewerEl.classList.add("hidden");
+    dsmViewEl.classList.add("hidden");
+    canvas.classList.remove("hidden");
+    setActiveViewTab("graph");
     void ensureAnalysisHierarchy().then((hierarchy) => {
       if (!hierarchy) return;
       const graph = graphForNavigation(hierarchy, app.graphNavigation);
@@ -437,19 +598,55 @@ export async function startApp(): Promise<void> {
     });
   }
 
+  function showDsmView() {
+    app.centerView = "dsm";
+    fileViewerEl.classList.add("hidden");
+    canvas.classList.add("hidden");
+    dsmViewEl.classList.remove("hidden");
+    setActiveViewTab("dsm");
+    void ensureAnalysisHierarchy().then((hierarchy) => {
+      if (hierarchy) {
+        app.hierarchy = hierarchy;
+      }
+      refreshDsmView();
+      refreshGraphNav();
+    });
+  }
+
   function showFileView() {
+    app.centerView = "file";
     fileViewerEl.classList.remove("hidden");
     canvas.classList.add("hidden");
-    viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((t) => {
-      t.classList.toggle("active", t.dataset.view === "file");
-    });
+    dsmViewEl.classList.add("hidden");
+    setActiveViewTab("file");
     const path = fileViewer.getPath();
     if (path) refreshFileNav(path);
   }
 
+  const dsmView = createDsmView(dsmViewEl, {
+    onOptionsChange: (opts) => {
+      app.dsmLevel = opts.level === "file" ? "file" : "package";
+      app.dsmOrdering =
+        opts.ordering === "hierarchical" ? "hierarchical" : "partitioned";
+      persist();
+      refreshDsmView();
+    },
+    onSelectElement: (id) => {
+      dsmView.highlight([id]);
+    },
+    onSelectCell: (rowId, colId) => {
+      dsmView.highlight([rowId, colId]);
+    },
+    onShowOnGraph: () => {
+      showGraphView();
+      void navigateGraph();
+    },
+  });
+
   viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       if (tab.dataset.view === "graph") showGraphView();
+      else if (tab.dataset.view === "dsm") showDsmView();
       else if (fileViewer.isOpen()) showFileView();
     });
   });
@@ -599,14 +796,23 @@ export async function startApp(): Promise<void> {
 
   createLintersPanel(lintersContainer, lintersState, lintersHandlers);
 
-  settingsApi = createSettingsPanel(settingsOverlay, () => {
-    requestAnimationFrame(() => {
-      if (rulesState.loading || rulesState.rules.length === 0) {
-        void initRulesPanel();
-      }
-      if (!lspLoaded) void lspHandlers.onRefresh();
-      if (!lintersLoaded) void lintersHandlers.onRefresh();
-    });
+  settingsApi = createSettingsPanel(settingsPanel, {
+    initiallyOpen: settingsPanelOpen,
+    onOpen: () => {
+      requestAnimationFrame(() => {
+        resize();
+        if (rulesState.loading || rulesState.rules.length === 0) {
+          void initRulesPanel();
+        }
+        if (!lspLoaded) void lspHandlers.onRefresh();
+        if (!lintersLoaded) void lintersHandlers.onRefresh();
+      });
+    },
+    onToggle: (open) => {
+      settingsPanelOpen = open;
+      resize();
+      persist();
+    },
   });
   btnSettings.addEventListener("click", () => settingsApi.toggle());
 
@@ -693,6 +899,9 @@ export async function startApp(): Promise<void> {
     const graph = graphForNavigation(hierarchy, app.graphNavigation);
     await loadGraph(graph, opts);
     refreshGraphNav(graph);
+    if (app.centerView === "dsm") {
+      refreshDsmView();
+    }
   }
 
   function drillIntoNode(nodeId: string) {
@@ -884,6 +1093,7 @@ export async function startApp(): Promise<void> {
       refreshModulesList();
       btnRun.disabled = false;
       persist();
+      await restoreAnalysisTriggers(scan.root);
       return true;
     } catch (err) {
       console.error(err);
@@ -1156,21 +1366,8 @@ export async function startApp(): Promise<void> {
     btnOpen.disabled = false;
   }
 
-  async function handleRunAnalysis() {
+  function startAnalysisRun(): void {
     if (!app.projectPath) return;
-    if (rulesState.loading || rulesState.rules.length === 0) {
-      await initRulesPanel();
-    }
-    if (app.selectedRules.size === 0) {
-      alert("Select at least one analysis rule.");
-      return;
-    }
-
-    const confirmed =
-      analysisManager.hasRunning() ||
-      (await showAnalysisDialog(app.selectedRules.size));
-    if (!confirmed) return;
-
     const linterSettings = ensureLinterSettings(
       app.linterSettings,
       lintersState.groups.length > 0 ? lintersState.groups : undefined,
@@ -1191,7 +1388,111 @@ export async function startApp(): Promise<void> {
       linterSettings,
       llmConfigurations: app.llmConfigurations,
       aiValidationRuntime: app.aiValidationRuntime,
+      designRules: app.designRules,
     });
+  }
+
+  function updateRunButtonHint(): void {
+    const parts: string[] = ["Run analysis"];
+    if (app.analysisTriggers.watchEnabled) parts.push("watching files");
+    if (app.analysisTriggers.scheduleEnabled) parts.push("scheduled");
+    btnRun.title = parts.join(" · ");
+  }
+
+  async function applyRunChoice(
+    choice: NonNullable<Awaited<ReturnType<typeof showAnalysisDialog>>>,
+  ): Promise<void> {
+    if (!app.projectPath) return;
+
+    if (choice.mode === "now") {
+      // Manual one-shot does not change persistent triggers.
+      startAnalysisRun();
+      return;
+    }
+
+    if (choice.mode === "watch") {
+      app.analysisTriggers = {
+        ...app.analysisTriggers,
+        watchEnabled: true,
+        watchDebounceMs: choice.debounceMs,
+      };
+      await startAnalysisWatch(app.projectPath, choice.debounceMs);
+      // Disable schedule if enabling watch-only from this dialog path? Keep both allowed.
+    } else if (choice.mode === "schedule") {
+      app.analysisTriggers = {
+        ...app.analysisTriggers,
+        scheduleEnabled: true,
+        cron: choice.cron,
+      };
+      await startAnalysisSchedule(app.projectPath, choice.cron);
+    }
+
+    persist();
+    updateRunButtonHint();
+
+    if (choice.runImmediately) {
+      startAnalysisRun();
+    }
+  }
+
+  async function handleRunAnalysis() {
+    if (!app.projectPath) return;
+    if (rulesState.loading || rulesState.rules.length === 0) {
+      await initRulesPanel();
+    }
+    if (app.selectedRules.size === 0) {
+      alert("Select at least one analysis rule.");
+      return;
+    }
+
+    if (analysisManager.hasRunning()) {
+      startAnalysisRun();
+      return;
+    }
+
+    const choice = await showAnalysisDialog(app.selectedRules.size, {
+      mode: "now",
+      debounceMs: app.analysisTriggers.watchDebounceMs,
+      cron: app.analysisTriggers.cron,
+      runImmediately: true,
+    });
+    if (!choice) return;
+
+    try {
+      await applyRunChoice(choice);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Auto-triggers from Rust (watch / cron)
+  void listenAnalysisTriggers((event) => {
+    if (!app.projectPath || event.projectPath !== app.projectPath) return;
+    if (app.selectedRules.size === 0) return;
+    if (analysisManager.hasRunning()) return;
+    startAnalysisRun();
+  });
+
+  async function restoreAnalysisTriggers(projectPath: string): Promise<void> {
+    try {
+      if (app.analysisTriggers.watchEnabled) {
+        await startAnalysisWatch(
+          projectPath,
+          app.analysisTriggers.watchDebounceMs,
+        );
+      } else {
+        await stopAnalysisWatch();
+      }
+      if (app.analysisTriggers.scheduleEnabled) {
+        await startAnalysisSchedule(projectPath, app.analysisTriggers.cron);
+      } else {
+        await stopAnalysisSchedule();
+      }
+    } catch (err) {
+      console.warn("Failed to restore analysis triggers:", err);
+    }
+    updateRunButtonHint();
   }
 
   btnOpen.addEventListener("click", handleOpenProject);
@@ -1247,6 +1548,14 @@ export async function startApp(): Promise<void> {
           visibleIds: persisted.visibleModuleIds,
           camera: persisted.camera,
           selectedId: persisted.selectedNodeId,
+        }).then(() => {
+          if (app.hierarchy && !app.analysisResult?.dsm) {
+            const dsm = computeDsm(app.hierarchy);
+            app.analysisResult = { ...app.analysisResult!, dsm };
+            resultsPanel.setResult(app.analysisResult);
+            persistAnalysis();
+          }
+          refreshDsmView();
         });
       }, 3000);
     });

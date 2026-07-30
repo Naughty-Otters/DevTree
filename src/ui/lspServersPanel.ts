@@ -80,6 +80,7 @@ function serverRow(
   container: HTMLElement,
 ): HTMLElement {
   const settingsDefs = server.settings ?? [];
+  const detailDefs = settingsDefs.filter((def) => def.key !== "enabled");
   const expanded = state.expandedServerId === server.id;
   const enabled = Boolean(state.settings[server.id]?.enabled ?? true);
 
@@ -91,13 +92,22 @@ function serverRow(
   const top = document.createElement("div");
   top.className = "lsp-server-top";
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "lsp-server-toggle";
-  toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "lsp-server-enabled";
+  checkbox.checked = enabled;
+  checkbox.title = enabled ? "Disable server" : "Enable server";
+  checkbox.addEventListener("change", () => {
+    if (!state.settings[server.id]) state.settings[server.id] = {};
+    state.settings[server.id].enabled = checkbox.checked;
+    handlers.onSettingsChange({ ...state.settings });
+    createLspServersPanel(container, state, handlers);
+  });
 
-  const info = document.createElement("div");
+  const info = document.createElement("button");
+  info.type = "button";
   info.className = "lsp-server-info";
+  info.title = enabled ? "Disable server" : "Enable server";
 
   const name = document.createElement("div");
   name.className = "lsp-server-name";
@@ -114,11 +124,33 @@ function serverRow(
   }
 
   info.append(name, meta);
+  info.addEventListener("click", () => {
+    checkbox.checked = !checkbox.checked;
+    checkbox.dispatchEvent(new Event("change"));
+  });
 
-  const chevron = document.createElement("span");
-  chevron.className = "lsp-server-chevron";
-  chevron.setAttribute("aria-hidden", "true");
-  if (settingsDefs.length > 0) {
+  const expandBtn = document.createElement("button");
+  expandBtn.type = "button";
+  expandBtn.className = "lsp-server-expand";
+  expandBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  expandBtn.disabled = detailDefs.length === 0;
+  expandBtn.title =
+    detailDefs.length === 0
+      ? "No settings"
+      : expanded
+        ? "Collapse settings"
+        : "Expand settings";
+  expandBtn.setAttribute(
+    "aria-label",
+    detailDefs.length === 0
+      ? "No settings"
+      : `Expand or collapse settings for ${server.label}`,
+  );
+
+  if (detailDefs.length > 0) {
+    const chevron = document.createElement("span");
+    chevron.className = "lsp-server-chevron";
+    chevron.setAttribute("aria-hidden", "true");
     chevron.appendChild(
       lucideIcon(ChevronDown, {
         size: 14,
@@ -126,15 +158,13 @@ function serverRow(
         "stroke-width": 1.75,
       }),
     );
+    expandBtn.appendChild(chevron);
+    expandBtn.addEventListener("click", () => {
+      state.expandedServerId =
+        state.expandedServerId === server.id ? null : server.id;
+      createLspServersPanel(container, state, handlers);
+    });
   }
-
-  toggle.append(info, chevron);
-  toggle.addEventListener("click", () => {
-    if (settingsDefs.length === 0) return;
-    state.expandedServerId =
-      state.expandedServerId === server.id ? null : server.id;
-    createLspServersPanel(container, state, handlers);
-  });
 
   const badge = document.createElement("span");
   badge.className =
@@ -144,7 +174,7 @@ function serverRow(
   badge.textContent =
     server.status === "installed" ? "Installed" : "Missing";
 
-  top.append(toggle, badge);
+  top.append(checkbox, info, expandBtn, badge);
   row.appendChild(top);
 
   const actions = document.createElement("div");
@@ -164,10 +194,10 @@ function serverRow(
 
   row.appendChild(actions);
 
-  if (settingsDefs.length > 0 && expanded) {
+  if (detailDefs.length > 0 && expanded) {
     const settingsEl = document.createElement("div");
     settingsEl.className = "lsp-server-settings";
-    for (const def of settingsDefs) {
+    for (const def of detailDefs) {
       settingsEl.appendChild(
         settingControl(server.id, def, state, handlers, container),
       );

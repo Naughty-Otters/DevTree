@@ -96,13 +96,24 @@ function languageRow(
   const top = document.createElement("div");
   top.className = "linter-lang-top";
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "linter-lang-toggle";
-  toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "linter-lang-enabled";
+  checkbox.checked = enabled;
+  checkbox.title = enabled ? "Disable language linter" : "Enable language linter";
+  checkbox.addEventListener("change", () => {
+    if (!state.settings[group.id]) state.settings[group.id] = {};
+    state.settings[group.id].enabled = checkbox.checked;
+    handlers.onSettingsChange({ ...state.settings });
+    createLintersPanel(container, state, handlers);
+  });
 
-  const info = document.createElement("div");
+  const info = document.createElement("button");
+  info.type = "button";
   info.className = "linter-lang-info";
+  info.title = enabled
+    ? "Disable language linter"
+    : "Enable language linter";
 
   const name = document.createElement("div");
   name.className = "linter-lang-name";
@@ -122,9 +133,24 @@ function languageRow(
   }
 
   info.append(name, meta);
+  info.addEventListener("click", () => {
+    checkbox.checked = !checkbox.checked;
+    checkbox.dispatchEvent(new Event("change"));
+  });
+
+  const expandBtn = document.createElement("button");
+  expandBtn.type = "button";
+  expandBtn.className = "linter-lang-expand";
+  expandBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+  expandBtn.title = expanded ? "Collapse settings" : "Expand settings";
+  expandBtn.setAttribute(
+    "aria-label",
+    `Expand or collapse settings for ${group.label}`,
+  );
 
   const chevron = document.createElement("span");
   chevron.className = "linter-lang-chevron";
+  chevron.setAttribute("aria-hidden", "true");
   chevron.appendChild(
     lucideIcon(ChevronDown, {
       size: 14,
@@ -132,9 +158,8 @@ function languageRow(
       "stroke-width": 1.75,
     }),
   );
-
-  toggle.append(info, chevron);
-  toggle.addEventListener("click", () => {
+  expandBtn.appendChild(chevron);
+  expandBtn.addEventListener("click", () => {
     state.expandedLanguageId =
       state.expandedLanguageId === group.id ? null : group.id;
     createLintersPanel(container, state, handlers);
@@ -148,16 +173,12 @@ function languageRow(
   badge.textContent =
     selected?.status === "installed" ? "Ready" : "Missing";
 
-  top.append(toggle, badge);
+  top.append(checkbox, info, expandBtn, badge);
   row.appendChild(top);
 
   if (expanded) {
     const settingsEl = document.createElement("div");
     settingsEl.className = "linter-lang-settings";
-
-    settingsEl.appendChild(
-      boolSetting(group.id, "enabled", "Use during validation", state, handlers, container),
-    );
 
     settingsEl.appendChild(
       linterSelect(group, state, handlers, container),
@@ -323,36 +344,6 @@ function levelSelect(
   });
 
   row.append(label, select);
-  return row;
-}
-
-function boolSetting(
-  languageId: string,
-  key: string,
-  text: string,
-  state: LintersPanelState,
-  handlers: { onSettingsChange: (settings: LinterSettingsMap) => void },
-  container: HTMLElement,
-): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "linter-setting";
-
-  const label = document.createElement("label");
-  label.className = "linter-setting-label";
-  label.textContent = text;
-
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.className = "linter-setting-input";
-  input.checked = Boolean(state.settings[languageId]?.[key] ?? true);
-  input.addEventListener("change", () => {
-    if (!state.settings[languageId]) state.settings[languageId] = {};
-    state.settings[languageId][key] = input.checked;
-    handlers.onSettingsChange({ ...state.settings });
-    createLintersPanel(container, state, handlers as never);
-  });
-
-  row.append(label, input);
   return row;
 }
 

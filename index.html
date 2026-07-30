@@ -41,17 +41,131 @@
           <main id="center-panel">
             <div id="view-tabs">
               <button class="view-tab active" data-view="graph">Graph</button>
+              <button class="view-tab" data-view="dsm">DSM</button>
               <button class="view-tab" data-view="file">File</button>
             </div>
             <div id="graph-nav" class="graph-nav"></div>
             <div id="center-content">
               <canvas id="graph-canvas"></canvas>
+              <div id="dsm-view" class="hidden"></div>
               <div id="file-viewer" class="hidden"></div>
               <div id="graph-overlay" class="graph-overlay hidden">
                 <span id="graph-overlay-text"></span>
               </div>
             </div>
           </main>
+
+          <div
+            id="right-resize-handle"
+            class="resize-handle resize-handle-col hidden"
+            data-resize="right"
+            data-tooltip="Resize settings panel"
+          ></div>
+
+          <aside id="right-panel" class="hidden" aria-hidden="true">
+            <header class="settings-header">
+              <h2 id="settings-title">Settings</h2>
+              <button id="btn-close-settings" class="btn btn-icon btn-ghost" title="Close settings"></button>
+            </header>
+            <div class="settings-body settings-accordion">
+              <section class="settings-accordion-item is-open" data-settings-section="rules">
+                <div class="settings-accordion-header">
+                  <span class="settings-accordion-label">Analysis Rules</span>
+                  <button
+                    type="button"
+                    class="settings-accordion-expand"
+                    aria-expanded="true"
+                    aria-label="Expand or collapse Analysis Rules"
+                  >
+                    <span class="settings-accordion-chevron" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="settings-accordion-panel">
+                  <div id="rules-panel" class="panel-body scrollable"></div>
+                </div>
+              </section>
+              <section class="settings-accordion-item" data-settings-section="linters">
+                <div class="settings-accordion-header">
+                  <span class="settings-accordion-label">Language Linters</span>
+                  <button
+                    type="button"
+                    class="settings-accordion-expand"
+                    aria-expanded="false"
+                    aria-label="Expand or collapse Language Linters"
+                  >
+                    <span class="settings-accordion-chevron" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="settings-accordion-panel">
+                  <div id="linters-panel" class="panel-body scrollable"></div>
+                </div>
+              </section>
+              <section class="settings-accordion-item" data-settings-section="llm-configs">
+                <div class="settings-accordion-header">
+                  <span class="settings-accordion-label">LLM Configurations</span>
+                  <button
+                    type="button"
+                    class="settings-accordion-expand"
+                    aria-expanded="false"
+                    aria-label="Expand or collapse LLM Configurations"
+                  >
+                    <span class="settings-accordion-chevron" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="settings-accordion-panel">
+                  <div id="llm-provider-configs-panel" class="panel-body scrollable"></div>
+                </div>
+              </section>
+              <section class="settings-accordion-item" data-settings-section="llm-runtime">
+                <div class="settings-accordion-header">
+                  <span class="settings-accordion-label">LLM Runtime</span>
+                  <button
+                    type="button"
+                    class="settings-accordion-expand"
+                    aria-expanded="false"
+                    aria-label="Expand or collapse LLM Runtime"
+                  >
+                    <span class="settings-accordion-chevron" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="settings-accordion-panel">
+                  <div id="llm-runtime-settings-panel" class="panel-body scrollable"></div>
+                </div>
+              </section>
+              <section class="settings-accordion-item" data-settings-section="architecture">
+                <div class="settings-accordion-header">
+                  <span class="settings-accordion-label">Architecture / Design Rules</span>
+                  <button
+                    type="button"
+                    class="settings-accordion-expand"
+                    aria-expanded="false"
+                    aria-label="Expand or collapse Architecture Design Rules"
+                  >
+                    <span class="settings-accordion-chevron" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="settings-accordion-panel">
+                  <div id="design-rules-panel" class="panel-body scrollable"></div>
+                </div>
+              </section>
+              <section class="settings-accordion-item" data-settings-section="lsp">
+                <div class="settings-accordion-header">
+                  <span class="settings-accordion-label">LSP Servers</span>
+                  <button
+                    type="button"
+                    class="settings-accordion-expand"
+                    aria-expanded="false"
+                    aria-label="Expand or collapse LSP Servers"
+                  >
+                    <span class="settings-accordion-chevron" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="settings-accordion-panel">
+                  <div id="lsp-servers-panel" class="panel-body scrollable"></div>
+                </div>
+              </section>
+            </div>
+          </aside>
         </div>
 
         <div class="resize-handle resize-handle-row" data-resize="bottom" data-tooltip="Resize results panel"></div>
@@ -59,63 +173,6 @@
         <footer id="bottom-panel">
           <div id="results-panel"></div>
         </footer>
-      </div>
-
-      <div id="settings-overlay" class="hidden" aria-hidden="true">
-        <div class="settings-backdrop"></div>
-        <aside id="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-          <header class="settings-header">
-            <h2 id="settings-title">Settings</h2>
-            <button id="btn-close-settings" class="btn btn-icon btn-ghost" title="Close settings"></button>
-          </header>
-          <div class="settings-body settings-accordion">
-            <section class="settings-accordion-item is-open" data-settings-section="rules">
-              <button type="button" class="settings-accordion-trigger" aria-expanded="true">
-                <span>Analysis Rules</span>
-                <span class="settings-accordion-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="settings-accordion-panel">
-                <div id="rules-panel" class="panel-body scrollable"></div>
-              </div>
-            </section>
-            <section class="settings-accordion-item" data-settings-section="linters">
-              <button type="button" class="settings-accordion-trigger" aria-expanded="false">
-                <span>Language Linters</span>
-                <span class="settings-accordion-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="settings-accordion-panel">
-                <div id="linters-panel" class="panel-body scrollable"></div>
-              </div>
-            </section>
-            <section class="settings-accordion-item" data-settings-section="llm-configs">
-              <button type="button" class="settings-accordion-trigger" aria-expanded="false">
-                <span>LLM Configurations</span>
-                <span class="settings-accordion-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="settings-accordion-panel">
-                <div id="llm-provider-configs-panel" class="panel-body scrollable"></div>
-              </div>
-            </section>
-            <section class="settings-accordion-item" data-settings-section="llm-runtime">
-              <button type="button" class="settings-accordion-trigger" aria-expanded="false">
-                <span>LLM Runtime</span>
-                <span class="settings-accordion-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="settings-accordion-panel">
-                <div id="llm-runtime-settings-panel" class="panel-body scrollable"></div>
-              </div>
-            </section>
-            <section class="settings-accordion-item" data-settings-section="lsp">
-              <button type="button" class="settings-accordion-trigger" aria-expanded="false">
-                <span>LSP Servers</span>
-                <span class="settings-accordion-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="settings-accordion-panel">
-                <div id="lsp-servers-panel" class="panel-body scrollable"></div>
-              </div>
-            </section>
-          </div>
-        </aside>
       </div>
     </div>
   </body>
