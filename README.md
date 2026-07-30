@@ -135,13 +135,23 @@ CI on `main` runs tests with coverage, builds macOS (Apple Silicon) + Windows ar
 
 ### Releasing
 
+**Manual (Actions UI):** GitHub → **Actions** → **Release** → **Run workflow** → enter version (e.g. `0.1.0`) → Run. Creates a draft GitHub Release for `v{version}` **and** uploads the same installers as **Actions artifacts** on that run (download from the workflow summary).
+
+**Tag push:**
+
 ```bash
 npm run sync:version
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Draft GitHub Release + optional npm / Homebrew tap updates when `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN` are set. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+Or from a machine with `gh` auth:
+
+```bash
+gh workflow run Release -f version=0.1.0 -f draft=true
+```
+
+Optional npm / Homebrew tap updates run when `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN` are set. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 ### Project layout
 

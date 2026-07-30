@@ -37,6 +37,8 @@ brew tap Naughty-Otters/tap && brew install --cask devtree
 | 3 | Fill Homebrew cask sha256 from mac DMG | `release.yml` mac job → `node scripts/update-homebrew-cask.mjs` |
 | 4 | Push cask to tap (optional) | `release.yml` → `homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set |
 | 5 | GitHub Release assets | `tauri-action` (DMG / MSI / NSIS) — required for `devtree install` |
+| 6 | GitHub Actions artifacts | Same installers uploaded on the Release workflow run (`DevTree-vX.Y.Z-<target>`, 90-day retention) |
+| 7 | Manual release | Actions → **Release** → **Run workflow** (or `gh workflow run Release -f version=0.1.0`) |
 
 Secrets:
 

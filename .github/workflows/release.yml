@@ -1,4 +1,4 @@
-# Tag push → GitHub Release + optional npm / Homebrew tap updates
+# Tag push *or* manual run → GitHub Release + Actions artifacts + optional npm / Homebrew
 # (same distribution surface as Naughty-Otters/Teralexi).
 name: Release
 
@@ -6,13 +6,69 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.0 or v0.1.0). Must match package.json."
+        required: true
+        type: string
+      draft:
+        description: "Create a draft release (recommended)"
+        required: false
+        type: boolean
+        default: true
+      prerelease:
+        description: "Mark release as prerelease"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      draft: ${{ steps.resolve.outputs.draft }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW="${{ inputs.version }}"
+            DRAFT="${{ inputs.draft }}"
+            PRERELEASE="${{ inputs.prerelease }}"
+          else
+            RAW="${{ github.ref_name }}"
+            DRAFT="true"
+            PRERELEASE="false"
+          fi
+          VERSION="${RAW#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "::error::Invalid version '$RAW' (expected semver like 0.1.0)"
+            exit 1
+          fi
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "$VERSION" ] && [ "$PKG" != "${VERSION%%-*}" ]; then
+            echo "::warning::package.json version is $PKG but release version is $VERSION — sync with npm run sync:version before publishing npm"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "draft=$DRAFT" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Release tag: v$VERSION (draft=$DRAFT prerelease=$PRERELEASE)"
+
   release:
     name: Release (${{ matrix.platform }})
+    needs: meta
     strategy:
       fail-fast: false
       matrix:
@@ -52,23 +108,36 @@ jobs:
           APPLE_SIGNING_IDENTITY: "-"
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: DevTree ${{ github.ref_name }}
+          tagName: ${{ needs.meta.outputs.tag }}
+          releaseName: DevTree ${{ needs.meta.outputs.tag }}
           releaseBody: |
             Download DevTree for your platform from the assets below.
 
             **Install options**
             - **GitHub Releases** — DMG / Windows installer (this page)
-            - **npm CLI** — `npm i -g devtree-ai@latest` then `devtree open`
+            - **npm CLI** — `npm i -g devtree-ai@latest` then `devtree install && devtree open`
             - **Homebrew (macOS)** — `brew tap Naughty-Otters/tap && brew install --cask devtree`
 
             **macOS (Apple Silicon)** — `aarch64` build from `macos-latest`
             **Windows** — `x86_64-pc-windows-msvc` installer
 
             > **Note:** Builds are currently unsigned. macOS may require right-click → Open on first launch.
-          releaseDraft: true
-          prerelease: false
+          releaseDraft: ${{ needs.meta.outputs.draft == 'true' }}
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
           args: --target ${{ matrix.target }} --no-sign
+
+      # Also keep installers on the workflow run (Actions Artifacts), not only GitHub Releases.
+      - name: Upload build artifacts to GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: DevTree-${{ needs.meta.outputs.tag }}-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Update Homebrew cask sha256 (from DMG)
         if: matrix.platform == 'macos-latest'
@@ -89,7 +158,7 @@ jobs:
 
   npm-publish-cli:
     name: Publish devtree-ai to npm
-    needs: release
+    needs: [meta, release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -117,7 +186,7 @@ jobs:
 
   homebrew-tap:
     name: Update Homebrew tap cask
-    needs: release
+    needs: [meta, release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -129,6 +198,7 @@ jobs:
       - name: Push Casks/devtree.rb to Naughty-Otters/homebrew-tap
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ needs.meta.outputs.tag }}
         run: |
           set -euo pipefail
           if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
@@ -147,5 +217,5 @@ jobs:
             echo "Homebrew tap already up to date."
             exit 0
           fi
-          git commit -m "chore: update devtree cask to ${GITHUB_REF_NAME}"
+          git commit -m "chore: update devtree cask to ${RELEASE_TAG}"
           git push
