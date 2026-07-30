@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -e
+
+echo "pre-commit: running full test suite..."
+npm run test:all
+
+echo "pre-commit checks passed."

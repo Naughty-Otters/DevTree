@@ -1,13 +1,7 @@
 #!/usr/bin/env sh
 set -e
 
-echo "Running per-file unit test check..."
-npm run test:files
+echo "pre-push: running full test suite (files + Rust + coverage)..."
+npm run test:all
 
-echo "Running Rust tests..."
-npm run test:rust
-
-echo "Running TypeScript tests with coverage (80% minimum)..."
-npm run test:coverage
-
-echo "All tests passed."
+echo "pre-push checks passed."

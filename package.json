@@ -17,6 +17,7 @@
     "test:files": "node scripts/verify-unit-test-coverage.mjs",
     "test:coverage": "vitest run --coverage",
     "test:all": "npm run test:files && npm run test:rust && npm run test:coverage",
+    "precommit": "npm run test:all",
     "prepare": "husky"
   },
   "dependencies": {

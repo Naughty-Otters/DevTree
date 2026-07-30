@@ -9,7 +9,9 @@ Thank you for your interest in contributing!
    ```bash
    npm install
    ```
-   This also installs Git hooks (via Husky) that run the full test suite on `git push`.
+   This also installs Git hooks (via Husky):
+   - **pre-commit** — full test suite (`test:all`: per-file checks, Rust, TypeScript + coverage)
+   - **pre-push** — same full suite (`test:all`)
 3. Run the desktop app:
    ```bash
    npm run tauri dev
@@ -27,7 +29,9 @@ npm run test:all
 - **Rust:** `cargo test --workspace`
 - **TypeScript:** `npm test` (Vitest)
 
-`git push` runs the same checks automatically via the Husky pre-push hook.
+`git commit` and `git push` both run the full suite via Husky (`npm run test:all`).
+
+Run the same checks manually: `npm run precommit` or `npm run test:all`
 
 CI runs the same checks on every push and pull request.
 
