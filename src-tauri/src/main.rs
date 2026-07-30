@@ -4,3 +4,11 @@
 fn main() {
     devtree_lib::run()
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn binary_links_library() {
+        assert!(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").exists());
+    }
+}

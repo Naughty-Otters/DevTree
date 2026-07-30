@@ -42,3 +42,15 @@ pub fn list_skills() -> Vec<AgentSkillInfo> {
 pub fn skill_by_id(id: &str) -> Option<&'static AgentSkill> {
     SKILLS.iter().find(|skill| skill.id == id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_and_resolves_skills() {
+        let skills = list_skills();
+        assert!(!skills.is_empty());
+        assert!(skill_by_id(&skills[0].id).is_some());
+    }
+}

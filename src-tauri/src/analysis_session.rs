@@ -57,3 +57,17 @@ pub fn check_cancelled(cancel: &AtomicBool) -> Result<(), String> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn cancellation_flag_is_observable() {
+        let flag = AtomicBool::new(false);
+        assert!(check_cancelled(&flag).is_ok());
+        flag.store(true, Ordering::SeqCst);
+        assert!(check_cancelled(&flag).is_err());
+    }
+}

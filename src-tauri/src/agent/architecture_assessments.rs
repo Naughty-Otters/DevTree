@@ -111,3 +111,17 @@ fn cfg_bool(cfg: Option<&serde_json::Map<String, serde_json::Value>>, key: &str,
         .and_then(|v| v.as_bool())
         .unwrap_or(default)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selects_enabled_architecture_assessments() {
+        assert!(!ARCHITECTURE_ASSESSMENTS.is_empty());
+        let selected = selected_architecture_assessments(None);
+        assert!(!selected.is_empty());
+        let prompt = build_architecture_assessment_prompt(None);
+        assert!(prompt.contains("Selected assessments"));
+    }
+}

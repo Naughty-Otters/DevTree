@@ -9,6 +9,7 @@ Thank you for your interest in contributing!
    ```bash
    npm install
    ```
+   This also installs Git hooks (via Husky) that run the full test suite on `git push`.
 3. Run the desktop app:
    ```bash
    npm run tauri dev
@@ -22,8 +23,11 @@ Run the full test suite before opening a pull request:
 npm run test:all
 ```
 
+- **Coverage:** `npm run test:coverage` — core logic modules must meet **≥80%** line/statement/function coverage (branches ≥65%); UI/integration layers use per-file smoke tests
 - **Rust:** `cargo test --workspace`
 - **TypeScript:** `npm test` (Vitest)
+
+`git push` runs the same checks automatically via the Husky pre-push hook.
 
 CI runs the same checks on every push and pull request.
 

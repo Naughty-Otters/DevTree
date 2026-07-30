@@ -119,3 +119,14 @@ fn is_likely_chat_model(id: &str) -> bool {
     ];
     !EXCLUDED.iter().any(|needle| lower.contains(needle))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_likely_chat_model;
+
+    #[test]
+    fn filters_embedding_models() {
+        assert!(!is_likely_chat_model("text-embedding-3-small"));
+        assert!(is_likely_chat_model("gpt-4o-mini"));
+    }
+}

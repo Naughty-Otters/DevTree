@@ -397,3 +397,13 @@ fn run_install(program: &str, args: &[String]) -> (bool, String) {
     }
     (output.status.success(), text)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_lsp_servers() {
+        assert!(!list_lsp_servers().is_empty());
+    }
+}

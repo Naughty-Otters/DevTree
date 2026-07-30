@@ -93,3 +93,14 @@ pub enum AgentEventKind {
     },
     Cancelled,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_provider_enum() {
+        let provider = LlmProvider::Openai;
+        assert_eq!(format!("{provider:?}"), "Openai");
+    }
+}

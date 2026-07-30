@@ -192,3 +192,14 @@ pub fn resolve_which(name: &str) -> Option<String> {
         Some(first.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_rust_files() {
+        assert_eq!(file_language("src/main.rs"), Some(LanguageKind::Rust));
+        assert!(linters_for(LanguageKind::Rust).len() > 0);
+    }
+}

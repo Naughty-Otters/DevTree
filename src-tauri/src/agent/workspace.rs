@@ -67,3 +67,14 @@ pub fn should_skip_dir(name: &str) -> bool {
         ".git" | "node_modules" | "target" | "dist" | "build" | ".next" | "__pycache__"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_common_vendor_dirs() {
+        assert!(should_skip_dir("node_modules"));
+        assert!(!should_skip_dir("src"));
+    }
+}

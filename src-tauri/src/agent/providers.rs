@@ -229,3 +229,13 @@ pub async fn run_validation_provider_stream(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::list_providers;
+
+    #[test]
+    fn lists_llm_providers() {
+        assert!(!list_providers().is_empty());
+    }
+}

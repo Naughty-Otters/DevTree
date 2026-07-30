@@ -537,3 +537,14 @@ All paths and commands must stay within the current project root.\n\n";
 
     results
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_ai_validation_rules() {
+        assert!(is_ai_validation_rule("ai_architecture"));
+        assert!(!rule_definitions().is_empty());
+    }
+}

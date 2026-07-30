@@ -424,3 +424,14 @@ where
         .tool(GrepTool)
         .tool(ShellTool)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_blocked_shell_command;
+
+    #[test]
+    fn blocks_destructive_shell_commands() {
+        assert!(is_blocked_shell_command("rm -rf /"));
+        assert!(!is_blocked_shell_command("cargo test"));
+    }
+}

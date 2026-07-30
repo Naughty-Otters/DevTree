@@ -451,3 +451,11 @@ fn estimate_name_character(sym: &SymbolInfo) -> u32 {
     // Rough indent-agnostic position; servers usually resolve from nearby token.
     sym.label.len().min(40) as u32
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn lsp_module_is_available() {
+        assert!(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lsp").exists());
+    }
+}

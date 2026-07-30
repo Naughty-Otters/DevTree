@@ -363,3 +363,14 @@ fn flush_validation_text(text_buffer: &mut String) {
         let _ = std::mem::take(text_buffer);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_preamble_includes_skill_instructions() {
+        let preamble = build_preamble("Do the thing.");
+        assert!(preamble.contains("Do the thing."));
+    }
+}

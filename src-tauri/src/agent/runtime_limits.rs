@@ -29,3 +29,15 @@ pub fn clamp_agent_turns(value: u32) -> u32 {
 pub fn turns_as_usize(value: u32) -> usize {
     value.max(MIN_TURNS) as usize
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamps_validation_and_agent_turns() {
+        assert_eq!(clamp_validation_turns(0), DEFAULT_VALIDATION_MAX_TURNS);
+        assert_eq!(clamp_agent_turns(9999), MAX_AGENT_TURNS);
+        assert_eq!(turns_as_usize(2), MIN_TURNS as usize);
+    }
+}

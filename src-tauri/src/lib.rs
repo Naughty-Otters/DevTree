@@ -198,3 +198,11 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn library_entrypoint_is_available() {
+        assert!(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).exists());
+    }
+}

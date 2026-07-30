@@ -97,3 +97,14 @@ pub async fn run_agent_skill(
 pub fn cancel_agent_run(run_id: String, registry: tauri::State<'_, AnalysisSessionRegistry>) -> bool {
     registry.cancel(&run_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_agent_skills_and_providers() {
+        assert!(!list_agent_skills().is_empty());
+        assert!(!list_llm_providers().is_empty());
+    }
+}

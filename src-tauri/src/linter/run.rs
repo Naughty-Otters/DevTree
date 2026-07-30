@@ -739,3 +739,14 @@ fn normalize_severity(s: &str) -> String {
 fn strip_root_prefix(path: &str) -> String {
     path.replace('\\', "/")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_severity;
+
+    #[test]
+    fn normalizes_linter_severity_labels() {
+        assert_eq!(normalize_severity("error"), "error");
+        assert_eq!(normalize_severity("WARN"), "warning");
+    }
+}

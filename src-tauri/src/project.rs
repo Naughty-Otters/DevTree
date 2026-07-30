@@ -210,3 +210,16 @@ pub fn scan_project(root_path: &str) -> Result<ProjectScan, String> {
         modules,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scans_current_crate_as_project() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let scan = scan_project(root).expect("scan");
+        assert_eq!(scan.root, root);
+        assert!(!scan.modules.is_empty());
+    }
+}

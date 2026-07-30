@@ -372,3 +372,18 @@ fn parse_locations(value: &Value) -> Vec<RefLocation> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_locations;
+    use serde_json::json;
+
+    #[test]
+    fn parses_reference_locations() {
+        let value = json!([{
+            "uri": "file:///tmp/a.ts",
+            "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } }
+        }]);
+        assert_eq!(parse_locations(&value).len(), 1);
+    }
+}

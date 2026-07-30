@@ -72,3 +72,14 @@ pub fn save_persisted_state(
 pub fn get_db_path() -> Result<String, String> {
     db_path().map(|p| p.to_string_lossy().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_path_ends_with_devtree_db() {
+        let path = db_path().expect("db path");
+        assert!(path.to_string_lossy().ends_with("devtree.db"));
+    }
+}

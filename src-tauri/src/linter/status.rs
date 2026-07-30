@@ -360,3 +360,14 @@ fn run_install(program: &str, args: &[String]) -> (bool, String) {
     }
     (output.status.success(), text)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_language_linters() {
+        assert!(!list_language_linters().is_empty());
+        assert!(!default_linter_settings().is_empty());
+    }
+}
