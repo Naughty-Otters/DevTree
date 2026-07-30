@@ -32,11 +32,15 @@ This document tracks DevTree's readiness for public open-source distribution.
 
 ## Distribution
 
+Publish target is **GitHub only** (CI Actions artifacts + GitHub Releases). Users download installers from the repo Releases page — no App Store, Homebrew, or other registries.
+
 | Item | Status |
 |------|--------|
-| macOS builds (Apple Silicon + Intel) | CI + release matrix |
+| macOS builds (Apple Silicon) | CI + release matrix |
 | Windows builds (x64) | CI + release matrix |
 | Linux builds | Not in release matrix yet — add if needed |
+| CI uploads | GitHub Actions artifacts only |
+| Release uploads | GitHub Releases only (draft → publish for downloads) |
 | CI / release code signing | Explicitly disabled (`--no-sign`, `APPLE_SIGNING_IDENTITY=-`, `CSC_IDENTITY_AUTO_DISCOVERY=false`) — same pattern as unsigned staging in OpenFDE CI |
 | Signed / notarized macOS binaries | Not automated — add `APPLE_*` secrets to `release.yml` when ready |
 | Windows code signing | Not automated — optional for OSS |
@@ -46,7 +50,7 @@ This document tracks DevTree's readiness for public open-source distribution.
 1. Replace placeholder `authors` in `src-tauri/Cargo.toml` with real names or org.
 2. Set GitHub repository URL in `package.json` / README badge once published.
 3. Run `npm run test:all` and `npm run tauri build` on a clean machine.
-4. Tag `v0.1.0` (or current version) to trigger the release workflow; review the draft release assets.
+4. Tag `v0.1.0` (or current version) to trigger the release workflow; review the draft on GitHub, then publish so users can download.
 5. Audit dependencies: `cargo audit`, `npm audit` (optional but recommended).
 
 ## Known limitations for contributors

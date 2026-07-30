@@ -1,3 +1,5 @@
+# Tag push → GitHub Release only (users download installers from the Releases page).
+# No App Store, Homebrew, crates.io, or other external publish targets.
 name: Release
 
 on:
@@ -50,12 +52,13 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: DevTree ${{ github.ref_name }}
           releaseBody: |
-            See the assets below to download DevTree for your platform.
+            Download DevTree for your platform from the assets below (GitHub Releases only).
 
             **macOS (Apple Silicon)** — `aarch64` build from `macos-latest`
             **Windows** — `x86_64-pc-windows-msvc` installer
 
             > **Note:** Builds are currently unsigned. macOS may require right-click → Open on first launch.
+          # Draft until reviewed; publish the draft on GitHub so users can download.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }} --no-sign

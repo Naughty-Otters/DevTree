@@ -1,5 +1,7 @@
 name: CI
 
+# Builds stay on GitHub only (Actions artifacts). User-facing downloads come from GitHub Releases.
+
 on:
   push:
     branches: [main, master]
@@ -114,6 +116,18 @@ jobs:
         run: npm run tauri build -- --target ${{ matrix.target }} --no-sign
         env:
           CI: true
-          # CI artifacts are unsigned; add signing secrets in release.yml when ready.
+          # CI artifacts are unsigned; signing secrets belong in release.yml when ready.
           APPLE_SIGNING_IDENTITY: "-"
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      # Publish build outputs only to GitHub Actions (no App Store / Homebrew / etc.).
+      - name: Upload build artifacts to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: DevTree-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+          if-no-files-found: warn
+          retention-days: 14

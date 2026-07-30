@@ -65,11 +65,11 @@ npm test
 npm run test:all
 ```
 
-CI runs tests and builds macOS (Apple Silicon + Intel) and Windows artifacts on every push to `main`.
+CI runs tests and builds macOS (Apple Silicon) and Windows on every push to `main`, then uploads installers as **GitHub Actions artifacts** (GitHub only — no other stores).
 
 ## Releasing
 
-Push a version tag to create a draft GitHub Release with platform binaries:
+Distribution is **GitHub Releases only**. Push a version tag to create a draft release with platform binaries; publish the draft on GitHub so users can download:
 
 ```bash
 git tag v0.1.0
