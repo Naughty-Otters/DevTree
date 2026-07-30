@@ -150,9 +150,54 @@ export function architectureAssessmentSettingDefs(): RuleSettingDef[] {
   }));
 }
 
+/** Selectable code-review lenses for `ai_code_review`. */
+export const CODE_REVIEW_LENS_KEYS = [
+  "review_performance",
+  "review_security",
+  "review_universal_quality",
+  "review_common_bugs",
+  "review_sql_injection",
+  "review_xss",
+  "review_n_plus_one",
+  "review_error_handling",
+  "review_async_concurrency",
+  "review_anti_patterns",
+  "review_logging",
+] as const;
+
+export type CodeReviewLensKey = (typeof CODE_REVIEW_LENS_KEYS)[number];
+
+const CODE_REVIEW_LENS_LABELS: Record<CodeReviewLensKey, string> = {
+  review_performance: "Performance",
+  review_security: "Security",
+  review_universal_quality: "Universal quality",
+  review_common_bugs: "Common bugs",
+  review_sql_injection: "SQL injection",
+  review_xss: "XSS prevention",
+  review_n_plus_one: "N+1 queries",
+  review_error_handling: "Error handling",
+  review_async_concurrency: "Async & concurrency",
+  review_anti_patterns: "Anti-patterns",
+  review_logging: "Logging strategy",
+};
+
+export function isCodeReviewLensKey(key: string): boolean {
+  return (CODE_REVIEW_LENS_KEYS as readonly string[]).includes(key);
+}
+
+export function codeReviewLensSettingDefs(): RuleSettingDef[] {
+  return CODE_REVIEW_LENS_KEYS.map((key) => ({
+    key,
+    label: `Review: ${CODE_REVIEW_LENS_LABELS[key]}`,
+    kind: "boolean" as const,
+    default: true,
+  }));
+}
+
 export function shouldShowAiRuleSetting(ruleId: string, key: string): boolean {
   if (key === AI_LLM_SETTING_KEYS.override) return true;
   if (ruleId === "ai_architecture" && isArchitectureAssessmentKey(key)) return true;
+  if (ruleId === "ai_code_review" && isCodeReviewLensKey(key)) return true;
   return false;
 }
 

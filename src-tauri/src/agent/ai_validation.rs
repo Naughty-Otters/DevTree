@@ -9,6 +9,10 @@ use crate::agent::architecture_assessments::{
     architecture_rule_settings, build_architecture_assessment_prompt,
     selected_architecture_assessments,
 };
+use crate::agent::code_review_lenses::{
+    build_code_review_lens_prompt, code_review_rule_settings, selected_code_review_lenses,
+    CODE_REVIEW_SKILL_INSTRUCTIONS,
+};
 use crate::agent::providers::default_model;
 use crate::agent::run::ValidationStreamEvent;
 use crate::agent::types::LlmProvider;
@@ -92,6 +96,12 @@ const AI_RULES: &[AiValidationRuleDef] = &[
         instructions: include_str!("../../../src/ai_validation/rules/architecture.md"),
     },
     AiValidationRuleDef {
+        id: "ai_code_review",
+        name: "AI Code Reviewer",
+        description: "Cross-cutting code review with selectable lenses (performance, security, quality, XSS, N+1, error handling, concurrency, logging, etc.).",
+        instructions: CODE_REVIEW_SKILL_INSTRUCTIONS,
+    },
+    AiValidationRuleDef {
         id: "ai_maintainability",
         name: "AI Maintainability Review",
         description: "LLM review of naming, duplication, and navigability issues.",
@@ -124,10 +134,10 @@ pub fn rule_definitions() -> Vec<AnalysisRule> {
 
 fn rule_settings_for(rule_id: &str) -> Vec<RuleSettingDef> {
     let llm = ai_llm_rule_settings();
-    if rule_id == "ai_architecture" {
-        architecture_rule_settings(llm)
-    } else {
-        llm
+    match rule_id {
+        "ai_architecture" => architecture_rule_settings(llm),
+        "ai_code_review" => code_review_rule_settings(llm),
+        _ => llm,
     }
 }
 
@@ -426,11 +436,26 @@ All paths and commands must stay within the current project root.\n\n";
             continue;
         }
 
+        if rule.id == "ai_code_review" && selected_code_review_lenses(rule_cfg).is_empty() {
+            results.push(ValidationItem {
+                rule_id: rule.id.into(),
+                rule_name: rule.name.into(),
+                status: "warn".into(),
+                message: "Skipped — enable at least one code review lens in rule settings".into(),
+                affected: vec![],
+                cycle_groups: None,
+            });
+            continue;
+        }
+
         let prompt = {
             let mut prompt = base_prompt.clone();
             if rule.id == "ai_architecture" {
                 prompt.push_str("\n\n");
                 prompt.push_str(&build_architecture_assessment_prompt(rule_cfg));
+            } else if rule.id == "ai_code_review" {
+                prompt.push_str("\n\n");
+                prompt.push_str(&build_code_review_lens_prompt(rule_cfg));
             }
             prompt
         };

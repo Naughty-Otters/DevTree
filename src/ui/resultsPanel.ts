@@ -56,7 +56,7 @@ export function createResultsPanel(
     { id: "analysis", label: "Analysis" },
     { id: "health", label: "Health" },
     { id: "validation", label: "Validation" },
-    { id: "progress", label: "Validation progress" },
+    { id: "progress", label: "Progress" },
   ];
 
   const tabButtons: Record<TabId, HTMLButtonElement> = {} as Record<
@@ -267,7 +267,14 @@ export function createResultsPanel(
 
     const streamCol = document.createElement("div");
     streamCol.className = "analysis-run-stream";
-    streamCol.hidden = true;
+
+    const aiStreamHost = document.createElement("div");
+    aiStreamHost.className = "analysis-ai-stream-host";
+    const streamPlaceholder = document.createElement("div");
+    streamPlaceholder.className = "ai-stream-waiting";
+    streamPlaceholder.textContent = "AI output will appear here during validation…";
+    aiStreamHost.appendChild(streamPlaceholder);
+    streamCol.appendChild(aiStreamHost);
 
     body.append(progressCol, streamCol);
     root.append(header, body);
@@ -286,7 +293,7 @@ export function createResultsPanel(
       rulesList: null,
       pipelineBars,
       ruleBars: new Map(),
-      aiStreamHost: null,
+      aiStreamHost,
     };
   }
 
@@ -418,22 +425,22 @@ export function createResultsPanel(
 
     syncRuleTaskBars(refs, ruleTasks, currentStage, progress);
 
+    // Progress tab always keeps the progress column + AI text channel visible.
+    refs.streamCol.hidden = false;
+    refs.root.classList.add("has-ai-stream");
+    if (!refs.aiStreamHost) {
+      refs.aiStreamHost = document.createElement("div");
+      refs.aiStreamHost.className = "analysis-ai-stream-host";
+      refs.streamCol.appendChild(refs.aiStreamHost);
+    }
     if (progress?.aiStream) {
-      refs.streamCol.hidden = false;
-      refs.root.classList.add("has-ai-stream");
-      if (!refs.aiStreamHost) {
-        refs.aiStreamHost = document.createElement("div");
-        refs.aiStreamHost.className = "analysis-ai-stream-host";
-        refs.streamCol.appendChild(refs.aiStreamHost);
-      }
       renderAiStreamPreview(refs.aiStreamHost, progress.aiStream);
-    } else {
-      refs.streamCol.hidden = true;
-      refs.root.classList.remove("has-ai-stream");
-      if (refs.aiStreamHost) {
-        refs.aiStreamHost.remove();
-        refs.aiStreamHost = null;
-      }
+    } else if (!refs.aiStreamHost.querySelector(".ai-stream-preview")) {
+      refs.aiStreamHost.replaceChildren();
+      const waiting = document.createElement("div");
+      waiting.className = "ai-stream-waiting";
+      waiting.textContent = "AI output will appear here during validation…";
+      refs.aiStreamHost.appendChild(waiting);
     }
   }
 
@@ -452,7 +459,7 @@ export function createResultsPanel(
       if (!progressEmptyEl) {
         progressEmptyEl = document.createElement("div");
         progressEmptyEl.className = "panel-empty";
-        progressEmptyEl.textContent = "Run analysis to see validation progress";
+        progressEmptyEl.textContent = "Run analysis to see progress and AI output";
       }
       if (!progressHost.contains(progressEmptyEl)) {
         progressHost.replaceChildren(progressEmptyEl);
@@ -541,20 +548,21 @@ export function createResultsPanel(
   }
 
   function renderContent(): void {
-    updateProgressRuns();
+    const showProgress = activeTab === "progress";
+    progressHost.hidden = !showProgress;
+    resultsHost.hidden = showProgress;
 
+    if (showProgress) {
+      emptyHost.hidden = true;
+      updateProgressRuns();
+      return;
+    }
+
+    // Analysis / Health / Validation — never show progress bars or AI text channel.
     const hasRuns = activeRuns.length > 0;
     const hasRunning = activeRuns.some((run) => run.status === "running");
-
-    progressHost.hidden = activeTab !== "progress";
-    resultsHost.hidden = activeTab === "progress";
-
-    if (activeTab === "progress") {
-      emptyHost.hidden = true;
-    } else {
-      emptyHost.hidden = hasRunning || hasRuns || currentResult !== null;
-      renderResults();
-    }
+    emptyHost.hidden = hasRunning || hasRuns || currentResult !== null;
+    renderResults();
   }
 
   return {
@@ -563,13 +571,26 @@ export function createResultsPanel(
       renderContent();
     },
     setRuns(runs: AnalysisRun[]) {
-      const prevIds = new Set(activeRuns.map((run) => run.id));
+      const prevById = new Map(activeRuns.map((run) => [run.id, run]));
       const startedNew = runs.some(
-        (run) => run.status === "running" && !prevIds.has(run.id),
+        (run) => run.status === "running" && !prevById.has(run.id),
       );
+      const latest = runs.reduce<AnalysisRun | null>((best, run) => {
+        if (!best || run.startedAt >= best.startedAt) return run;
+        return best;
+      }, null);
+      const latestJustFinished =
+        latest != null &&
+        latest.status === "completed" &&
+        prevById.get(latest.id)?.status === "running";
+
       activeRuns = runs;
       if (startedNew) {
         setActiveTab("progress");
+        return;
+      }
+      if (latestJustFinished) {
+        setActiveTab("analysis");
         return;
       }
       renderContent();

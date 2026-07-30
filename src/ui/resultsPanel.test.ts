@@ -151,4 +151,90 @@ describe("resultsPanel", () => {
     healthTab.click();
     expect(container.querySelector(".health-poor")).toBeTruthy();
   });
+
+  it("shows Progress tab and keeps stream channel after completion", () => {
+    const container = document.createElement("div");
+    const panel = createResultsPanel(container);
+    const progressTab = [...container.querySelectorAll(".results-tab")].find(
+      (t) => t.textContent === "Progress",
+    ) as HTMLButtonElement;
+    expect(progressTab).toBeTruthy();
+
+    const startedAt = Date.now();
+    panel.setRuns([
+      {
+        id: "run-1",
+        label: "Run #1",
+        startedAt,
+        status: "running",
+        progress: {
+          analysisId: "run-1",
+          stage: "validating",
+          message: "AI reviewing…",
+          current: 1,
+          total: 2,
+          percent: 50,
+          aiStream: {
+            ruleId: "ai_code_review",
+            ruleName: "AI Code Reviewer",
+            thinking: "",
+            text: "Finding one",
+            status: "running",
+          },
+        },
+        ruleTasks: [],
+        result: null,
+        error: null,
+      },
+    ]);
+
+    expect(progressTab.classList.contains("active")).toBe(true);
+    expect(container.querySelector(".analysis-run-stream")).toBeTruthy();
+    expect(
+      container.querySelector(".analysis-run-stream")?.hasAttribute("hidden"),
+    ).toBe(false);
+    expect(container.textContent).toContain("Finding one");
+
+    panel.setRuns([
+      {
+        id: "run-1",
+        label: "Run #1",
+        startedAt,
+        status: "completed",
+        progress: {
+          analysisId: "run-1",
+          stage: "done",
+          message: "Analysis complete",
+          current: 2,
+          total: 2,
+          percent: 100,
+          aiStream: {
+            ruleId: "ai_code_review",
+            ruleName: "AI Code Reviewer",
+            thinking: "",
+            text: "Finding one",
+            status: "done",
+          },
+        },
+        ruleTasks: [],
+        result: makeResult(makeDsm()),
+        error: null,
+      },
+    ]);
+
+    const analysisTab = [...container.querySelectorAll(".results-tab")].find(
+      (t) => t.textContent === "Analysis",
+    ) as HTMLButtonElement;
+    expect(analysisTab.classList.contains("active")).toBe(true);
+    expect(
+      container.querySelector(".results-progress-content")?.hasAttribute("hidden"),
+    ).toBe(true);
+
+    progressTab.click();
+    expect(
+      container.querySelector(".results-progress-content")?.hasAttribute("hidden"),
+    ).toBe(false);
+    expect(container.querySelector(".analysis-run-stream")).toBeTruthy();
+    expect(container.textContent).toContain("Finding one");
+  });
 });

@@ -3,6 +3,7 @@ import {
   AI_LLM_SETTING_KEYS,
   architectureAssessmentSettingDefs,
   clampRuntimeSettings,
+  codeReviewLensSettingDefs,
   configurationLabel,
   configuredLlmConfigurations,
   createLlmConfiguration,
@@ -11,6 +12,7 @@ import {
   ensureSingleGlobal,
   isAiValidationRuleId,
   isArchitectureAssessmentKey,
+  isCodeReviewLensKey,
   isLlmConfigurationReady,
   migratePersistedAiSettings,
   migrateRuntimeSettings,
@@ -60,6 +62,14 @@ describe("aiValidation LLM configuration", () => {
     expect(architectureAssessmentSettingDefs().length).toBeGreaterThan(0);
     expect(shouldShowAiRuleSetting("ai_architecture", "arch_security")).toBe(true);
     expect(shouldShowAiRuleSetting("ai_other", AI_LLM_SETTING_KEYS.override)).toBe(true);
+  });
+
+  it("detects code review lens keys", () => {
+    expect(isAiValidationRuleId("ai_code_review")).toBe(true);
+    expect(isCodeReviewLensKey("review_security")).toBe(true);
+    expect(codeReviewLensSettingDefs()).toHaveLength(11);
+    expect(shouldShowAiRuleSetting("ai_code_review", "review_logging")).toBe(true);
+    expect(shouldShowAiRuleSetting("ai_architecture", "review_logging")).toBe(false);
   });
 
   it("manages global LLM configuration", () => {

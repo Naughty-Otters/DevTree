@@ -6,6 +6,7 @@ import {
   getGlobalConfiguration,
   isAiValidationRuleId,
   isArchitectureAssessmentKey,
+  isCodeReviewLensKey,
   shouldShowAiRuleSetting,
 } from "../validation/aiValidation";
 import type { LlmProviderInfo } from "../agent/types";
@@ -260,6 +261,7 @@ function ruleItem(
     );
 
     let archAssessmentHeaderAdded = false;
+    let codeReviewLensHeaderAdded = false;
 
     for (const def of settings) {
       if (isAiValidationRuleId(rule.id) && !shouldShowAiRuleSetting(rule.id, def.key)) {
@@ -277,6 +279,19 @@ function ruleItem(
         archHeader.textContent =
           "Architecture assessments to run (after discovering and mapping the project):";
         settingsEl.appendChild(archHeader);
+      }
+
+      if (
+        rule.id === "ai_code_review" &&
+        isCodeReviewLensKey(def.key) &&
+        !codeReviewLensHeaderAdded
+      ) {
+        codeReviewLensHeaderAdded = true;
+        const reviewHeader = document.createElement("p");
+        reviewHeader.className = "rule-settings-hint";
+        reviewHeader.textContent =
+          "Code review lenses to inject into the run instructions:";
+        settingsEl.appendChild(reviewHeader);
       }
 
       settingsEl.appendChild(

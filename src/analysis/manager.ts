@@ -152,11 +152,16 @@ export function createAnalysisManager(
       (progress) => {
         const current = getRun(id);
         if (!current || current.status !== "running") return;
-        current.progress = progress;
+        const prevAiStream = current.progress?.aiStream;
+        current.progress = {
+          ...progress,
+          // Later pipeline events omit aiStream — keep the last streamed output.
+          aiStream: progress.aiStream ?? prevAiStream,
+        };
         if (progress.ruleTasks?.length) {
           current.ruleTasks = mergeRuleTasks(current.ruleTasks, progress.ruleTasks);
           current.progress = {
-            ...progress,
+            ...current.progress,
             ruleTasks: current.ruleTasks,
           };
         }
@@ -165,6 +170,12 @@ export function createAnalysisManager(
             if (task.status !== "done" && task.status !== "failed") {
               task.status = "done";
             }
+          }
+          if (current.progress?.aiStream) {
+            current.progress = {
+              ...current.progress,
+              aiStream: { ...current.progress.aiStream, status: "done" },
+            };
           }
         }
         notify();

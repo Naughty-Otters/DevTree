@@ -1006,6 +1006,12 @@ body.is-resizing-v {
   min-height: 0;
 }
 
+.results-progress-content[hidden],
+.results-tab-content[hidden],
+.panel-empty[hidden] {
+  display: none !important;
+}
+
 .results-progress-content .analysis-runs-heading {
   padding-top: 2px;
 }

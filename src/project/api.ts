@@ -28,6 +28,7 @@ import {
 import {
   aiRuleLlmSettingDefs,
   architectureAssessmentSettingDefs,
+  codeReviewLensSettingDefs,
 } from "../validation/aiValidation";
 import type { ProjectScan } from "./types";
 import { mockHierarchyForFixture } from "../graph/hierarchy";
@@ -506,6 +507,10 @@ function mockRules(): AnalysisRule[] {
     ...aiLlmSettings,
     ...architectureAssessmentSettingDefs(),
   ];
+  const aiCodeReviewSettings = [
+    ...aiLlmSettings,
+    ...codeReviewLensSettingDefs(),
+  ];
   return [
     {
       id: "modularity",
@@ -699,6 +704,14 @@ function mockRules(): AnalysisRule[] {
         "Map project architecture from source, then evaluate selected assessment areas (patterns, design, security, debt, etc.).",
       category: "ai",
       settings: aiArchitectureSettings,
+    },
+    {
+      id: "ai_code_review",
+      name: "AI Code Reviewer",
+      description:
+        "Cross-cutting code review with selectable lenses (performance, security, quality, XSS, N+1, error handling, concurrency, logging, etc.).",
+      category: "ai",
+      settings: aiCodeReviewSettings,
     },
     {
       id: "ai_maintainability",
