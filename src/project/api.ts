@@ -28,6 +28,7 @@ import {
 import {
   aiRuleLlmSettingDefs,
   architectureAssessmentSettingDefs,
+  cleanCodePrincipleSettingDefs,
   codeReviewLensSettingDefs,
 } from "../validation/aiValidation";
 import type { ProjectScan } from "./types";
@@ -511,6 +512,10 @@ function mockRules(): AnalysisRule[] {
     ...aiLlmSettings,
     ...codeReviewLensSettingDefs(),
   ];
+  const aiCleanCodeSettings = [
+    ...aiLlmSettings,
+    ...cleanCodePrincipleSettingDefs(),
+  ];
   return [
     {
       id: "modularity",
@@ -712,6 +717,14 @@ function mockRules(): AnalysisRule[] {
         "Cross-cutting code review with selectable lenses (performance, security, quality, XSS, N+1, error handling, concurrency, logging, etc.).",
       category: "ai",
       settings: aiCodeReviewSettings,
+    },
+    {
+      id: "ai_clean_code",
+      name: "AI Clean Code Reviewer",
+      description:
+        "Review current workspace git changes against selectable Clean Code principles (names, functions, SRP, DRY, tests, smells, etc.).",
+      category: "ai",
+      settings: aiCleanCodeSettings,
     },
     {
       id: "ai_maintainability",

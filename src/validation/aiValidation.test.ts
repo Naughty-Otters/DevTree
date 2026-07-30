@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   AI_LLM_SETTING_KEYS,
+  aiRuleCategoryLabel,
   architectureAssessmentSettingDefs,
   clampRuntimeSettings,
+  cleanCodePrincipleSettingDefs,
   codeReviewLensSettingDefs,
   configurationLabel,
   configuredLlmConfigurations,
@@ -12,6 +14,7 @@ import {
   ensureSingleGlobal,
   isAiValidationRuleId,
   isArchitectureAssessmentKey,
+  isCleanCodePrincipleKey,
   isCodeReviewLensKey,
   isLlmConfigurationReady,
   migratePersistedAiSettings,
@@ -70,6 +73,14 @@ describe("aiValidation LLM configuration", () => {
     expect(codeReviewLensSettingDefs()).toHaveLength(11);
     expect(shouldShowAiRuleSetting("ai_code_review", "review_logging")).toBe(true);
     expect(shouldShowAiRuleSetting("ai_architecture", "review_logging")).toBe(false);
+  });
+
+  it("detects clean code principle keys", () => {
+    expect(isAiValidationRuleId("ai_clean_code")).toBe(true);
+    expect(isCleanCodePrincipleKey("clean_dry")).toBe(true);
+    expect(cleanCodePrincipleSettingDefs()).toHaveLength(11);
+    expect(shouldShowAiRuleSetting("ai_clean_code", "clean_boy_scout")).toBe(true);
+    expect(aiRuleCategoryLabel("ai")).toBe("AI Validation");
   });
 
   it("manages global LLM configuration", () => {

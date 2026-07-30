@@ -2,10 +2,12 @@ import type { AnalysisRule, RuleSettingDef, RuleSettingsMap } from "../analysis/
 import type { LlmConfiguration } from "../validation/aiValidation";
 import {
   AI_LLM_SETTING_KEYS,
+  aiRuleCategoryLabel,
   configuredLlmConfigurations,
   getGlobalConfiguration,
   isAiValidationRuleId,
   isArchitectureAssessmentKey,
+  isCleanCodePrincipleKey,
   isCodeReviewLensKey,
   shouldShowAiRuleSetting,
 } from "../validation/aiValidation";
@@ -110,7 +112,7 @@ function renderRules(
   for (const [category, rules] of Object.entries(byCategory)) {
     const catHeader = document.createElement("div");
     catHeader.className = "rules-category";
-    catHeader.textContent = category === "ai" ? "AI Validation" : category;
+    catHeader.textContent = aiRuleCategoryLabel(category);
     list.appendChild(catHeader);
 
     for (const rule of rules) {
@@ -262,6 +264,7 @@ function ruleItem(
 
     let archAssessmentHeaderAdded = false;
     let codeReviewLensHeaderAdded = false;
+    let cleanCodePrincipleHeaderAdded = false;
 
     for (const def of settings) {
       if (isAiValidationRuleId(rule.id) && !shouldShowAiRuleSetting(rule.id, def.key)) {
@@ -292,6 +295,19 @@ function ruleItem(
         reviewHeader.textContent =
           "Code review lenses to inject into the run instructions:";
         settingsEl.appendChild(reviewHeader);
+      }
+
+      if (
+        rule.id === "ai_clean_code" &&
+        isCleanCodePrincipleKey(def.key) &&
+        !cleanCodePrincipleHeaderAdded
+      ) {
+        cleanCodePrincipleHeaderAdded = true;
+        const cleanHeader = document.createElement("p");
+        cleanHeader.className = "rule-settings-hint";
+        cleanHeader.textContent =
+          "Clean Code principles to apply to current workspace changes:";
+        settingsEl.appendChild(cleanHeader);
       }
 
       settingsEl.appendChild(

@@ -194,10 +194,60 @@ export function codeReviewLensSettingDefs(): RuleSettingDef[] {
   }));
 }
 
+/** Selectable Clean Code principles for `ai_clean_code`. */
+export const CLEAN_CODE_PRINCIPLE_KEYS = [
+  "clean_meaningful_names",
+  "clean_functions",
+  "clean_single_responsibility",
+  "clean_dry",
+  "clean_comments",
+  "clean_error_handling",
+  "clean_boundaries",
+  "clean_unit_tests",
+  "clean_classes_and_data",
+  "clean_code_smells",
+  "clean_boy_scout",
+] as const;
+
+export type CleanCodePrincipleKey = (typeof CLEAN_CODE_PRINCIPLE_KEYS)[number];
+
+const CLEAN_CODE_PRINCIPLE_LABELS: Record<CleanCodePrincipleKey, string> = {
+  clean_meaningful_names: "Meaningful names",
+  clean_functions: "Functions",
+  clean_single_responsibility: "Single responsibility",
+  clean_dry: "DRY",
+  clean_comments: "Comments",
+  clean_error_handling: "Error handling",
+  clean_boundaries: "Boundaries",
+  clean_unit_tests: "Unit tests",
+  clean_classes_and_data: "Classes & data",
+  clean_code_smells: "Code smells",
+  clean_boy_scout: "Boy Scout rule",
+};
+
+export function isCleanCodePrincipleKey(key: string): boolean {
+  return (CLEAN_CODE_PRINCIPLE_KEYS as readonly string[]).includes(key);
+}
+
+export function cleanCodePrincipleSettingDefs(): RuleSettingDef[] {
+  return CLEAN_CODE_PRINCIPLE_KEYS.map((key) => ({
+    key,
+    label: `Principle: ${CLEAN_CODE_PRINCIPLE_LABELS[key]}`,
+    kind: "boolean" as const,
+    default: true,
+  }));
+}
+
+export function aiRuleCategoryLabel(category: string): string {
+  if (category === "ai") return "AI Validation";
+  return category;
+}
+
 export function shouldShowAiRuleSetting(ruleId: string, key: string): boolean {
   if (key === AI_LLM_SETTING_KEYS.override) return true;
   if (ruleId === "ai_architecture" && isArchitectureAssessmentKey(key)) return true;
   if (ruleId === "ai_code_review" && isCodeReviewLensKey(key)) return true;
+  if (ruleId === "ai_clean_code" && isCleanCodePrincipleKey(key)) return true;
   return false;
 }
 

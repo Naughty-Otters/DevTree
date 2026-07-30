@@ -9,6 +9,10 @@ use crate::agent::architecture_assessments::{
     architecture_rule_settings, build_architecture_assessment_prompt,
     selected_architecture_assessments,
 };
+use crate::agent::clean_code_lenses::{
+    build_clean_code_principle_prompt, clean_code_rule_settings, selected_clean_code_principles,
+    CLEAN_CODE_SKILL_INSTRUCTIONS,
+};
 use crate::agent::code_review_lenses::{
     build_code_review_lens_prompt, code_review_rule_settings, selected_code_review_lenses,
     CODE_REVIEW_SKILL_INSTRUCTIONS,
@@ -85,6 +89,7 @@ struct AiValidationRuleDef {
     id: &'static str,
     name: &'static str,
     description: &'static str,
+    category: &'static str,
     instructions: &'static str,
 }
 
@@ -93,24 +98,35 @@ const AI_RULES: &[AiValidationRuleDef] = &[
         id: "ai_architecture",
         name: "AI Architecture Review",
         description: "Map project architecture from source, then evaluate selected assessment areas (patterns, design, security, debt, etc.).",
+        category: "ai",
         instructions: include_str!("../../../src/ai_validation/rules/architecture.md"),
     },
     AiValidationRuleDef {
         id: "ai_code_review",
         name: "AI Code Reviewer",
         description: "Cross-cutting code review with selectable lenses (performance, security, quality, XSS, N+1, error handling, concurrency, logging, etc.).",
+        category: "ai",
         instructions: CODE_REVIEW_SKILL_INSTRUCTIONS,
+    },
+    AiValidationRuleDef {
+        id: "ai_clean_code",
+        name: "AI Clean Code Reviewer",
+        description: "Review current workspace git changes against selectable Clean Code principles (names, functions, SRP, DRY, tests, smells, etc.).",
+        category: "ai",
+        instructions: CLEAN_CODE_SKILL_INSTRUCTIONS,
     },
     AiValidationRuleDef {
         id: "ai_maintainability",
         name: "AI Maintainability Review",
         description: "LLM review of naming, duplication, and navigability issues.",
+        category: "ai",
         instructions: include_str!("../../../src/ai_validation/rules/maintainability.md"),
     },
     AiValidationRuleDef {
         id: "ai_test_gaps",
         name: "AI Test Gap Review",
         description: "LLM review of missing or weak test coverage in critical modules.",
+        category: "ai",
         instructions: include_str!("../../../src/ai_validation/rules/test_gaps.md"),
     },
 ];
@@ -126,7 +142,7 @@ pub fn rule_definitions() -> Vec<AnalysisRule> {
             id: rule.id.into(),
             name: rule.name.into(),
             description: rule.description.into(),
-            category: "ai".into(),
+            category: rule.category.into(),
             settings: rule_settings_for(rule.id),
         })
         .collect()
@@ -137,6 +153,7 @@ fn rule_settings_for(rule_id: &str) -> Vec<RuleSettingDef> {
     match rule_id {
         "ai_architecture" => architecture_rule_settings(llm),
         "ai_code_review" => code_review_rule_settings(llm),
+        "ai_clean_code" => clean_code_rule_settings(llm),
         _ => llm,
     }
 }
@@ -448,6 +465,19 @@ All paths and commands must stay within the current project root.\n\n";
             continue;
         }
 
+        if rule.id == "ai_clean_code" && selected_clean_code_principles(rule_cfg).is_empty() {
+            results.push(ValidationItem {
+                rule_id: rule.id.into(),
+                rule_name: rule.name.into(),
+                status: "warn".into(),
+                message: "Skipped — enable at least one Clean Code principle in rule settings"
+                    .into(),
+                affected: vec![],
+                cycle_groups: None,
+            });
+            continue;
+        }
+
         let prompt = {
             let mut prompt = base_prompt.clone();
             if rule.id == "ai_architecture" {
@@ -456,6 +486,9 @@ All paths and commands must stay within the current project root.\n\n";
             } else if rule.id == "ai_code_review" {
                 prompt.push_str("\n\n");
                 prompt.push_str(&build_code_review_lens_prompt(rule_cfg));
+            } else if rule.id == "ai_clean_code" {
+                prompt.push_str("\n\n");
+                prompt.push_str(&build_clean_code_principle_prompt(rule_cfg));
             }
             prompt
         };
