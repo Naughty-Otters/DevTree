@@ -87,6 +87,7 @@ jobs:
             name: Windows-x64
             bundles: msi,nsis
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -198,8 +199,8 @@ jobs:
           echo "notarytool credentials OK."
 
       # Tauri requires APPLE_SIGNING_IDENTITY to exactly match the cert in APPLE_CERTIFICATE.
-      # OpenFDE's MAC_SIGN_IDENTITY is often the short CSC_NAME form (e.g. "Name (TEAMID)"),
-      # which does not match — so resolve the full identity from the .p12 instead.
+      # OpenFDE's MAC_SIGN_IDENTITY is often the short CSC_NAME form — resolve from the .p12.
+      # Do NOT change the user keychain search list (that breaks subsequent Tauri import).
       - name: Resolve Apple signing identity from certificate
         if: matrix.os == 'mac'
         env:
@@ -217,8 +218,6 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 \
             -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed -e s/\"//g)
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
           IDENTITY="$(
             security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
@@ -231,7 +230,7 @@ jobs:
             exit 1
           fi
           echo "Resolved APPLE_SIGNING_IDENTITY=$IDENTITY"
-          if [ -n "${MAC_SIGN_IDENTITY}" ] && [ "$MAC_SIGN_IDENTITY" != "$IDENTITY" ]; then
+          if [ -n "${MAC_SIGN_IDENTITY:-}" ] && [ "$MAC_SIGN_IDENTITY" != "$IDENTITY" ]; then
             echo "::warning::MAC_SIGN_IDENTITY ('$MAC_SIGN_IDENTITY') does not match cert identity; using cert identity for Tauri."
           fi
           CERT_TEAM="$(printf '%s' "$IDENTITY" | sed -E 's/.*\(([A-Z0-9]{10})\)$/\1/')"
@@ -240,7 +239,12 @@ jobs:
             echo "Notarization must use the same team that owns Developer ID Application."
             exit 1
           fi
-          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          # Heredoc: identity contains spaces and ':' which break KEY=value GITHUB_ENV lines.
+          {
+            echo "APPLE_SIGNING_IDENTITY<<EOF"
+            printf '%s\n' "$IDENTITY"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
           rm -f "$CERT_PATH"
           security delete-keychain "$KEYCHAIN_PATH" || true
 
@@ -282,43 +286,77 @@ jobs:
             exit 1
           fi
 
+      - name: Setup .NET (Windows Azure signing)
+        if: matrix.os == 'win' && env.WINDOWS_SIGN_MODE == 'azure'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # Tauri splits string signCommand on spaces; paths/spaces need object form with literal "%1".
       - name: Configure Windows Azure Trusted Signing
         if: matrix.os == 'win' && env.WINDOWS_SIGN_MODE == 'azure'
         env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
           AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
           AZURE_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE }}
           AZURE_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_SIGNING_PUBLISHER_NAME }}
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          cargo install artifact-signing-cli --locked
-          node -e '
-            const fs = require("fs");
-            const path = "src-tauri/tauri.conf.json";
-            const endpoint = (process.env.AZURE_SIGNING_ENDPOINT || "").replace(/\/$/, "");
-            const account = process.env.AZURE_SIGNING_ACCOUNT_NAME;
-            const profile = process.env.AZURE_SIGNING_CERTIFICATE_PROFILE;
-            const publisher = process.env.AZURE_SIGNING_PUBLISHER_NAME;
-            const q = (s) => `"${String(s).replace(/"/g, "\\\"")}"`;
-            const signCommand = [
-              "artifact-signing-cli",
-              "-e", q(endpoint),
-              "-a", q(account),
-              "-c", q(profile),
-              "-d", q(publisher),
-              "%1",
-            ].join(" ");
-            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
-            conf.bundle = conf.bundle || {};
-            conf.bundle.windows = {
-              ...(conf.bundle.windows || {}),
-              signCommand,
-            };
-            delete conf.bundle.windows.certificateThumbprint;
-            fs.writeFileSync(path, JSON.stringify(conf, null, 2) + "\n");
-            console.log("Wrote windows.signCommand for Azure Artifact Signing");
-          '
+          $ErrorActionPreference = 'Stop'
+          dotnet tool update -g --prerelease sign
+          if ($LASTEXITCODE -ne 0) {
+            dotnet tool install -g --prerelease sign
+          }
+          $signPath = Join-Path $env:USERPROFILE '.dotnet\tools'
+          echo "$signPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:Path = "$signPath;$env:Path"
+
+          $scriptPath = Join-Path $env:GITHUB_WORKSPACE 'scripts\sign-windows.ps1'
+          if (-not (Test-Path -LiteralPath $scriptPath)) {
+            throw "Missing $scriptPath"
+          }
+
+          # Object-form signCommand: Tauri replaces the literal "%1" arg with the file path.
+          # String form splits on spaces and breaks -File paths / quoted %1.
+          $env:SIGN_SCRIPT = $scriptPath
+          node -e @"
+          const fs = require('fs');
+          const path = 'src-tauri/tauri.conf.json';
+          const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+          conf.bundle = conf.bundle || {};
+          conf.bundle.windows = {
+            ...(conf.bundle.windows || {}),
+            signCommand: {
+              cmd: 'powershell.exe',
+              args: [
+                '-NoProfile',
+                '-ExecutionPolicy',
+                'Bypass',
+                '-File',
+                process.env.SIGN_SCRIPT,
+                '%1',
+              ],
+            },
+          };
+          delete conf.bundle.windows.certificateThumbprint;
+          fs.writeFileSync(path, JSON.stringify(conf, null, 2) + '\n');
+          console.log('Wrote windows.signCommand object form');
+          console.log(JSON.stringify(conf.bundle.windows.signCommand, null, 2));
+          "@
+
+          $signExe = (Get-Command sign).Source
+          Write-Host "sign tool: $signExe"
+          & $signExe --version
+
+          # Fail fast: sign a probe PE before the long Tauri build.
+          $probe = Join-Path $env:RUNNER_TEMP 'devtree-sign-probe.exe'
+          Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination $probe -Force
+          Write-Host "Azure signing preflight on $probe …"
+          & $scriptPath $probe
+          Write-Host "Azure signing preflight OK."
 
       - name: Import Windows signing certificate (.pfx)
         if: matrix.os == 'win' && env.WINDOWS_SIGN_MODE == 'pfx'
@@ -369,7 +407,7 @@ jobs:
           APPLE_ID: ${{ matrix.os == 'mac' && env.APPLE_ID || '' }}
           APPLE_PASSWORD: ${{ matrix.os == 'mac' && env.APPLE_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.os == 'mac' && env.APPLE_TEAM_ID || '' }}
-          # Windows — same OpenFDE WIN_SIGN_* / AZURE_* names (artifact-signing-cli reads AZURE_*)
+          # Windows — same OpenFDE AZURE_* / WIN_SIGN_* names (sign-windows.ps1 reads AZURE_*)
           WIN_SIGN_CERTIFICATE: ${{ matrix.os == 'win' && secrets.WIN_SIGN_CERTIFICATE_BASE64 || '' }}
           WIN_SIGN_CERTIFICATE_PASSWORD: ${{ matrix.os == 'win' && secrets.WIN_SIGN_CERTIFICATE_PASSWORD || '' }}
           AZURE_TENANT_ID: ${{ matrix.os == 'win' && secrets.AZURE_TENANT_ID || '' }}
@@ -442,6 +480,7 @@ jobs:
     needs: [meta, release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -470,6 +509,7 @@ jobs:
     needs: [meta, release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: release
     steps:
       - uses: actions/download-artifact@v4
         with:

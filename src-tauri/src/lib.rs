@@ -187,7 +187,7 @@ async fn install_lsp_server(id: String) -> Result<LspInstallResult, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let conn = init_db().expect("failed to initialize database");
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(DbState(std::sync::Mutex::new(conn)))
         .manage(AnalysisSessionRegistry::new())
         .manage(AnalysisTriggerState::new())
@@ -221,30 +221,32 @@ pub fn run() {
         ]);
 
     #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .setup(|app| {
-                tray::setup_macos_tray(app).map_err(|e| e.to_string())?;
-                Ok(())
-            })
-            .on_window_event(|window, event| {
-                tray::on_window_event(window, event);
-            });
-    }
-
-    builder
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen {
-                has_visible_windows,
-                ..
-            } = event
-            {
-                tray::on_reopen(app_handle, has_visible_windows);
-            }
+    let builder = builder
+        .setup(|app| {
+            tray::setup_macos_tray(app).map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            tray::on_window_event(window, event);
         });
+
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    #[cfg(target_os = "macos")]
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } = event
+        {
+            tray::on_reopen(app_handle, has_visible_windows);
+        }
+    });
+
+    #[cfg(not(target_os = "macos"))]
+    app.run(|_app_handle, _event| {});
 }
 
 #[cfg(test)]

@@ -22,7 +22,11 @@ import { basename, join, relative } from "node:path";
 
 const root = process.cwd();
 const outDir = join(root, "release-artifacts");
-const searchRoot = join(root, "src-tauri", "target");
+// tauri-action may write under src-tauri/target or repo-root target/
+const searchRoots = [
+  join(root, "src-tauri", "target"),
+  join(root, "target"),
+];
 
 const INSTALLER_RE =
   /\.(dmg|msi|exe|app\.tar\.gz|app\.tar\.gz\.sig|deb|AppImage|rpm)$/i;
@@ -84,8 +88,10 @@ if (raw) {
 }
 
 const candidates = new Set(fromAction);
-for (const file of walk(searchRoot)) {
-  if (isBundleInstaller(file)) candidates.add(file);
+for (const searchRoot of searchRoots) {
+  for (const file of walk(searchRoot)) {
+    if (isBundleInstaller(file)) candidates.add(file);
+  }
 }
 
 let copied = 0;
@@ -121,11 +127,13 @@ writeFileSync(
 );
 
 if (copied === 0) {
-  console.warn("No installers found under src-tauri/target or ARTIFACT_PATHS.");
+  console.warn("No installers found under target dirs or ARTIFACT_PATHS.");
   console.warn("Listing bundle directories for debugging:");
-  for (const file of walk(searchRoot)) {
-    const norm = file.replace(/\\/g, "/");
-    if (norm.includes("/bundle/")) console.warn(`  ${relative(root, file)}`);
+  for (const searchRoot of searchRoots) {
+    for (const file of walk(searchRoot)) {
+      const norm = file.replace(/\\/g, "/");
+      if (norm.includes("/bundle/")) console.warn(`  ${relative(root, file)}`);
+    }
   }
 }
 

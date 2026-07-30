@@ -93,8 +93,11 @@ if (bundleDir) {
   searchRoots.push(join(bundleDir, "macos"));
 }
 searchRoots.push(searchRoot);
+searchRoots.push(join(root, "target"));
 searchRoots.push(join(root, "src-tauri", "target", "aarch64-apple-darwin", "release", "bundle"));
 searchRoots.push(join(root, "src-tauri", "target", "release", "bundle"));
+searchRoots.push(join(root, "target", "aarch64-apple-darwin", "release", "bundle"));
+searchRoots.push(join(root, "target", "release", "bundle"));
 
 const installerPath = explicitDmg || findInstaller(searchRoots);
 if (!installerPath || !existsSync(installerPath)) {

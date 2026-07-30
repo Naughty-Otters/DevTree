@@ -58,11 +58,11 @@ Secrets (repo or GitHub Environment **`release`** — same names as [OpenFDE](ht
 | `AZURE_SIGNING_ENDPOINT` | Artifact Signing account URI (e.g. `https://eus.codesigning.azure.net/`) |
 | `AZURE_SIGNING_ACCOUNT_NAME` | Artifact Signing account name |
 | `AZURE_SIGNING_CERTIFICATE_PROFILE` | Certificate profile name |
-| `AZURE_SIGNING_PUBLISHER_NAME` | Publisher / legal name (UAC description) |
+| `AZURE_SIGNING_PUBLISHER_NAME` | Publisher / legal name (logged; same OpenFDE secret) |
 | `NPM_TOKEN` | publish `devtree-ai` (skipped with a warning if unset) |
 | `HOMEBREW_TAP_TOKEN` | PAT with write access to `Naughty-Otters/homebrew-tap` (optional) |
 
-Windows signing requires **either** all seven `AZURE_*` vars (preferred, same as OpenFDE) **or** `WIN_SIGN_*`. CI builds stay unsigned (`--no-sign`). Only the **Release** workflow signs (and notarizes on macOS).
+Windows Azure signing uses Microsoft’s `sign` CLI via `scripts/sign-windows.ps1` with the same seven `AZURE_*` secrets as OpenFDE. Fallback: `WIN_SIGN_*` `.pfx`. CI builds stay unsigned (`--no-sign`). Only the **Release** workflow signs (and notarizes on macOS).
 
 Local dry-run:
 
