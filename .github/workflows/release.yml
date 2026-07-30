@@ -76,9 +76,11 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             name: macOS-arm64
+            bundles: app,dmg
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             name: Windows-x64
+            bundles: msi,nsis
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -101,12 +103,13 @@ jobs:
       - name: Sync / check package versions
         run: node scripts/sync-cli-version.mjs --check
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build + upload to GitHub Release
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Unsigned until Apple/Windows signing secrets are configured (see OPEN_SOURCE.md).
-          APPLE_SIGNING_IDENTITY: "-"
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Unsigned builds: do not set a fake signing identity (breaks bundling).
+          CI: true
         with:
           tagName: ${{ needs.meta.outputs.tag }}
           releaseName: DevTree ${{ needs.meta.outputs.tag }}
@@ -124,58 +127,30 @@ jobs:
             > **Note:** Builds are currently unsigned. macOS may require right-click → Open on first launch.
           releaseDraft: ${{ needs.meta.outputs.draft == 'true' }}
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
-          args: --target ${{ matrix.target }} --no-sign
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --no-sign
 
-      # Also keep installers on the workflow run (Actions Artifacts), not only GitHub Releases.
-      - name: Upload macOS build artifacts
-        if: matrix.platform == 'macos-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: DevTree-${{ needs.meta.outputs.tag }}-${{ matrix.target }}
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/**
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/**
-          if-no-files-found: warn
-          retention-days: 90
-
-      - name: List Windows bundle outputs
-        if: matrix.platform == 'windows-latest'
+      - name: Collect installers for Actions artifacts
         shell: bash
+        env:
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
         run: |
-          echo "=== Windows bundle tree ==="
-          find src-tauri/target -type d \( -name msi -o -name nsis -o -name bundle \) 2>/dev/null | head -40
-          find src-tauri/target -type f \( -name '*.msi' -o -name '*.exe' -o -name '*.zip' \) 2>/dev/null | head -80 || true
+          echo "tauri-action artifactPaths=$ARTIFACT_PATHS"
+          node scripts/collect-release-artifacts.mjs
+          ls -la release-artifacts || true
 
-      - name: Upload Windows build artifacts
-        if: matrix.platform == 'windows-latest'
+      - name: Upload build artifacts to GitHub Actions
         uses: actions/upload-artifact@v4
         with:
           name: DevTree-${{ needs.meta.outputs.tag }}-${{ matrix.target }}
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/msi/**
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/**
-            src-tauri/target/release/bundle/msi/**
-            src-tauri/target/release/bundle/nsis/**
+          path: release-artifacts/
           if-no-files-found: warn
           retention-days: 90
-
-      - name: List macOS bundle outputs
-        if: matrix.platform == 'macos-latest'
-        run: |
-          echo "=== bundle tree ==="
-          find src-tauri/target -type d -name bundle 2>/dev/null | while read -r d; do
-            echo "-- $d"
-            find "$d" -maxdepth 3 -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -print 2>/dev/null || true
-          done
 
       - name: Update Homebrew cask sha256 (from installer)
         if: matrix.platform == 'macos-latest'
         run: |
           node scripts/update-homebrew-cask.mjs \
             --search-root src-tauri/target \
-            --bundle-dir "src-tauri/target/${{ matrix.target }}/release/bundle" \
             --allow-missing
           mkdir -p packaging-out
           if [ -f packaging/homebrew/devtree-cask-checksums.json ]; then
