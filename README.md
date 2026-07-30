@@ -6,11 +6,84 @@
 [![npm](https://img.shields.io/npm/v/devtree-ai.svg)](https://www.npmjs.com/package/devtree-ai)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-DevTree is a desktop tool for visualizing a codebase's module/dependency graph and scoring its architectural health — modularity, cleanliness, type coverage, and test coverage. The client is a [Tauri](https://tauri.app/) app; heavy computation (graph layout, metrics) is written in Rust and compiled to WebAssembly so it runs inside the webview, and the graph itself is rendered on an HTML5 Canvas.
+**Bridge vibe-coding demo quality → production quality. Guardrail everything you continuously deliver.**
 
-**License:** [MIT](LICENSE) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Open source checklist:** [OPEN_SOURCE.md](OPEN_SOURCE.md) · **Distribution:** [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)
+DevTree is a desktop watchdog for AI-assisted development — architecture graph, DSM health, deterministic rules, linters/LSP, and AI review lenses (security, performance, clean code) in one place. Point it at a repo, run (or watch/schedule) analysis, and see what the vibes missed before it ships.
 
-**Current status**: desktop analysis builds a package → file → symbol dependency map. Symbol extraction and the **Language Diagnostics** rule use system language servers when available (`rust-analyzer`, `typescript-language-server` / `vtsls`, `gopls`, `basedpyright` / `pyright` / `pylsp`); otherwise heuristics are used.
+<p align="center">
+  <img src="media/video/video_run_app.gif" alt="Open a project and run analysis in DevTree" width="720" />
+</p>
+
+**License:** [MIT](LICENSE) · **Why / rules catalog:** [docs/FOR_VIBE_CODERS.md](docs/FOR_VIBE_CODERS.md) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Distribution:** [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)
+
+---
+
+## Why DevTree exists
+
+| Vibe / demo reality | Production / CD need | DevTree |
+| --- | --- | --- |
+| Agents write a lot, fast | A second set of eyes on structure & risk | Rule board + AI lenses |
+| “It runs” ≠ “it’s shippable” | Health, cycles, coupling, design rules | Graph · DSM · modularity score |
+| Review is scattered across chats & tools | One bar every delivery loop | Architecture · review · security · perf in **one** app |
+| CD keeps moving | Continuous guardrails | Run now · file watch · schedule |
+
+<p align="center">
+  <img src="media/pic/pic_watch_list.png" alt="Analysis rules: architecture, quality, maintainability, AI validation" width="640" />
+</p>
+
+<p align="center"><em>CD guardrail board — architecture, quality, maintainability, and AI review (with dozens of toggleable lenses).</em></p>
+
+### What you can check
+
+**Deterministic:** Modularity · Dependency Depth · Circular Dependencies · Type Coverage · Test Coverage · File Size · Naming · Language Linters · Language Diagnostics · LDM design rules  
+
+**AI Architecture assessments:** patterns · system design · scalability · stack · integration · security · performance · data · technical debt  
+
+**AI Code Reviewer lenses:** performance · security · quality · common bugs · SQL injection · XSS · N+1 · error handling · async/concurrency · anti-patterns · logging  
+
+**AI Clean Code (git diff):** names · functions · SRP · DRY · comments · errors · boundaries · unit tests · classes/data · smells · Boy Scout  
+
+Full tables → **[docs/FOR_VIBE_CODERS.md](docs/FOR_VIBE_CODERS.md)**.
+
+---
+
+## See the codebase, not just the chat
+
+Dependency graph for packages and files — so you can tell whether the agent glued layers together or actually respected boundaries.
+
+<p align="center">
+  <img src="media/pic/pic_package_dep.png" alt="Package dependency graph in DevTree" width="720" />
+</p>
+
+DSM + health score when you want numbers, not vibes:
+
+<p align="center">
+  <img src="media/pic/pic_dsk_healthy.png" alt="DSM view and modularity health dashboard" width="720" />
+</p>
+
+---
+
+## AI review that lands in your editor
+
+Run AI Code Reviewer / Clean Code / Architecture Review against the workspace. Findings show up next to the file — unused args, hot paths, security smells — not buried in another chat transcript.
+
+<p align="center">
+  <img src="media/video/video_ai_review.gif" alt="AI review streaming in the Progress panel" width="720" />
+</p>
+
+<p align="center">
+  <img src="media/pic/pic_review_details.png" alt="Review findings highlighted in the file viewer" width="720" />
+</p>
+
+Track failures and warnings while analysis runs:
+
+<p align="center">
+  <img src="media/video/video_error_tracking.gif" alt="Error and warning tracking during analysis" width="720" />
+</p>
+
+More screenshots, the demo→production pitch, and the **full rules catalog**: **[docs/FOR_VIBE_CODERS.md](docs/FOR_VIBE_CODERS.md)**.
+
+---
 
 ## Download
 
@@ -29,8 +102,6 @@ devtree open             # launch the installed app
 devtree doctor
 ```
 
-`devtree install` pulls the Tauri DMG / `.app.tar.gz` (macOS) or NSIS/MSI (Windows) from [Releases](https://github.com/Naughty-Otters/DevTree/releases) and installs it under `/Applications` or `~/Applications` (macOS).
-
 ### Homebrew (macOS)
 
 ```bash
@@ -42,125 +113,52 @@ brew install --cask devtree
 
 macOS / Windows installers: [GitHub Releases](https://github.com/Naughty-Otters/DevTree/releases).
 
-## Prerequisites
+---
 
-- **Rust** (stable toolchain) with the `wasm32-unknown-unknown` target:
-  ```bash
-  rustup target add wasm32-unknown-unknown
-  ```
-- **Node.js** (v20+) and npm
-- **wasm-pack** (v0.13+; older versions are incompatible with recent Cargo — see Troubleshooting below):
-  ```bash
-  cargo install wasm-pack
-  ```
-- Tauri's own OS-level dependencies (Xcode Command Line Tools on macOS; see the [Tauri prerequisites guide](https://tauri.app/start/prerequisites/) for Linux/Windows)
-- **Optional language servers** (for richer analysis validations and symbol graphs):
-  ```bash
-  rustup component add rust-analyzer
-  npm install -g typescript-language-server typescript   # or: npm i -g @vtsls/language-server
-  go install golang.org/x/tools/gopls@latest
-  npm install -g basedpyright   # or: pip install basedpyright / python-lsp-server
-  ```
+## Build from source
 
-## Setup
+**Prerequisites:** Rust (stable) + `wasm32-unknown-unknown`, Node.js 20+, [wasm-pack](https://rustwasm.github.io/wasm-pack/), [Tauri OS deps](https://tauri.app/start/prerequisites/). Optional language servers (`rust-analyzer`, `typescript-language-server` / `vtsls`, `gopls`, `basedpyright`) improve diagnostics and symbol graphs.
 
 ```bash
 npm install
-```
-
-This installs frontend dependencies (Vite, TypeScript, the Tauri CLI). Rust dependencies are resolved automatically on first build.
-
-## Running the app
-
-```bash
 npm run tauri dev
 ```
 
-This builds the `devtree-core` crate to wasm, starts the Vite dev server, compiles the Rust backend, and opens the native app window. First run compiles Tauri's full dependency tree and can take several minutes; subsequent runs are fast.
-
-For faster frontend-only iteration (no native window, just the webview content in a regular browser):
+Frontend-only (browser, no native window): `npm run dev` → open `http://localhost:1420`.
 
 ```bash
-npm run dev
+npm run test:all      # per-file gate + Rust + TypeScript coverage
+npm run tauri build   # distributable app
 ```
 
-then open the printed `http://localhost:1420` URL.
+CI on `main` runs tests with coverage, builds macOS (Apple Silicon) + Windows artifacts, and refreshes README badges under [`.github/badges/`](.github/badges/).
 
-## Testing
-
-```bash
-# Rust unit tests (workspace)
-npm run test:rust
-
-# TypeScript unit tests (Vitest)
-npm test
-
-# Both
-npm run test:all
-```
-
-CI runs per-file checks, Rust tests, TypeScript tests **with coverage**, and builds macOS (Apple Silicon) and Windows on every push to `main`, then uploads installers and a coverage report as **GitHub Actions artifacts**. On `main`, CI also refreshes the README **version** and **coverage** badges under [`.github/badges/`](.github/badges/).
-
-## Releasing
-
-Push a version tag to create a **draft** GitHub Release with platform binaries, refresh the Homebrew cask sha256, and (when secrets are set) publish **npm** + update the **Homebrew tap**:
+### Releasing
 
 ```bash
-npm run sync:version   # keep CLI / cask / Tauri versions aligned
+npm run sync:version
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Then publish the draft on GitHub so users can download. See [.github/workflows/release.yml](.github/workflows/release.yml) and [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+Draft GitHub Release + optional npm / Homebrew tap updates when `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN` are set. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
-Secrets (optional but recommended for full distribution):
-
-| Secret | Effect |
-| --- | --- |
-| `NPM_TOKEN` | Publish `devtree-ai` to npm |
-| `HOMEBREW_TAP_TOKEN` | Push `Casks/devtree.rb` to `Naughty-Otters/homebrew-tap` |
-
-## Building
-
-```bash
-npm run tauri build
-```
-
-## Project layout
+### Project layout
 
 ```
 DevTree/
-├── crates/devtree-core/   # Graph types + force-directed layout, plain Rust
-│                          # compiled natively (linked into src-tauri) and to
-│                          # wasm32 (via `npm run build:wasm`) for the frontend
-├── src-tauri/             # Tauri Rust backend (app shell; no real commands yet)
-├── src/                   # Vite + TypeScript frontend
-│   ├── canvas/            # Canvas renderer + pan/zoom/hover/click interaction
-│   ├── graph/             # Graph types + fixture loading
-│   └── wasm-bridge.ts     # Typed wrapper around the generated wasm module
-└── fixtures/               # Canned graph data used until real analysis exists
+├── crates/devtree-core/   # Graph + layout (native + wasm)
+├── src-tauri/             # Tauri Rust backend
+├── src/                   # Vite + TypeScript UI
+├── media/                 # README screenshots & GIFs
+└── packages/cli/          # npm package devtree-ai
 ```
 
-## Scripts
+### Troubleshooting
 
-| Script | Purpose |
-| --- | --- |
-| `npm run dev` | Start the Vite dev server only (browser, no Tauri window) |
-| `npm run build:wasm` | Rebuild `devtree-core` to wasm and copy bindings into `src/wasm` |
-| `npm run build` | Type-check and build the frontend |
-| `npm run test` | Run TypeScript unit tests (Vitest) |
-| `npm run test:rust` | Run Rust unit tests |
-| `npm run test:all` | Run Rust + TypeScript tests |
-| `npm run tauri dev` | Run the full Tauri app (rebuilds wasm automatically via `predev`) |
-| `npm run tauri build` | Build a distributable native app |
+- **`the --artifact-dir flag is unstable` from `wasm-pack`:** upgrade with `cargo install wasm-pack --force`.
+- **Stale absolute paths after moving the repo:** `rm -rf target && cargo build --workspace`.
 
-`build:wasm` runs automatically before `dev`/`build` via `predev`/`prebuild` hooks, so you generally don't need to call it directly.
+### Recommended IDE setup
 
-## Troubleshooting
-
-- **`the --artifact-dir flag is unstable` error from `wasm-pack build`**: your `wasm-pack` is too old for the installed Cargo version. Run `cargo install wasm-pack --force` to upgrade (this project has been verified against wasm-pack 0.15.0 with Cargo 1.93).
-- **Stale build errors mentioning a path that no longer exists** (e.g. after moving/renaming this directory): Rust caches absolute paths in `target/`. Delete it and rebuild: `rm -rf target && cargo build --workspace`.
-
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+[VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
