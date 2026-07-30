@@ -1,0 +1,41 @@
+{
+  "name": "devtree-ai",
+  "version": "0.1.0",
+  "description": "DevTree CLI — companion to the DevTree desktop codebase graph app",
+  "license": "MIT",
+  "author": "Naughty-Otters",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Naughty-Otters/DevTree.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/Naughty-Otters/DevTree",
+  "bugs": {
+    "url": "https://github.com/Naughty-Otters/DevTree/issues"
+  },
+  "keywords": [
+    "devtree",
+    "architecture",
+    "dsm",
+    "dependency-graph",
+    "cli"
+  ],
+  "type": "module",
+  "bin": {
+    "devtree": "./bin/devtree"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test src/cli.test.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

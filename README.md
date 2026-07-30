@@ -1,12 +1,37 @@
 # DevTree
 
-[![CI](https://github.com/devtree/devtree/actions/workflows/ci.yml/badge.svg)](https://github.com/devtree/devtree/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/Naughty-Otters/DevTree/ci.yml?branch=main&label=CI&logo=github)](https://github.com/Naughty-Otters/DevTree/actions/workflows/ci.yml?query=branch%3Amain)
+[![Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/.github/badges/version.json)](https://github.com/Naughty-Otters/DevTree/releases)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/.github/badges/coverage.json)](https://github.com/Naughty-Otters/DevTree/actions/workflows/ci.yml?query=branch%3Amain)
+[![npm](https://img.shields.io/npm/v/devtree-ai.svg)](https://www.npmjs.com/package/devtree-ai)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
 DevTree is a desktop tool for visualizing a codebase's module/dependency graph and scoring its architectural health — modularity, cleanliness, type coverage, and test coverage. The client is a [Tauri](https://tauri.app/) app; heavy computation (graph layout, metrics) is written in Rust and compiled to WebAssembly so it runs inside the webview, and the graph itself is rendered on an HTML5 Canvas.
 
-**License:** [MIT](LICENSE) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Open source checklist:** [OPEN_SOURCE.md](OPEN_SOURCE.md)
+**License:** [MIT](LICENSE) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Open source checklist:** [OPEN_SOURCE.md](OPEN_SOURCE.md) · **Distribution:** [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)
 
 **Current status**: desktop analysis builds a package → file → symbol dependency map. Symbol extraction and the **Language Diagnostics** rule use system language servers when available (`rust-analyzer`, `typescript-language-server` / `vtsls`, `gopls`, `basedpyright` / `pyright` / `pylsp`); otherwise heuristics are used.
+
+## Download
+
+### Desktop
+
+- **GitHub Releases** — macOS (Apple Silicon) DMG and Windows installer: [Releases](https://github.com/Naughty-Otters/DevTree/releases)
+- **Homebrew** (after the tap is published by a release):
+
+```bash
+brew tap Naughty-Otters/tap
+brew install --cask devtree
+```
+
+### CLI (npm)
+
+```bash
+npm i -g devtree-ai@latest
+devtree --version
+devtree doctor
+devtree open          # launches the desktop app if installed
+```
 
 ## Prerequisites
 
@@ -65,18 +90,26 @@ npm test
 npm run test:all
 ```
 
-CI runs tests and builds macOS (Apple Silicon) and Windows on every push to `main`, then uploads installers as **GitHub Actions artifacts** (GitHub only — no other stores).
+CI runs per-file checks, Rust tests, TypeScript tests **with coverage**, and builds macOS (Apple Silicon) and Windows on every push to `main`, then uploads installers and a coverage report as **GitHub Actions artifacts**. On `main`, CI also refreshes the README **version** and **coverage** badges under [`.github/badges/`](.github/badges/).
 
 ## Releasing
 
-Distribution is **GitHub Releases only**. Push a version tag to create a draft release with platform binaries; publish the draft on GitHub so users can download:
+Push a version tag to create a **draft** GitHub Release with platform binaries, refresh the Homebrew cask sha256, and (when secrets are set) publish **npm** + update the **Homebrew tap**:
 
 ```bash
+npm run sync:version   # keep CLI / cask / Tauri versions aligned
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-See [.github/workflows/release.yml](.github/workflows/release.yml).
+Then publish the draft on GitHub so users can download. See [.github/workflows/release.yml](.github/workflows/release.yml) and [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+
+Secrets (optional but recommended for full distribution):
+
+| Secret | Effect |
+| --- | --- |
+| `NPM_TOKEN` | Publish `devtree-ai` to npm |
+| `HOMEBREW_TAP_TOKEN` | Push `Casks/devtree.rb` to `Naughty-Otters/homebrew-tap` |
 
 ## Building
 

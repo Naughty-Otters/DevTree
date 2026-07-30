@@ -1,5 +1,5 @@
-# Tag push → GitHub Release only (users download installers from the Releases page).
-# No App Store, Homebrew, crates.io, or other external publish targets.
+# Tag push → GitHub Release + optional npm / Homebrew tap updates
+# (same distribution surface as Naughty-Otters/Teralexi).
 name: Release
 
 on:
@@ -42,6 +42,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Sync / check package versions
+        run: node scripts/sync-cli-version.mjs --check
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,13 +55,97 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: DevTree ${{ github.ref_name }}
           releaseBody: |
-            Download DevTree for your platform from the assets below (GitHub Releases only).
+            Download DevTree for your platform from the assets below.
+
+            **Install options**
+            - **GitHub Releases** — DMG / Windows installer (this page)
+            - **npm CLI** — `npm i -g devtree-ai@latest` then `devtree open`
+            - **Homebrew (macOS)** — `brew tap Naughty-Otters/tap && brew install --cask devtree`
 
             **macOS (Apple Silicon)** — `aarch64` build from `macos-latest`
             **Windows** — `x86_64-pc-windows-msvc` installer
 
             > **Note:** Builds are currently unsigned. macOS may require right-click → Open on first launch.
-          # Draft until reviewed; publish the draft on GitHub so users can download.
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }} --no-sign
+
+      - name: Update Homebrew cask sha256 (from DMG)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          node scripts/update-homebrew-cask.mjs --bundle-dir "src-tauri/target/${{ matrix.target }}/release/bundle"
+          mkdir -p packaging-out
+          cp packaging/homebrew/devtree.rb packaging-out/
+          cp packaging/homebrew/devtree-cask-checksums.json packaging-out/
+
+      - name: Upload Homebrew cask packaging artifact
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: devtree-homebrew-cask
+          path: packaging-out/
+          retention-days: 14
+          if-no-files-found: error
+
+  npm-publish-cli:
+    name: Publish devtree-ai to npm
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Sync version, test, publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          node scripts/sync-cli-version.mjs
+          npm --prefix packages/cli test
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::warning::NPM_TOKEN not set — skipping npm publish for devtree-ai"
+            (cd packages/cli && npm pack --dry-run)
+            exit 0
+          fi
+          cd packages/cli
+          npm publish --access public
+
+  homebrew-tap:
+    name: Update Homebrew tap cask
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: devtree-homebrew-cask
+          path: packaging-out
+
+      - name: Push Casks/devtree.rb to Naughty-Otters/homebrew-tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping tap update (cask artifact still uploaded)"
+            ls -la packaging-out
+            exit 0
+          fi
+          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/Naughty-Otters/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          cp packaging-out/devtree.rb tap/Casks/devtree.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/devtree.rb
+          if git diff --staged --quiet; then
+            echo "Homebrew tap already up to date."
+            exit 0
+          fi
+          git commit -m "chore: update devtree cask to ${GITHUB_REF_NAME}"
+          git push

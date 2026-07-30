@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Naughty-Otters/DevTree.git"
+  },
   "scripts": {
     "predev": "npm run build:wasm",
     "dev": "vite",
@@ -17,6 +21,8 @@
     "test:files": "node scripts/verify-unit-test-coverage.mjs",
     "test:coverage": "vitest run --coverage",
     "test:all": "npm run test:files && npm run test:rust && npm run test:coverage",
+    "sync:version": "node scripts/sync-cli-version.mjs",
+    "badges": "npm run test:coverage && node scripts/write-ci-badges.mjs",
     "precommit": "npm run test:all",
     "prepare": "husky"
   },

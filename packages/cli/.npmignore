@@ -1,0 +1,7 @@
+*
+!bin/
+!bin/**
+!src/
+!src/**
+!README.md
+!package.json

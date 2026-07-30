@@ -1,6 +1,7 @@
 name: CI
 
 # Builds stay on GitHub only (Actions artifacts). User-facing downloads come from GitHub Releases.
+# On push to main/master, version + coverage badge JSON is published for the README.
 
 on:
   push:
@@ -11,6 +12,9 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test-rust:
@@ -46,6 +50,8 @@ jobs:
   test-typescript:
     name: TypeScript tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -60,14 +66,44 @@ jobs:
       - name: Build WASM (required by some frontend modules)
         run: npm run build:wasm
 
-      - name: Run TypeScript unit tests
-        run: npm test
+      - name: Per-file unit test coverage gate
+        run: npm run test:files
+
+      - name: Check release version sync
+        run: node scripts/sync-cli-version.mjs --check
+
+      - name: Run CLI package tests
+        run: npm --prefix packages/cli test
+
+      - name: Run TypeScript unit tests with coverage
+        run: npm run test:coverage
 
       - name: Type-check frontend
         run: npx tsc --noEmit
 
       - name: Type-check unit tests
         run: npx tsc --noEmit -p tsconfig.test.json
+
+      - name: Write version + coverage badge JSON
+        run: node scripts/write-ci-badges.mjs
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage/coverage-summary.json
+            coverage/index.html
+            .github/badges/*.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish README badges on main
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update CI status badges [skip ci]"
+          file_pattern: ".github/badges/*.json"
 
   build:
     name: Build (${{ matrix.platform }})
