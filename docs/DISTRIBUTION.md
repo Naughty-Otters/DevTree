@@ -46,7 +46,7 @@ Secrets (repo or GitHub Environment **`release`** — same names as [OpenFDE](ht
 | --- | --- |
 | `MAC_SIGN_CERTIFICATE_BASE64` | Base64 `.p12` (Developer ID Application) → Tauri `APPLE_CERTIFICATE` |
 | `MAC_SIGN_CERTIFICATE_PASSWORD` | `.p12` password → `APPLE_CERTIFICATE_PASSWORD` |
-| `MAC_SIGN_IDENTITY` | e.g. `Developer ID Application: … (TEAMID)` → `APPLE_SIGNING_IDENTITY` |
+| `MAC_SIGN_IDENTITY` | Optional (OpenFDE/electron short name). Tauri resolves the full identity from the `.p12` |
 | `MAC_APPLE_ID` | Apple ID email → `APPLE_ID` (notarization) |
 | `MAC_APPLE_APP_SPECIFIC_PASSWORD` | App-specific password → `APPLE_PASSWORD` |
 | `MAC_APPLE_TEAM_ID` | 10-char Team ID → `APPLE_TEAM_ID` |
