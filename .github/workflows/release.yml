@@ -130,6 +130,73 @@ jobs:
           fi
           echo "macOS signing + notarization secrets present."
 
+      # Trim + validate notarization creds (Tauri → notarytool). OpenFDE maps these to
+      # APPLE_APP_SPECIFIC_PASSWORD; Tauri expects APPLE_PASSWORD.
+      - name: Prepare Apple notarization credentials
+        if: matrix.os == 'mac'
+        env:
+          RAW_APPLE_ID: ${{ secrets.MAC_APPLE_ID }}
+          RAW_APPLE_PASSWORD: ${{ secrets.MAC_APPLE_APP_SPECIFIC_PASSWORD }}
+          RAW_APPLE_TEAM_ID: ${{ secrets.MAC_APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          trim() {
+            # strip CR/LF and leading/trailing whitespace (common when pasting secrets)
+            local s="$1"
+            s="${s//$'\r'/}"
+            s="${s#"${s%%[![:space:]]*}"}"
+            s="${s%"${s##*[![:space:]]}"}"
+            printf '%s' "$s"
+          }
+          APPLE_ID="$(trim "$RAW_APPLE_ID")"
+          APPLE_PASSWORD="$(trim "$RAW_APPLE_PASSWORD")"
+          APPLE_TEAM_ID="$(trim "$RAW_APPLE_TEAM_ID")"
+
+          if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::MAC_APPLE_TEAM_ID must be a 10-character Team ID (got length ${#APPLE_TEAM_ID})."
+            exit 1
+          fi
+          # App-specific passwords are typically xxxx-xxxx-xxxx-xxxx (19 chars with dashes)
+          if [[ ! "$APPLE_PASSWORD" =~ ^[a-zA-Z0-9-]{8,}$ ]]; then
+            echo "::error::MAC_APPLE_APP_SPECIFIC_PASSWORD looks invalid after trim. Generate one at appleid.apple.com → App-Specific Passwords."
+            exit 1
+          fi
+
+          {
+            echo "APPLE_ID<<EOF"
+            printf '%s\n' "$APPLE_ID"
+            echo "EOF"
+            echo "APPLE_PASSWORD<<EOF"
+            printf '%s\n' "$APPLE_PASSWORD"
+            echo "EOF"
+            echo "APPLE_TEAM_ID<<EOF"
+            printf '%s\n' "$APPLE_TEAM_ID"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+          echo "APPLE_ID length=${#APPLE_ID} (domain=$(printf '%s' "$APPLE_ID" | sed 's/.*@/@/'))"
+          echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+          echo "APPLE_PASSWORD length=${#APPLE_PASSWORD} (value not printed)"
+
+          echo "Verifying notarization credentials with notarytool…"
+          if ! xcrun notarytool history \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --output-format json >/tmp/notary-history.json 2>/tmp/notary-history.err; then
+            echo "::error::Apple notarization auth failed (HTTP 401 / invalid credentials)."
+            echo "Fix MAC_APPLE_* in the DevTree GitHub Environment \"release\":"
+            echo "  1. MAC_APPLE_ID = Apple ID email that owns the Developer team"
+            echo "  2. MAC_APPLE_APP_SPECIFIC_PASSWORD = NEW app-specific password from https://appleid.apple.com"
+            echo "     (Sign-In and Security → App-Specific Passwords). NOT your Apple ID login password."
+            echo "  3. MAC_APPLE_TEAM_ID = 10-char Team ID from developer.apple.com → Membership"
+            echo "  4. Re-copy from OpenFDE's release env if that release still notarizes successfully."
+            echo "--- notarytool stderr ---"
+            cat /tmp/notary-history.err || true
+            exit 1
+          fi
+          echo "notarytool credentials OK."
+
       # Tauri requires APPLE_SIGNING_IDENTITY to exactly match the cert in APPLE_CERTIFICATE.
       # OpenFDE's MAC_SIGN_IDENTITY is often the short CSC_NAME form (e.g. "Name (TEAMID)"),
       # which does not match — so resolve the full identity from the .p12 instead.
@@ -166,6 +233,12 @@ jobs:
           echo "Resolved APPLE_SIGNING_IDENTITY=$IDENTITY"
           if [ -n "${MAC_SIGN_IDENTITY}" ] && [ "$MAC_SIGN_IDENTITY" != "$IDENTITY" ]; then
             echo "::warning::MAC_SIGN_IDENTITY ('$MAC_SIGN_IDENTITY') does not match cert identity; using cert identity for Tauri."
+          fi
+          CERT_TEAM="$(printf '%s' "$IDENTITY" | sed -E 's/.*\(([A-Z0-9]{10})\)$/\1/')"
+          if [ -n "${APPLE_TEAM_ID:-}" ] && [ "$CERT_TEAM" != "$IDENTITY" ] && [ "$CERT_TEAM" != "$APPLE_TEAM_ID" ]; then
+            echo "::error::MAC_APPLE_TEAM_ID ($APPLE_TEAM_ID) does not match Team ID in signing cert ($CERT_TEAM)."
+            echo "Notarization must use the same team that owns Developer ID Application."
+            exit 1
           fi
           echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           rm -f "$CERT_PATH"
@@ -289,12 +362,13 @@ jobs:
           CI: true
           # macOS — OpenFDE secret names → Tauri APPLE_* env
           # APPLE_SIGNING_IDENTITY comes from the cert (see Resolve step), not MAC_SIGN_IDENTITY
+          # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID come from Prepare step (trimmed)
           APPLE_CERTIFICATE: ${{ matrix.os == 'mac' && secrets.MAC_SIGN_CERTIFICATE_BASE64 || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ matrix.os == 'mac' && secrets.MAC_SIGN_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'mac' && env.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_APP_SPECIFIC_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_TEAM_ID || '' }}
+          APPLE_ID: ${{ matrix.os == 'mac' && env.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.os == 'mac' && env.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.os == 'mac' && env.APPLE_TEAM_ID || '' }}
           # Windows — same OpenFDE WIN_SIGN_* / AZURE_* names (artifact-signing-cli reads AZURE_*)
           WIN_SIGN_CERTIFICATE: ${{ matrix.os == 'win' && secrets.WIN_SIGN_CERTIFICATE_BASE64 || '' }}
           WIN_SIGN_CERTIFICATE_PASSWORD: ${{ matrix.os == 'win' && secrets.WIN_SIGN_CERTIFICATE_PASSWORD || '' }}
