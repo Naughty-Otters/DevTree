@@ -4,7 +4,12 @@ import { createSettingsPanel } from "./settingsPanel";
 describe("settingsPanel", () => {
   it("creates or renders without throwing", () => {
     const container = document.createElement("div");
-    expect(() => createSettingsPanel(container, { onClose: () => {} })).not.toThrow();
+    container.innerHTML = `
+      <div class="settings-backdrop"></div>
+      <button id="btn-close-settings"></button>
+      <div class="settings-accordion"></div>
+    `;
+    expect(() => createSettingsPanel(container)).not.toThrow();
     expect(container).toBeDefined();
   });
 });

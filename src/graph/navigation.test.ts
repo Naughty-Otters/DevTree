@@ -28,12 +28,12 @@ describe("graph/navigation", () => {
   it("drills into packages and files with history", () => {
     let nav = drillIntoPackage(rootNavigation(), "src", "src");
     nav = drillIntoFile(nav, "src/a.ts", "a.ts");
-    expect(nav.crumbs.at(-1)?.level).toBe("symbols");
+    expect(nav.crumbs[nav.crumbs.length - 1]?.level).toBe("symbols");
     expect(canGoBack(nav)).toBe(true);
     const back = goBack(nav);
-    expect(back.crumbs.at(-1)?.level).toBe("package");
+    expect(back.crumbs[back.crumbs.length - 1]?.level).toBe("package");
     const forward = goForward(back);
-    expect(forward.crumbs.at(-1)?.level).toBe("symbols");
+    expect(forward.crumbs[forward.crumbs.length - 1]?.level).toBe("symbols");
     expect(canGoForward(back)).toBe(true);
   });
 
@@ -65,13 +65,13 @@ describe("graph/navigation", () => {
       { id: "src", label: "src", path: "src", loc: 1, kind: "package" },
       rootNavigation(),
     );
-    expect(pkgTarget?.crumbs.at(-1)?.level).toBe("package");
+    expect(pkgTarget?.crumbs[pkgTarget.crumbs.length - 1]?.level).toBe("package");
 
     const pkgNav = drillIntoPackage(rootNavigation(), "src", "src");
     const fileTarget = drillTargetForNode(
       { id: "src/a.ts", label: "a.ts", path: "src/a.ts", loc: 1, kind: "file" },
       pkgNav,
     );
-    expect(fileTarget?.crumbs.at(-1)?.level).toBe("symbols");
+    expect(fileTarget?.crumbs[fileTarget.crumbs.length - 1]?.level).toBe("symbols");
   });
 });

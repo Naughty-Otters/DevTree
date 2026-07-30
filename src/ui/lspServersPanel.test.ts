@@ -4,7 +4,24 @@ import { createLspServersPanel } from "./lspServersPanel";
 describe("lspServersPanel", () => {
   it("creates or renders without throwing", () => {
     const container = document.createElement("div");
-    expect(() => createLspServersPanel(container, { servers: [], installing: new Set(), onInstall: async () => {} })).not.toThrow();
+    expect(() =>
+      createLspServersPanel(
+        container,
+        {
+          servers: [],
+          settings: {},
+          expandedServerId: null,
+          installingId: null,
+          errors: {},
+          loading: false,
+        },
+        {
+          onRefresh: () => {},
+          onInstall: async () => {},
+          onSettingsChange: () => {},
+        },
+      ),
+    ).not.toThrow();
     expect(container).toBeDefined();
   });
 });

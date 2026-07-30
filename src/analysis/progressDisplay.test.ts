@@ -32,14 +32,20 @@ describe("progressDisplay", () => {
   it("counts active pipeline and rule tasks", () => {
     expect(getPipelineStages().length).toBe(5);
     expect(
-      countActiveTasks("scanning", [{ ruleId: "r", status: "running" }]),
+      countActiveTasks("scanning", [
+        { ruleId: "r", ruleName: "Rule", status: "running" },
+      ]),
     ).toBeGreaterThan(0);
-    expect(effectiveRuleStatus({ ruleId: "r", status: "pending" })).toBe("pending");
+    expect(
+      effectiveRuleStatus({ ruleId: "r", ruleName: "Rule", status: "pending" }),
+    ).toBe("pending");
   });
 
   it("computes rule and overall progress metadata", () => {
     const progress: AnalysisProgress = {
+      analysisId: "a1",
       stage: "validating",
+      message: "Validating…",
       percent: 42,
       current: 2,
       total: 5,
@@ -47,7 +53,17 @@ describe("progressDisplay", () => {
     };
     expect(overallProgressPercent(progress)).toBe(42);
     expect(overallProgressMeta(progress)).toContain("2/5");
-    expect(ruleTaskFillPercent({ ruleId: "r", status: "running" }, progress)).toBeGreaterThan(0);
-    expect(ruleTaskFillPercent({ ruleId: "r", status: "done" }, progress)).toBe(100);
+    expect(
+      ruleTaskFillPercent(
+        { ruleId: "r", ruleName: "Rule", status: "running" },
+        progress,
+      ),
+    ).toBeGreaterThan(0);
+    expect(
+      ruleTaskFillPercent(
+        { ruleId: "r", ruleName: "Rule", status: "done" },
+        progress,
+      ),
+    ).toBe(100);
   });
 });

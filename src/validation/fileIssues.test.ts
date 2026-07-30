@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { collectFileIssues, issuesByLine } from "./fileIssues";
 import type { AnalysisResult } from "../analysis/types";
+import { minimalHierarchy } from "../test/fixtures/hierarchy";
 
 const baseResult = (): AnalysisResult => ({
   graph: { nodes: [], edges: [] },
+  hierarchy: minimalHierarchy(),
   validation: [],
   suggestions: [],
   summary: "",
