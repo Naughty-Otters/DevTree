@@ -67,17 +67,22 @@ jobs:
           echo "Release tag: v$VERSION (draft=$DRAFT prerelease=$PRERELEASE)"
 
   release:
-    name: Release (${{ matrix.platform }})
+    name: Release (${{ matrix.name }})
     needs: meta
+    # Signing / notarization secrets live in the "release" environment
+    # (same secret names as Naughty-Otters/OpenFDE / Teralexi).
+    environment: release
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
+          - os: mac
+            platform: macos-latest
             target: aarch64-apple-darwin
             name: macOS-arm64
             bundles: app,dmg
-          - platform: windows-latest
+          - os: win
+            platform: windows-latest
             target: x86_64-pc-windows-msvc
             name: Windows-x64
             bundles: msi,nsis
@@ -103,13 +108,80 @@ jobs:
       - name: Sync / check package versions
         run: node scripts/sync-cli-version.mjs --check
 
+      - name: Require macOS signing secrets
+        if: matrix.os == 'mac'
+        env:
+          MAC_SIGN_CERTIFICATE_BASE64: ${{ secrets.MAC_SIGN_CERTIFICATE_BASE64 }}
+          MAC_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MAC_SIGN_CERTIFICATE_PASSWORD }}
+          MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+          MAC_APPLE_ID: ${{ secrets.MAC_APPLE_ID }}
+          MAC_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.MAC_APPLE_APP_SPECIFIC_PASSWORD }}
+          MAC_APPLE_TEAM_ID: ${{ secrets.MAC_APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for v in MAC_SIGN_CERTIFICATE_BASE64 MAC_SIGN_CERTIFICATE_PASSWORD MAC_SIGN_IDENTITY \
+                   MAC_APPLE_ID MAC_APPLE_APP_SPECIFIC_PASSWORD MAC_APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then missing+=("$v"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing release-environment secrets for macOS signing/notarization: ${missing[*]}"
+            echo "Copy the same MAC_* secrets from OpenFDE into this repo's GitHub Environment named \"release\"."
+            exit 1
+          fi
+          echo "macOS signing + notarization secrets present."
+
+      # Windows Authenticode: import OpenFDE WIN_SIGN_* .pfx and set thumbprint for Tauri.
+      - name: Import Windows signing certificate
+        if: matrix.os == 'win'
+        env:
+          WIN_SIGN_CERTIFICATE: ${{ secrets.WIN_SIGN_CERTIFICATE_BASE64 }}
+          WIN_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.WIN_SIGN_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_SIGN_CERTIFICATE)) {
+            Write-Host "::warning::WIN_SIGN_CERTIFICATE_BASE64 not set — Windows build will be unsigned"
+            exit 0
+          }
+          New-Item -ItemType Directory -Force -Path certificate | Out-Null
+          $bytes = [Convert]::FromBase64String($env:WIN_SIGN_CERTIFICATE)
+          [IO.File]::WriteAllBytes("$pwd/certificate/certificate.pfx", $bytes)
+          $secure = ConvertTo-SecureString -String $env:WIN_SIGN_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate `
+            -FilePath "$pwd/certificate/certificate.pfx" `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -Password $secure
+          $thumb = $cert.Thumbprint
+          Write-Host "Imported certificate thumbprint=$thumb"
+          $env:THUMB = $thumb
+          node -e @'
+          const fs = require("fs");
+          const path = "src-tauri/tauri.conf.json";
+          const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+          conf.bundle = conf.bundle || {};
+          conf.bundle.windows = {
+            ...(conf.bundle.windows || {}),
+            certificateThumbprint: process.env.THUMB,
+            digestAlgorithm: "sha256",
+            timestampUrl: "http://timestamp.digicert.com",
+          };
+          fs.writeFileSync(path, JSON.stringify(conf, null, 2) + "\n");
+          console.log("Wrote windows.certificateThumbprint=" + process.env.THUMB);
+          '@
+
       - name: Build + upload to GitHub Release
         id: tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Unsigned builds: do not set a fake signing identity (breaks bundling).
           CI: true
+          # macOS — OpenFDE secret names → Tauri APPLE_* env
+          APPLE_CERTIFICATE: ${{ matrix.os == 'mac' && secrets.MAC_SIGN_CERTIFICATE_BASE64 || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.os == 'mac' && secrets.MAC_SIGN_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'mac' && secrets.MAC_SIGN_IDENTITY || '' }}
+          APPLE_ID: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_TEAM_ID || '' }}
         with:
           tagName: ${{ needs.meta.outputs.tag }}
           releaseName: DevTree ${{ needs.meta.outputs.tag }}
@@ -121,13 +193,11 @@ jobs:
             - **npm CLI** — `npm i -g devtree-ai@latest` then `devtree install && devtree open`
             - **Homebrew (macOS)** — `brew tap Naughty-Otters/tap && brew install --cask devtree`
 
-            **macOS (Apple Silicon)** — `aarch64` build from `macos-latest`
-            **Windows** — `x86_64-pc-windows-msvc` installer
-
-            > **Note:** Builds are currently unsigned. macOS may require right-click → Open on first launch.
+            **macOS (Apple Silicon)** — signed + notarized `aarch64` build
+            **Windows** — signed `x86_64` installer (when `WIN_SIGN_*` secrets are set)
           releaseDraft: ${{ needs.meta.outputs.draft == 'true' }}
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --no-sign
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Collect installers for Actions artifacts
         shell: bash

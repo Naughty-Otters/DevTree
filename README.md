@@ -151,7 +151,7 @@ Or from a machine with `gh` auth:
 gh workflow run Release -f version=0.1.0 -f draft=true
 ```
 
-Optional npm / Homebrew tap updates run when `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN` are set. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+Release builds sign/notarize with the same `MAC_*` / `WIN_*` secrets as OpenFDE (GitHub Environment **`release`**). Optional npm / Homebrew tap updates run when `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN` are set. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 ### Project layout
 

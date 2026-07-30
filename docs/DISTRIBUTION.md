@@ -40,10 +40,22 @@ brew tap Naughty-Otters/tap && brew install --cask devtree
 | 6 | GitHub Actions artifacts | Same installers uploaded on the Release workflow run (`DevTree-vX.Y.Z-<target>`, 90-day retention) |
 | 7 | Manual release | Actions → **Release** → **Run workflow** (or `gh workflow run Release -f version=0.1.0`) |
 
-Secrets:
+Secrets (repo or GitHub Environment **`release`** — same names as [OpenFDE](https://github.com/Naughty-Otters/OpenFDE)):
 
-- `NPM_TOKEN` — publish `devtree-ai` (skipped with a warning if unset)
-- `HOMEBREW_TAP_TOKEN` — PAT with write access to `Naughty-Otters/homebrew-tap` (optional; cask artifact is always uploaded)
+| Secret | Used for |
+| --- | --- |
+| `MAC_SIGN_CERTIFICATE_BASE64` | Base64 `.p12` (Developer ID Application) → Tauri `APPLE_CERTIFICATE` |
+| `MAC_SIGN_CERTIFICATE_PASSWORD` | `.p12` password → `APPLE_CERTIFICATE_PASSWORD` |
+| `MAC_SIGN_IDENTITY` | e.g. `Developer ID Application: … (TEAMID)` → `APPLE_SIGNING_IDENTITY` |
+| `MAC_APPLE_ID` | Apple ID email → `APPLE_ID` (notarization) |
+| `MAC_APPLE_APP_SPECIFIC_PASSWORD` | App-specific password → `APPLE_PASSWORD` |
+| `MAC_APPLE_TEAM_ID` | 10-char Team ID → `APPLE_TEAM_ID` |
+| `WIN_SIGN_CERTIFICATE_BASE64` | Base64 `.pfx` (optional Windows Authenticode) |
+| `WIN_SIGN_CERTIFICATE_PASSWORD` | `.pfx` password |
+| `NPM_TOKEN` | publish `devtree-ai` (skipped with a warning if unset) |
+| `HOMEBREW_TAP_TOKEN` | PAT with write access to `Naughty-Otters/homebrew-tap` (optional) |
+
+CI builds stay unsigned (`--no-sign`). Only the **Release** workflow signs (and notarizes on macOS).
 
 Local dry-run:
 
