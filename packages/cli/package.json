@@ -26,14 +26,17 @@
   },
   "files": [
     "bin",
-    "src",
+    "src/cli.js",
+    "src/desktop.js",
+    "src/postinstall.js",
     "README.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test src/cli.test.js"
+    "test": "node --test src/*.test.js",
+    "postinstall": "node ./src/postinstall.js"
   },
   "publishConfig": {
     "access": "public"

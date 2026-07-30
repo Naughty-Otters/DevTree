@@ -1,12 +1,18 @@
 # DevTree CLI (`devtree-ai`)
 
-Companion CLI for the [DevTree](https://github.com/Naughty-Otters/DevTree) desktop app.
+Companion CLI that **downloads and installs** the [DevTree](https://github.com/Naughty-Otters/DevTree) desktop app from GitHub Releases (not just a launcher script).
 
 ```bash
 npm i -g devtree-ai@latest
-devtree --version
+devtree install          # download macOS DMG / Windows setup for this machine
+devtree open             # launch
 devtree doctor
-devtree open
 ```
 
-Desktop installers: [GitHub Releases](https://github.com/Naughty-Otters/DevTree/releases) or Homebrew cask (`brew install --cask devtree` after tapping `Naughty-Otters/tap`).
+One-liner (CLI + desktop):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/install/install.sh | bash
+```
+
+Also available via Homebrew cask after the tap is published: `brew install --cask devtree`.

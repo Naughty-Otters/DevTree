@@ -14,24 +14,33 @@ DevTree is a desktop tool for visualizing a codebase's module/dependency graph a
 
 ## Download
 
-### Desktop
+### One-liner (CLI + desktop)
 
-- **GitHub Releases** — macOS (Apple Silicon) DMG and Windows installer: [Releases](https://github.com/Naughty-Otters/DevTree/releases)
-- **Homebrew** (after the tap is published by a release):
+```bash
+curl -fsSL https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/install/install.sh | bash
+```
+
+### npm CLI (downloads the desktop app)
+
+```bash
+npm i -g devtree-ai@latest
+devtree install          # fetch the matching GitHub Release build for this OS/arch
+devtree open             # launch the installed app
+devtree doctor
+```
+
+`devtree install` pulls the Tauri DMG / `.app.tar.gz` (macOS) or NSIS/MSI (Windows) from [Releases](https://github.com/Naughty-Otters/DevTree/releases) and installs it under `/Applications` or `~/Applications` (macOS).
+
+### Homebrew (macOS)
 
 ```bash
 brew tap Naughty-Otters/tap
 brew install --cask devtree
 ```
 
-### CLI (npm)
+### Manual
 
-```bash
-npm i -g devtree-ai@latest
-devtree --version
-devtree doctor
-devtree open          # launches the desktop app if installed
-```
+macOS / Windows installers: [GitHub Releases](https://github.com/Naughty-Otters/DevTree/releases).
 
 ## Prerequisites
 

@@ -1,52 +1,45 @@
 #!/usr/bin/env node
 /**
- * DevTree CLI — companion to the desktop app (version, doctor, open).
+ * DevTree CLI — download/install/launch the desktop app (+ doctor/version).
  */
 import { existsSync } from "node:fs";
 import { homedir, platform, arch, release as osRelease } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
+import {
+  installDesktopApp,
+  readCliVersion,
+  readInstallState,
+} from "./desktop.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
+export { readCliVersion as readPackageVersion } from "./desktop.js";
 
 const DESKTOP_BUNDLE_ID = "com.devtree.app";
 const DESKTOP_APP_NAME = "devtree.app";
 const RELEASES_URL = "https://github.com/Naughty-Otters/DevTree/releases";
 const NPM_PACKAGE = "devtree-ai";
-
-export function readPackageVersion() {
-  try {
-    const pkg = require(join(__dirname, "..", "package.json"));
-    return String(pkg.version || "0.0.0");
-  } catch {
-    return "0.0.0";
-  }
-}
+const INSTALL_SH =
+  "https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/install/install.sh";
 
 function printHelp(version) {
   console.log(`DevTree CLI v${version}
 
 Usage:
-  devtree [command]
+  devtree <command> [options]
 
 Commands:
-  doctor     Check Node + whether the desktop app is installed
-  open       Launch the DevTree desktop app if installed
-  version    Print version
-  help       Show this help
+  install [--version <ver>]   Download & install the desktop app from GitHub Releases
+  download                    Alias for install
+  open [--install]            Launch desktop (optionally install if missing)
+  doctor                      Check Node + desktop install
+  version                     Print CLI version
+  help                        Show this help
 
-Install CLI:
+Examples:
   npm i -g ${NPM_PACKAGE}@latest
-
-Install desktop (macOS):
-  brew tap Naughty-Otters/tap
-  brew install --cask devtree
-
-Or download installers:
-  ${RELEASES_URL}
+  devtree install             # fetch matching (or latest) desktop build
+  devtree open
+  curl -fsSL ${INSTALL_SH} | bash
 `);
 }
 
@@ -75,6 +68,9 @@ export function findDesktopApp() {
   const fromEnv = resolveFromEnv();
   if (fromEnv) return fromEnv;
 
+  const state = readInstallState();
+  if (state?.appPath && existsSync(state.appPath)) return state.appPath;
+
   const p = platform();
   if (p === "darwin") {
     const candidates = [
@@ -88,33 +84,85 @@ export function findDesktopApp() {
   if (p === "win32") {
     const local = process.env.LOCALAPPDATA;
     if (local) {
-      const exe = join(local, "devtree", "devtree.exe");
-      if (existsSync(exe)) return exe;
+      for (const exe of [
+        join(local, "devtree", "devtree.exe"),
+        join(local, "Programs", "devtree", "devtree.exe"),
+      ]) {
+        if (existsSync(exe)) return exe;
+      }
     }
-    return null;
   }
   return null;
+}
+
+function parseFlags(argv) {
+  const flags = { version: undefined, install: false, force: false };
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--version" || a === "-v") {
+      flags.version = argv[++i];
+      continue;
+    }
+    if (a === "--install") {
+      flags.install = true;
+      continue;
+    }
+    if (a === "--force") {
+      flags.force = true;
+      continue;
+    }
+    positional.push(a);
+  }
+  return { flags, positional };
 }
 
 function cmdDoctor(version) {
   const node = process.version;
   const app = findDesktopApp();
+  const state = readInstallState();
   console.log(`DevTree CLI ${version}`);
   console.log(`Node        ${node} (${platform()} ${arch()}, ${osRelease()})`);
   console.log(`Desktop app ${app ?? "(not found)"}`);
+  if (state?.version) {
+    console.log(`Installed   v${state.version} via ${state.assetName ?? "unknown"}`);
+  }
   if (!app) {
-    console.log(`\nInstall desktop from ${RELEASES_URL}`);
-    console.log("or: brew tap Naughty-Otters/tap && brew install --cask devtree");
+    console.log(`\nRun: devtree install`);
+    console.log(`Or download from ${RELEASES_URL}`);
     return 1;
   }
   return 0;
 }
 
-function cmdOpen() {
-  const app = findDesktopApp();
+async function cmdInstall(flags) {
+  try {
+    const existing = findDesktopApp();
+    if (existing && !flags.force) {
+      console.log(`Desktop already installed at ${existing}`);
+      console.log("Pass --force to reinstall.");
+      return 0;
+    }
+    await installDesktopApp({ version: flags.version });
+    return 0;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    console.error(`\nManual download: ${RELEASES_URL}`);
+    return 1;
+  }
+}
+
+async function cmdOpen(flags) {
+  let app = findDesktopApp();
+  if (!app && flags.install) {
+    const code = await cmdInstall(flags);
+    if (code !== 0) return code;
+    app = findDesktopApp();
+  }
   if (!app) {
-    console.error(`DevTree desktop app not found. Download: ${RELEASES_URL}`);
-    console.error("Or set DEVTREE_APP to the .app / .exe path.");
+    console.error("DevTree desktop app not found.");
+    console.error("Run: devtree install");
+    console.error(`Or:  devtree open --install`);
     return 1;
   }
   if (platform() === "darwin") {
@@ -133,10 +181,11 @@ function cmdOpen() {
  * @returns {Promise<number>}
  */
 export async function runCli(argv) {
-  const version = readPackageVersion();
-  const cmd = (argv[0] ?? "help").replace(/^--/, "");
+  const version = readCliVersion();
+  const { flags, positional } = parseFlags(argv);
+  const cmd = (positional[0] ?? "help").replace(/^--/, "");
 
-  if (cmd === "version" || cmd === "v" || cmd === "V") {
+  if (cmd === "version" || cmd === "V") {
     console.log(version);
     return 0;
   }
@@ -145,7 +194,8 @@ export async function runCli(argv) {
     return 0;
   }
   if (cmd === "doctor") return cmdDoctor(version);
-  if (cmd === "open") return cmdOpen();
+  if (cmd === "install" || cmd === "download") return cmdInstall(flags);
+  if (cmd === "open") return cmdOpen(flags);
 
   printHelp(version);
   return 1;
