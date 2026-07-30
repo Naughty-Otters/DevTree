@@ -50,12 +50,19 @@ Secrets (repo or GitHub Environment **`release`** — same names as [OpenFDE](ht
 | `MAC_APPLE_ID` | Apple ID email → `APPLE_ID` (notarization) |
 | `MAC_APPLE_APP_SPECIFIC_PASSWORD` | App-specific password → `APPLE_PASSWORD` |
 | `MAC_APPLE_TEAM_ID` | 10-char Team ID → `APPLE_TEAM_ID` |
-| `WIN_SIGN_CERTIFICATE_BASE64` | Base64 `.pfx` (optional Windows Authenticode) |
+| `WIN_SIGN_CERTIFICATE_BASE64` | Base64 `.pfx` (fallback if Azure not set) |
 | `WIN_SIGN_CERTIFICATE_PASSWORD` | `.pfx` password |
+| `AZURE_TENANT_ID` | Entra tenant ID (Azure Trusted Signing — preferred) |
+| `AZURE_CLIENT_ID` | App registration client ID |
+| `AZURE_CLIENT_SECRET` | App registration client secret |
+| `AZURE_SIGNING_ENDPOINT` | Artifact Signing account URI (e.g. `https://eus.codesigning.azure.net/`) |
+| `AZURE_SIGNING_ACCOUNT_NAME` | Artifact Signing account name |
+| `AZURE_SIGNING_CERTIFICATE_PROFILE` | Certificate profile name |
+| `AZURE_SIGNING_PUBLISHER_NAME` | Publisher / legal name (UAC description) |
 | `NPM_TOKEN` | publish `devtree-ai` (skipped with a warning if unset) |
 | `HOMEBREW_TAP_TOKEN` | PAT with write access to `Naughty-Otters/homebrew-tap` (optional) |
 
-CI builds stay unsigned (`--no-sign`). Only the **Release** workflow signs (and notarizes on macOS).
+Windows signing requires **either** all seven `AZURE_*` vars (preferred, same as OpenFDE) **or** `WIN_SIGN_*`. CI builds stay unsigned (`--no-sign`). Only the **Release** workflow signs (and notarizes on macOS).
 
 Local dry-run:
 

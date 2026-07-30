@@ -131,18 +131,89 @@ jobs:
           fi
           echo "macOS signing + notarization secrets present."
 
-      # Windows Authenticode: import OpenFDE WIN_SIGN_* .pfx and set thumbprint for Tauri.
-      - name: Import Windows signing certificate
+      # Windows — same OpenFDE secrets: Azure Trusted Signing preferred, else WIN_SIGN_* .pfx
+      - name: Require Windows signing secrets
         if: matrix.os == 'win'
+        env:
+          WIN_SIGN_CERTIFICATE_BASE64: ${{ secrets.WIN_SIGN_CERTIFICATE_BASE64 }}
+          WIN_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.WIN_SIGN_CERTIFICATE_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE }}
+          AZURE_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_SIGNING_PUBLISHER_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          azure_ok=1
+          for v in AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET \
+                   AZURE_SIGNING_ENDPOINT AZURE_SIGNING_ACCOUNT_NAME \
+                   AZURE_SIGNING_CERTIFICATE_PROFILE AZURE_SIGNING_PUBLISHER_NAME; do
+            if [ -z "${!v}" ]; then azure_ok=0; fi
+          done
+          pfx_ok=0
+          if [ -n "${WIN_SIGN_CERTIFICATE_BASE64}" ] && [ -n "${WIN_SIGN_CERTIFICATE_PASSWORD}" ]; then
+            pfx_ok=1
+          fi
+          if [ "$azure_ok" -eq 1 ]; then
+            echo "Windows Azure Trusted Signing secrets present (preferred)."
+            echo "WINDOWS_SIGN_MODE=azure" >> "$GITHUB_ENV"
+          elif [ "$pfx_ok" -eq 1 ]; then
+            echo "Windows WIN_SIGN_* .pfx secrets present."
+            echo "WINDOWS_SIGN_MODE=pfx" >> "$GITHUB_ENV"
+          else
+            echo "::error::Missing Windows signing secrets. Need all seven AZURE_* vars (preferred) or WIN_SIGN_CERTIFICATE_BASE64 + WIN_SIGN_CERTIFICATE_PASSWORD."
+            echo "Copy the same WIN_SIGN_* / AZURE_* secrets from OpenFDE into this repo's GitHub Environment named \"release\"."
+            exit 1
+          fi
+
+      - name: Configure Windows Azure Trusted Signing
+        if: matrix.os == 'win' && env.WINDOWS_SIGN_MODE == 'azure'
+        env:
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_SIGNING_ACCOUNT_NAME }}
+          AZURE_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_SIGNING_CERTIFICATE_PROFILE }}
+          AZURE_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_SIGNING_PUBLISHER_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install artifact-signing-cli --locked
+          node -e '
+            const fs = require("fs");
+            const path = "src-tauri/tauri.conf.json";
+            const endpoint = (process.env.AZURE_SIGNING_ENDPOINT || "").replace(/\/$/, "");
+            const account = process.env.AZURE_SIGNING_ACCOUNT_NAME;
+            const profile = process.env.AZURE_SIGNING_CERTIFICATE_PROFILE;
+            const publisher = process.env.AZURE_SIGNING_PUBLISHER_NAME;
+            const q = (s) => `"${String(s).replace(/"/g, "\\\"")}"`;
+            const signCommand = [
+              "artifact-signing-cli",
+              "-e", q(endpoint),
+              "-a", q(account),
+              "-c", q(profile),
+              "-d", q(publisher),
+              "%1",
+            ].join(" ");
+            const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+            conf.bundle = conf.bundle || {};
+            conf.bundle.windows = {
+              ...(conf.bundle.windows || {}),
+              signCommand,
+            };
+            delete conf.bundle.windows.certificateThumbprint;
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2) + "\n");
+            console.log("Wrote windows.signCommand for Azure Artifact Signing");
+          '
+
+      - name: Import Windows signing certificate (.pfx)
+        if: matrix.os == 'win' && env.WINDOWS_SIGN_MODE == 'pfx'
         env:
           WIN_SIGN_CERTIFICATE: ${{ secrets.WIN_SIGN_CERTIFICATE_BASE64 }}
           WIN_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.WIN_SIGN_CERTIFICATE_PASSWORD }}
         shell: pwsh
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_SIGN_CERTIFICATE)) {
-            Write-Host "::warning::WIN_SIGN_CERTIFICATE_BASE64 not set — Windows build will be unsigned"
-            exit 0
-          }
           New-Item -ItemType Directory -Force -Path certificate | Out-Null
           $bytes = [Convert]::FromBase64String($env:WIN_SIGN_CERTIFICATE)
           [IO.File]::WriteAllBytes("$pwd/certificate/certificate.pfx", $bytes)
@@ -165,6 +236,7 @@ jobs:
             digestAlgorithm: "sha256",
             timestampUrl: "http://timestamp.digicert.com",
           };
+          delete conf.bundle.windows.signCommand;
           fs.writeFileSync(path, JSON.stringify(conf, null, 2) + "\n");
           console.log("Wrote windows.certificateThumbprint=" + process.env.THUMB);
           '@
@@ -182,6 +254,16 @@ jobs:
           APPLE_ID: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_ID || '' }}
           APPLE_PASSWORD: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.os == 'mac' && secrets.MAC_APPLE_TEAM_ID || '' }}
+          # Windows — same OpenFDE WIN_SIGN_* / AZURE_* names (artifact-signing-cli reads AZURE_*)
+          WIN_SIGN_CERTIFICATE: ${{ matrix.os == 'win' && secrets.WIN_SIGN_CERTIFICATE_BASE64 || '' }}
+          WIN_SIGN_CERTIFICATE_PASSWORD: ${{ matrix.os == 'win' && secrets.WIN_SIGN_CERTIFICATE_PASSWORD || '' }}
+          AZURE_TENANT_ID: ${{ matrix.os == 'win' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ matrix.os == 'win' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ matrix.os == 'win' && secrets.AZURE_CLIENT_SECRET || '' }}
+          AZURE_SIGNING_ENDPOINT: ${{ matrix.os == 'win' && secrets.AZURE_SIGNING_ENDPOINT || '' }}
+          AZURE_SIGNING_ACCOUNT_NAME: ${{ matrix.os == 'win' && secrets.AZURE_SIGNING_ACCOUNT_NAME || '' }}
+          AZURE_SIGNING_CERTIFICATE_PROFILE: ${{ matrix.os == 'win' && secrets.AZURE_SIGNING_CERTIFICATE_PROFILE || '' }}
+          AZURE_SIGNING_PUBLISHER_NAME: ${{ matrix.os == 'win' && secrets.AZURE_SIGNING_PUBLISHER_NAME || '' }}
         with:
           tagName: ${{ needs.meta.outputs.tag }}
           releaseName: DevTree ${{ needs.meta.outputs.tag }}
@@ -194,7 +276,7 @@ jobs:
             - **Homebrew (macOS)** — `brew tap Naughty-Otters/tap && brew install --cask devtree`
 
             **macOS (Apple Silicon)** — signed + notarized `aarch64` build
-            **Windows** — signed `x86_64` installer (when `WIN_SIGN_*` secrets are set)
+            **Windows** — signed `x86_64` installer (Azure Trusted Signing or `WIN_SIGN_*`)
           releaseDraft: ${{ needs.meta.outputs.draft == 'true' }}
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}

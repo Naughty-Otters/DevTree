@@ -45,7 +45,7 @@ Primary downloads are **GitHub Releases**. Release automation also updates **npm
 | Homebrew cask (`devtree`) | Cask template + sha256 from mac DMG; tap push when `HOMEBREW_TAP_TOKEN` is set |
 | CI code signing | Disabled (`--no-sign`) |
 | Release macOS signing + notarization | `release` environment secrets `MAC_SIGN_*` / `MAC_APPLE_*` (same as OpenFDE) → Tauri `APPLE_*` |
-| Release Windows signing | Optional `WIN_SIGN_CERTIFICATE_BASE64` + `WIN_SIGN_CERTIFICATE_PASSWORD` |
+| Release Windows signing | Same OpenFDE secrets: all seven `AZURE_*` (preferred) or `WIN_SIGN_*` |
 
 ## Before first public release
 
@@ -53,7 +53,7 @@ Primary downloads are **GitHub Releases**. Release automation also updates **npm
 2. Repository URL is set in `package.json` / README badges (`Naughty-Otters/DevTree`). CI on `main` refreshes version + coverage badges in `.github/badges/`.
 3. Run `npm run test:all` and `npm run tauri build` on a clean machine.
 4. Create `Naughty-Otters/homebrew-tap` (if missing) and add repo secrets `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN`.
-5. Create a GitHub Environment named **`release`** and add the same `MAC_SIGN_*` / `MAC_APPLE_*` (and optional `WIN_SIGN_*`) secrets used by OpenFDE — see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+5. Create a GitHub Environment named **`release`** and add the same `MAC_SIGN_*` / `MAC_APPLE_*` and Windows `AZURE_*` (preferred) or `WIN_SIGN_*` secrets used by OpenFDE — see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 6. Tag `v0.1.0` (or current version) to trigger the release workflow; review the draft on GitHub, then publish so users can download.
 7. Audit dependencies: `cargo audit`, `npm audit` (optional but recommended).
 
