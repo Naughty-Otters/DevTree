@@ -17,6 +17,7 @@
           <button id="btn-stop-analysis" class="btn btn-icon btn-ghost" disabled title="Stop analysis"></button>
           <button id="btn-focus-view" class="btn btn-icon btn-ghost" disabled title="Focus view"></button>
           <button id="btn-save-file" class="btn btn-icon btn-ghost" disabled title="Save file"></button>
+          <button id="btn-setup-wizard" class="btn btn-icon btn-ghost" title="Setup guide"></button>
           <button id="btn-settings" class="btn btn-icon btn-ghost" title="Settings"></button>
         </div>
         <span id="app-title">DevTree</span>
@@ -66,7 +67,10 @@
           <aside id="right-panel" class="hidden" aria-hidden="true">
             <header class="settings-header">
               <h2 id="settings-title">Settings</h2>
-              <button id="btn-close-settings" class="btn btn-icon btn-ghost" title="Close settings"></button>
+              <div class="settings-header-actions">
+                <button id="btn-setup-guide" type="button" class="btn-text" title="Open the setup wizard">Setup guide</button>
+                <button id="btn-close-settings" class="btn btn-icon btn-ghost" title="Close settings"></button>
+              </div>
             </header>
             <div class="settings-body settings-accordion">
               <section class="settings-accordion-item is-open" data-settings-section="rules">

@@ -55,6 +55,12 @@ Dependency graph for packages and files — so you can tell whether the agent gl
   <img src="media/pic/pic_package_dep.png" alt="Package dependency graph in DevTree" width="720" />
 </p>
 
+<p align="center">
+  <img src="media/pic/OpenCodeModuleAnalysis.png" alt="DevTree analyzing OpenCode: module graph, project tree, and completed analysis pipeline" width="720" />
+</p>
+
+<p align="center"><em>Example: OpenCode workspace — packages on the graph, modules in the sidebar, analysis complete in Progress.</em></p>
+
 DSM + health score when you want numbers, not vibes:
 
 <p align="center">

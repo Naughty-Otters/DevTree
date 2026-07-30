@@ -6,5 +6,6 @@ describe("state/types", () => {
     const state = defaultPersistedState();
     expect(state.panelSizes).toBeDefined();
     expect(state.version).toBe(1);
+    expect(state.setupWizardCompleted).toBe(false);
   });
 });

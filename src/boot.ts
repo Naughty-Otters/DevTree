@@ -22,8 +22,9 @@ import {
   scanProject,
   readProjectFile,
   writeProjectFile,
-  listLspServers,
-  installLspServer,
+  listLspServers as fetchLspServers,
+  installLspServer as runInstallLspServer,
+  listLlmModels,
   listLanguageLinters,
   installLinter,
   startAnalysisWatch,
@@ -61,6 +62,7 @@ import { mountToolbarIcons } from "./ui/toolbar";
 import { createSettingsPanel } from "./ui/settingsPanel";
 import { initResizers } from "./ui/resizer";
 import { showAnalysisDialog } from "./ui/analysisDialog";
+import { showSetupWizard } from "./ui/setupWizard";
 import {
   defaultAnalysisTriggerConfig,
   type AnalysisTriggerConfig,
@@ -145,6 +147,8 @@ export async function startApp(): Promise<void> {
   const btnFocus = document.querySelector<HTMLButtonElement>("#btn-focus-view")!;
   const btnSaveFile = document.querySelector<HTMLButtonElement>("#btn-save-file")!;
   const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings")!;
+  const btnSetupWizard = document.querySelector<HTMLButtonElement>("#btn-setup-wizard");
+  const btnSetupGuide = document.querySelector<HTMLButtonElement>("#btn-setup-guide");
   const projectPathEl = document.querySelector<HTMLElement>("#project-path")!;
   const treeContainer = document.querySelector<HTMLElement>("#project-tree")!;
   const modulesContainer = document.querySelector<HTMLElement>("#modules-list")!;
@@ -184,6 +188,8 @@ export async function startApp(): Promise<void> {
   };
 
   const migratedAi = migratePersistedAiSettings(persisted);
+  let setupWizardCompleted = Boolean(persisted.setupWizardCompleted);
+  let setupWizardOpen = false;
 
   function rulesPanelContext(): RulesPanelContext {
     return {
@@ -482,6 +488,7 @@ export async function startApp(): Promise<void> {
       dsmLevel: app.dsmLevel,
       dsmOrdering: app.dsmOrdering,
       designRules: app.designRules,
+      setupWizardCompleted,
     };
   }
 
@@ -674,7 +681,7 @@ export async function startApp(): Promise<void> {
       lspState.loading = true;
       createLspServersPanel(lspServersContainer, lspState, lspHandlers);
       try {
-        lspState.servers = await listLspServers();
+        lspState.servers = await fetchLspServers();
         lspState.settings = mergeLspSettings(
           lspState.servers,
           lspState.settings,
@@ -695,14 +702,14 @@ export async function startApp(): Promise<void> {
       delete lspState.errors[id];
       createLspServersPanel(lspServersContainer, lspState, lspHandlers);
       try {
-        const result = await installLspServer(id);
+        const result = await runInstallLspServer(id);
         lspState.servers = lspState.servers.map((s) =>
           s.id === id ? result.server : s,
         );
         if (!result.ok) {
           lspState.errors[id] = result.message;
         } else {
-          lspState.servers = await listLspServers();
+          lspState.servers = await fetchLspServers();
           lspState.settings = mergeLspSettings(
             lspState.servers,
             lspState.settings,
@@ -817,6 +824,12 @@ export async function startApp(): Promise<void> {
     },
   });
   btnSettings.addEventListener("click", () => settingsApi.toggle());
+  btnSetupWizard?.addEventListener("click", () => {
+    void launchSetupWizard();
+  });
+  btnSetupGuide?.addEventListener("click", () => {
+    void launchSetupWizard();
+  });
 
   initResizers(
     () => resize(),
@@ -1524,8 +1537,110 @@ export async function startApp(): Promise<void> {
   mountToolbarIcons();
   initTooltips();
 
+  async function launchSetupWizard(): Promise<void> {
+    if (setupWizardOpen) return;
+    setupWizardOpen = true;
+    try {
+      if (app.llmProviders.length === 0) {
+        try {
+          app.llmProviders = await getLlmProviders();
+          llmProviderConfigsPanel.setProviders(app.llmProviders);
+        } catch (err) {
+          console.warn("Failed to load LLM providers for setup wizard:", err);
+        }
+      }
+
+      const result = await showSetupWizard({
+        openProject: async () => {
+          let path = await openProjectDialog();
+          if (!path) {
+            // Same browser fallback as the toolbar Open button.
+            const input = document.createElement("input");
+            input.type = "file";
+            input.setAttribute("webkitdirectory", "");
+            input.style.display = "none";
+            document.body.appendChild(input);
+            path = await new Promise<string | null>((resolve) => {
+              input.addEventListener("change", () => {
+                const files = input.files;
+                if (!files || files.length === 0) {
+                  resolve(null);
+                  return;
+                }
+                const first = files[0]!;
+                const rel = first.webkitRelativePath;
+                const root = rel.split("/")[0];
+                resolve(root || first.name);
+              });
+              input.click();
+            });
+            document.body.removeChild(input);
+          }
+          if (!path) return null;
+          const ok = await openProjectAt(path);
+          return ok ? path : null;
+        },
+        getProjectPath: () => app.projectPath,
+        listLspServers: async () => {
+          const list = await fetchLspServers();
+          lspState.servers = list;
+          lspState.settings = mergeLspSettings(list, lspState.settings);
+          app.lspSettings = lspState.settings;
+          lspLoaded = true;
+          createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+          persist();
+          return list;
+        },
+        installLspServer: async (id) => {
+          const result = await runInstallLspServer(id);
+          if (result.ok) {
+            lspState.servers = await fetchLspServers();
+            lspState.settings = mergeLspSettings(
+              lspState.servers,
+              lspState.settings,
+            );
+            app.lspSettings = lspState.settings;
+            createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+            persist();
+          }
+          return result;
+        },
+        getLspSettings: () => app.lspSettings,
+        setLspSettings: (settings) => {
+          app.lspSettings = settings;
+          lspState.settings = settings;
+          persist();
+        },
+        getLlmProviders: () => app.llmProviders,
+        listLlmModels: (provider, apiKey) => listLlmModels(provider, apiKey),
+        getLlmConfigurations: () => app.llmConfigurations,
+        setLlmConfigurations: (configs) => {
+          app.llmConfigurations = configs;
+          llmProviderConfigsPanel.setConfigs(configs);
+          persist();
+        },
+      });
+
+      setupWizardCompleted = true;
+      persist();
+
+      if (!app.projectPath) {
+        showOverlay("Open a project to get started");
+      }
+
+      if (result.action === "runAnalysis" && app.projectPath) {
+        await handleRunAnalysis();
+      }
+    } finally {
+      setupWizardOpen = false;
+    }
+  }
+
   if (!persisted.projectPath) {
     showOverlay("Open a project to get started");
+    if (!setupWizardCompleted) {
+      void launchSetupWizard();
+    }
   } else {
     projectPathEl.textContent = "Restoring session…";
     runWhenIdleAsync(async () => {

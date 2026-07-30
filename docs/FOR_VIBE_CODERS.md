@@ -77,6 +77,12 @@ Stop bouncing between “ask the agent again,” a separate linter, and a securi
   <img src="../media/pic/pic_package_dep.png" alt="Frontend package dependency graph" width="760" />
 </p>
 
+<p align="center">
+  <img src="../media/pic/OpenCodeModuleAnalysis.png" alt="DevTree analyzing the OpenCode project: package graph, modules list, and completed analysis pipeline" width="760" />
+</p>
+
+<p align="center"><em>Real workspace — OpenCode packages on the graph with a finished rule pipeline in Progress.</em></p>
+
 ### Health you can measure
 
 <p align="center">

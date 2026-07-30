@@ -47,6 +47,8 @@ export interface PersistedUiState {
   dsmOrdering?: "partitioned" | "hierarchical";
   /** LDM design rules for architecture conformance */
   designRules?: DesignRule[];
+  /** True after the user finishes or skips the first-run setup wizard */
+  setupWizardCompleted?: boolean;
 }
 
 export interface PersistedAppState extends PersistedUiState {
@@ -80,6 +82,7 @@ export function defaultPersistedState(): PersistedAppState {
     dsmLevel: "package",
     dsmOrdering: "partitioned",
     designRules: defaultDesignRules(),
+    setupWizardCompleted: false,
     analysisResult: null,
   };
 }
