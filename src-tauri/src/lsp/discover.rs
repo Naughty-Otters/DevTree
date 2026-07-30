@@ -43,6 +43,14 @@ impl LanguageKind {
             Self::Rust => json!({
                 "cargo": {
                     "allTargets": cfg_bool(cfg, "cargo_all_targets", false)
+                },
+                // Keep analysis lighter / more stable for short-lived DevTree LSP sessions.
+                "checkOnSave": false,
+                "diagnostics": {
+                    "enable": true
+                },
+                "cachePriming": {
+                    "enable": false
                 }
             }),
             Self::Python => {

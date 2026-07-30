@@ -121,6 +121,9 @@ export function createResultsPanel(
     overallFill: HTMLElement;
     overallMeta: HTMLElement;
     actions: HTMLElement;
+    title: HTMLElement;
+    toggleBtn: HTMLButtonElement;
+    summary: HTMLElement;
     rulesHeading: HTMLElement | null;
     rulesList: HTMLElement | null;
     pipelineBars: Map<string, TaskBarRefs>;
@@ -129,6 +132,8 @@ export function createResultsPanel(
   }
 
   const runCards = new Map<string, RunCardRefs>();
+  /** Collapsed run cards — progress/AI body hidden until reopened. */
+  const collapsedRunIds = new Set<string>();
   let runsHeadingEl: HTMLElement | null = null;
   let runsHeadingText: HTMLElement | null = null;
   let cancelAllBtn: HTMLButtonElement | null = null;
@@ -213,13 +218,26 @@ export function createResultsPanel(
     const header = document.createElement("div");
     header.className = "analysis-run-header";
 
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "btn btn-ghost analysis-run-toggle";
+    toggleBtn.setAttribute("aria-label", "Expand or collapse run");
+
+    const titleBlock = document.createElement("div");
+    titleBlock.className = "analysis-run-title-block";
+
     const title = document.createElement("div");
     title.className = "analysis-run-title";
     title.textContent = run.label;
 
+    const summary = document.createElement("div");
+    summary.className = "analysis-run-summary";
+
+    titleBlock.append(title, summary);
+
     const actions = document.createElement("div");
     actions.className = "analysis-run-actions";
-    header.append(title, actions);
+    header.append(toggleBtn, titleBlock, actions);
 
     const message = document.createElement("div");
     message.className = "analysis-progress-message";
@@ -279,6 +297,15 @@ export function createResultsPanel(
     body.append(progressCol, streamCol);
     root.append(header, body);
 
+    toggleBtn.addEventListener("click", () => {
+      if (collapsedRunIds.has(run.id)) {
+        collapsedRunIds.delete(run.id);
+      } else {
+        collapsedRunIds.add(run.id);
+      }
+      applyCollapsedState(run.id);
+    });
+
     return {
       root,
       body,
@@ -289,12 +316,37 @@ export function createResultsPanel(
       overallFill,
       overallMeta,
       actions,
+      title,
+      toggleBtn,
+      summary,
       rulesHeading: null,
       rulesList: null,
       pipelineBars,
       ruleBars: new Map(),
       aiStreamHost,
     };
+  }
+
+  function applyCollapsedState(runId: string): void {
+    const refs = runCards.get(runId);
+    if (!refs) return;
+    const collapsed = collapsedRunIds.has(runId);
+    refs.root.classList.toggle("is-collapsed", collapsed);
+    refs.body.hidden = collapsed;
+    refs.toggleBtn.textContent = collapsed ? "▸" : "▾";
+    refs.toggleBtn.title = collapsed ? "Expand run details" : "Collapse run details";
+    refs.summary.hidden = !collapsed;
+  }
+
+  function runStatusSummary(run: AnalysisRun): string {
+    if (run.status === "running") {
+      const pct = overallProgressPercent(run.progress);
+      return `${run.progress?.message ?? "Running…"} · ${pct}%`;
+    }
+    if (run.status === "completed") return "Complete · 100%";
+    if (run.status === "cancelled") return "Cancelled";
+    if (run.status === "failed") return run.error ?? "Failed";
+    return run.status;
   }
 
   function updateRunActions(refs: RunCardRefs, run: AnalysisRun): void {
@@ -380,7 +432,10 @@ export function createResultsPanel(
 
   function updateRunCard(refs: RunCardRefs, run: AnalysisRun): void {
     refs.root.className = `analysis-run-card analysis-run-${run.status}`;
+    refs.title.textContent = run.label;
+    refs.summary.textContent = runStatusSummary(run);
     updateRunActions(refs, run);
+    applyCollapsedState(run.id);
 
     const progress = run.progress;
     const currentStage = progress?.stage ?? "starting";
@@ -445,17 +500,20 @@ export function createResultsPanel(
   }
 
   function updateProgressRuns(): void {
-    const runIds = new Set(activeRuns.map((run) => run.id));
-    const running = activeRuns.filter((run) => run.status === "running");
+    const orderedRuns = [...activeRuns].sort((a, b) => b.startedAt - a.startedAt);
+    const runIds = new Set(orderedRuns.map((run) => run.id));
+    const running = orderedRuns.filter((run) => run.status === "running");
 
     for (const [id, refs] of runCards) {
       if (!runIds.has(id)) {
         refs.root.remove();
         runCards.delete(id);
+        collapsedRunIds.delete(id);
       }
     }
 
-    if (activeRuns.length === 0) {
+    if (orderedRuns.length === 0) {
+      collapsedRunIds.clear();
       if (!progressEmptyEl) {
         progressEmptyEl = document.createElement("div");
         progressEmptyEl.className = "panel-empty";
@@ -484,14 +542,14 @@ export function createResultsPanel(
     }
 
     const runningCount = running.length;
-    const finishedCount = activeRuns.length - runningCount;
+    const finishedCount = orderedRuns.length - runningCount;
     if (runningCount > 0) {
       runsHeadingText!.textContent =
         `${runningCount} run${runningCount === 1 ? "" : "s"} in progress` +
         (finishedCount > 0 ? ` · ${finishedCount} finished` : "");
     } else {
       runsHeadingText!.textContent =
-        `${activeRuns.length} completed run${activeRuns.length === 1 ? "" : "s"}`;
+        `${orderedRuns.length} completed run${orderedRuns.length === 1 ? "" : "s"}`;
     }
 
     if (runningCount > 1) {
@@ -514,14 +572,29 @@ export function createResultsPanel(
       progressHost.appendChild(runsCardsHost);
     }
 
-    for (const run of activeRuns) {
+    const newRunIds = orderedRuns
+      .filter((run) => !runCards.has(run.id))
+      .map((run) => run.id);
+    if (newRunIds.length > 0) {
+      // Newest run stays open; push older runs down and collapse them.
+      for (const [id] of runCards) {
+        collapsedRunIds.add(id);
+      }
+    }
+
+    for (const run of orderedRuns) {
       let refs = runCards.get(run.id);
       if (!refs) {
         refs = createRunCard(run);
         runCards.set(run.id, refs);
-        runsCardsHost.appendChild(refs.root);
       }
       updateRunCard(refs, run);
+    }
+
+    // Keep DOM order newest-first.
+    for (const run of orderedRuns) {
+      const refs = runCards.get(run.id);
+      if (refs) runsCardsHost.appendChild(refs.root);
     }
   }
 

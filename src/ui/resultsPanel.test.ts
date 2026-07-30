@@ -237,4 +237,94 @@ describe("resultsPanel", () => {
     expect(container.querySelector(".analysis-run-stream")).toBeTruthy();
     expect(container.textContent).toContain("Finding one");
   });
+
+  it("places newest runs first and auto-collapses older ones", () => {
+    const container = document.createElement("div");
+    const panel = createResultsPanel(container);
+
+    panel.setRuns([
+      {
+        id: "run-1",
+        label: "Run #1",
+        startedAt: 1000,
+        status: "running",
+        progress: {
+          analysisId: "run-1",
+          stage: "scanning",
+          message: "Scanning…",
+          current: 0,
+          total: 1,
+          percent: 0,
+        },
+        ruleTasks: [],
+        result: null,
+        error: null,
+      },
+    ]);
+
+    const firstCard = container.querySelector(".analysis-run-card") as HTMLElement;
+    expect(firstCard.classList.contains("is-collapsed")).toBe(false);
+    expect(firstCard.querySelector(".analysis-run-body")?.hasAttribute("hidden")).toBe(
+      false,
+    );
+
+    panel.setRuns([
+      {
+        id: "run-1",
+        label: "Run #1",
+        startedAt: 1000,
+        status: "completed",
+        progress: {
+          analysisId: "run-1",
+          stage: "done",
+          message: "Analysis complete",
+          current: 1,
+          total: 1,
+          percent: 100,
+        },
+        ruleTasks: [],
+        result: makeResult(makeDsm()),
+        error: null,
+      },
+      {
+        id: "run-2",
+        label: "Run #2",
+        startedAt: 2000,
+        status: "running",
+        progress: {
+          analysisId: "run-2",
+          stage: "validating",
+          message: "Validating…",
+          current: 1,
+          total: 2,
+          percent: 50,
+        },
+        ruleTasks: [],
+        result: null,
+        error: null,
+      },
+    ]);
+
+    const cards = [
+      ...container.querySelectorAll(".analysis-run-card"),
+    ] as HTMLElement[];
+    expect(cards).toHaveLength(2);
+    expect(cards[0].dataset.runId).toBe("run-2");
+    expect(cards[1].dataset.runId).toBe("run-1");
+    expect(cards[0].classList.contains("is-collapsed")).toBe(false);
+    expect(cards[1].classList.contains("is-collapsed")).toBe(true);
+    expect(cards[1].querySelector(".analysis-run-body")?.hasAttribute("hidden")).toBe(
+      true,
+    );
+    expect(cards[1].textContent).toContain("Complete");
+
+    const toggle = cards[1].querySelector(
+      ".analysis-run-toggle",
+    ) as HTMLButtonElement;
+    toggle.click();
+    expect(cards[1].classList.contains("is-collapsed")).toBe(false);
+    expect(cards[1].querySelector(".analysis-run-body")?.hasAttribute("hidden")).toBe(
+      false,
+    );
+  });
 });

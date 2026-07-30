@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -34,6 +34,7 @@ pub struct LspClient {
     stdin: Mutex<ChildStdin>,
     pending: Arc<Mutex<HashMap<u64, Pending>>>,
     next_id: AtomicU64,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl LspClient {
@@ -63,13 +64,20 @@ impl LspClient {
             .take()
             .ok_or_else(|| "missing stdout".to_string())?;
 
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let shutting_down_stderr = Arc::clone(&shutting_down);
+
         if let Some(stderr) = child.stderr.take() {
             thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().flatten() {
-                    if !line.trim().is_empty() {
-                        eprintln!("[lsp stderr] {line}");
+                    if line.trim().is_empty() {
+                        continue;
                     }
+                    if shutting_down_stderr.load(Ordering::SeqCst) || is_noisy_lsp_stderr(&line) {
+                        continue;
+                    }
+                    eprintln!("[lsp stderr] {line}");
                 }
             });
         }
@@ -92,6 +100,7 @@ impl LspClient {
             stdin: Mutex::new(stdin),
             pending,
             next_id: AtomicU64::new(1),
+            shutting_down,
         })
     }
 
@@ -118,7 +127,8 @@ impl LspClient {
                 "name": "root"
             }]
         });
-        let _ = self.request("initialize", params)?;
+        // Workspace discovery (esp. rust-analyzer + cargo metadata) can be slow.
+        let _ = self.request_timeout("initialize", params, Duration::from_secs(120))?;
         Ok(())
     }
 
@@ -166,13 +176,44 @@ impl LspClient {
     }
 
     pub fn shutdown(&mut self) -> Result<(), String> {
-        let _ = self.request("shutdown", json!(null));
+        self.shutting_down.store(true, Ordering::SeqCst);
+        // Best-effort graceful exit; never block analysis teardown for long.
+        let _ = self.request_timeout("shutdown", json!(null), Duration::from_secs(2));
         let _ = self.notify("exit", json!(null));
-        let _ = self.child.wait();
+        self.wait_or_kill(Duration::from_millis(800));
         Ok(())
     }
 
+    fn wait_or_kill(&mut self, grace: Duration) {
+        let deadline = Instant::now() + grace;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(40));
+                }
+                _ => {
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
+                    return;
+                }
+            }
+        }
+    }
+
     fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.request_timeout(method, params, Duration::from_secs(45))
+    }
+
+    fn request_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return Err("LSP client is shutting down".into());
+        }
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = channel();
         self.pending
@@ -190,7 +231,14 @@ impl LspClient {
             let mut stdin = self.stdin.lock().map_err(|e| e.to_string())?;
             write_message(&mut *stdin, &msg)?;
         }
-        wait_response(rx, Duration::from_secs(45))
+        let result = wait_response(rx, timeout);
+        // Avoid leaking pending entries on timeout so late replies don't send on a dead channel.
+        if result.is_err() {
+            if let Ok(mut map) = self.pending.lock() {
+                map.remove(&id);
+            }
+        }
+        result
     }
 
     fn notify(&self, method: &str, params: Value) -> Result<(), String> {
@@ -202,6 +250,36 @@ impl LspClient {
         let mut stdin = self.stdin.lock().map_err(|e| e.to_string())?;
         write_message(&mut *stdin, &msg)
     }
+}
+
+impl Drop for LspClient {
+    fn drop(&mut self) {
+        if !self.shutting_down.swap(true, Ordering::SeqCst) {
+            let _ = self.notify("exit", json!(null));
+            self.wait_or_kill(Duration::from_millis(400));
+        } else if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// rust-analyzer (and friends) spam stderr with secondary panics when the client
+/// disconnects mid cargo-metadata; those are not actionable for DevTree users.
+fn is_noisy_lsp_stderr(line: &str) -> bool {
+    let l = line.to_ascii_lowercase();
+    l.contains("senderror")
+        || l.contains("stack backtrace")
+        || l.contains("rust_begin_unwind")
+        || l.contains("core::panicking")
+        || l.contains("core::result::unwrap_failed")
+        || l.contains("note: some details are omitted")
+        || l.contains("a scoped thread panicked")
+        || l.contains("called `result::unwrap()` on an `err` value")
+        || (l.contains("panicked at") && (l.contains("reload.rs") || l.contains("workspace.rs")))
+        || (l.contains("no path was found") && l.contains("rust-analyzer.toml"))
+        || l.contains("projectworkspace::loaded_sysroot")
+        || l.contains("projectworkspace::cargo_metadata")
 }
 
 fn write_message(stdin: &mut ChildStdin, msg: &Value) -> Result<(), String> {
@@ -375,7 +453,7 @@ fn parse_locations(value: &Value) -> Vec<RefLocation> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_locations;
+    use super::{is_noisy_lsp_stderr, parse_locations};
     use serde_json::json;
 
     #[test]
@@ -385,5 +463,19 @@ mod tests {
             "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 1 } }
         }]);
         assert_eq!(parse_locations(&value).len(), 1);
+    }
+
+    #[test]
+    fn filters_rust_analyzer_shutdown_noise() {
+        assert!(is_noisy_lsp_stderr(
+            "called `Result::unwrap()` on an `Err` value: \"SendError(..)\""
+        ));
+        assert!(is_noisy_lsp_stderr(
+            "thread 'ProjectWorkspace::cargo_metadata' panicked at reload.rs:312:30:"
+        ));
+        assert!(is_noisy_lsp_stderr(
+            "WARN notify error: No path was found. about [\"/tmp/rust-analyzer.toml\"]"
+        ));
+        assert!(!is_noisy_lsp_stderr("error: failed to load workspace"));
     }
 }

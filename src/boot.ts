@@ -141,6 +141,7 @@ export async function startApp(): Promise<void> {
 
   const btnOpen = document.querySelector<HTMLButtonElement>("#btn-open-project")!;
   const btnRun = document.querySelector<HTMLButtonElement>("#btn-run-analysis")!;
+  const btnStop = document.querySelector<HTMLButtonElement>("#btn-stop-analysis")!;
   const btnFocus = document.querySelector<HTMLButtonElement>("#btn-focus-view")!;
   const btnSaveFile = document.querySelector<HTMLButtonElement>("#btn-save-file")!;
   const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings")!;
@@ -320,6 +321,7 @@ export async function startApp(): Promise<void> {
   const analysisManager = createAnalysisManager({
     onRunsChanged: (runs) => {
       resultsPanel.setRuns(runs);
+      btnStop.disabled = !runs.some((run) => run.status === "running");
     },
     onRunCompleted: (run) => {
       if (run.id === analysisManager.getLatestRunId() && run.result) {
@@ -1497,6 +1499,9 @@ export async function startApp(): Promise<void> {
 
   btnOpen.addEventListener("click", handleOpenProject);
   btnRun.addEventListener("click", handleRunAnalysis);
+  btnStop.addEventListener("click", () => {
+    analysisManager.cancelAll();
+  });
   btnFocus.addEventListener("click", () => {
     if (app.renderState) {
       fitCameraToContent(app.renderState, canvas);

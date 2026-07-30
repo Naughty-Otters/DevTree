@@ -400,6 +400,10 @@ fn spawn_server(
     let client = LspClient::spawn(&spec.command, &spec.args, &root, Box::new(on_diag))?;
     client.initialize(&root_uri, language.init_options_with_settings(cfg))?;
     client.initialized()?;
+    // Give rust-analyzer a moment to start cargo metadata before flooding didOpen.
+    if language == LanguageKind::Rust {
+        std::thread::sleep(Duration::from_millis(400));
+    }
 
     Ok(ManagedServer {
         language: spec.language,

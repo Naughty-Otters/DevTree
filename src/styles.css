@@ -934,6 +934,16 @@ body.is-resizing-v {
   max-height: min(75vh, 560px);
 }
 
+.analysis-run-card.is-collapsed {
+  max-height: none;
+  gap: 0;
+  padding: 8px 10px;
+}
+
+.analysis-run-card.is-collapsed .analysis-run-body {
+  display: none;
+}
+
 .analysis-run-body {
   display: flex;
   gap: 10px;
@@ -971,10 +981,36 @@ body.is-resizing-v {
   gap: 8px;
 }
 
+.analysis-run-toggle {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.analysis-run-title-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .analysis-run-title {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.analysis-run-summary {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .analysis-run-actions {
