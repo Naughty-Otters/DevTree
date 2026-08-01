@@ -55,6 +55,9 @@ pub struct AnalysisResult {
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dsm: Option<DsmResult>,
+    /// Precomputed file/package quality metrics for O(1) UI lookups.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<devtree_core::QualityIndex>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1491,6 +1494,31 @@ pub fn run_analysis_with_progress(
         health
     );
 
+    let emit_quality = emit.clone();
+    let analysis_id_quality = analysis_id.to_string();
+    let quality = crate::quality::build_quality_index(
+        &hierarchy,
+        &contents,
+        &validation,
+        move |current, total| {
+            let pct = if total == 0 {
+                96
+            } else {
+                90 + ((current as f32 / total as f32) * 9.0) as u8
+            };
+            emit_progress(
+                &emit_quality,
+                &analysis_id_quality,
+                "quality",
+                &format!("Precomputing quality metrics ({current}/{total})"),
+                current,
+                total,
+                pct.min(99),
+                None,
+            );
+        },
+    );
+
     trim_analysis_result_for_transport(&mut hierarchy, &mut validation);
 
     emit_progress(
@@ -1511,6 +1539,7 @@ pub fn run_analysis_with_progress(
         suggestions: vec![],
         summary,
         dsm,
+        quality: Some(quality),
     })
 }
 

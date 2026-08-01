@@ -31,7 +31,7 @@ export function mountToolbarIcons(): void {
   }
   if (btnFocus) {
     btnFocus.appendChild(lucideIcon(Crosshair, TOOLBAR_ICON));
-    attachTooltip(btnFocus, "Focus — fit all visible modules in view");
+    attachTooltip(btnFocus, "Focus — relayout visible modules and fit view");
   }
   if (btnSave) {
     btnSave.appendChild(lucideIcon(Save, TOOLBAR_ICON));

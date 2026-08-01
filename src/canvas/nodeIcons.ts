@@ -20,8 +20,8 @@ export type NodeShapeKind =
   | "const"
   | "symbol";
 
-/** Fixed on-screen badge size in CSS pixels (scaled by canvas DPR). */
-export const NODE_KIND_BADGE_CSS_PX = 16;
+/** Fixed size for DOM list badges only (canvas icons scale with node radius). */
+export const NODE_KIND_BADGE_CSS_PX = 10;
 
 const SHAPE_META: Record<
   NodeShapeKind,
@@ -88,20 +88,20 @@ export function pathNodeShape(
 
   switch (shape) {
     case "package": {
-      const w = r * 1.55;
-      const h = r * 1.15;
-      roundRectPath(ctx, cx - w / 2, cy - h / 2, w, h, r * 0.28);
+      const w = r * 1.45;
+      const h = r * 1.05;
+      roundRectPath(ctx, cx - w / 2, cy - h / 2, w, h, r * 0.22);
       break;
     }
     case "file": {
-      const w = r * 1.2;
-      const h = r * 1.55;
-      roundRectPath(ctx, cx - w / 2, cy - h / 2, w, h, r * 0.18);
+      const w = r * 1.1;
+      const h = r * 1.4;
+      roundRectPath(ctx, cx - w / 2, cy - h / 2, w, h, r * 0.16);
       break;
     }
     case "class": {
-      const s = r * 1.35;
-      ctx.rect(cx - s / 2, cy - s / 2, s, s);
+      const s = r * 1.25;
+      roundRectPath(ctx, cx - s / 2, cy - s / 2, s, s, r * 0.18);
       break;
     }
     case "interface": {
@@ -177,7 +177,8 @@ function drawLucideIcon(
   ctx.scale(size / 24, size / 24);
   ctx.strokeStyle = color;
   ctx.fillStyle = "transparent";
-  ctx.lineWidth = 2.25;
+  // Keep stroke weight readable at both small and large icon sizes.
+  ctx.lineWidth = size < 14 ? 2.35 : size < 22 ? 2.1 : 1.9;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 

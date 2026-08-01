@@ -39,4 +39,5 @@ regex = "1.13.1"
 notify = "6"
 cron = "0.15"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rayon = "1.10"
 

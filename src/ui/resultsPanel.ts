@@ -1,6 +1,19 @@
 import type { AnalysisResult, HierarchyIndex, RuleTaskProgress } from "../analysis/types";
 import type { AnalysisRun } from "../analysis/manager";
+import {
+  buildArchitectureHealth,
+  type ArchitectureHealthReport,
+  type RatedEntity,
+} from "../analysis/architectureHealth";
 import { healthStatus } from "../analysis/dsm";
+import {
+  formatMetricHint,
+  formatMetricPrimary,
+  parsePercentileViewMode,
+  percentileViewLabel,
+  PERCENTILE_VIEW_MODES,
+  type PercentileViewMode,
+} from "../analysis/percentileView";
 import { renderAiStreamPreview } from "./aiStreamPreview";
 import {
   effectiveRuleStatus,
@@ -33,6 +46,8 @@ export interface ResultsPanelHandlers {
   onShowDependencyOnGraph?: AnalysisDetailHandlers["onShowDependencyOnGraph"];
   onShowDsm?: (highlightIds?: string[]) => void;
   getHierarchy?: () => HierarchyIndex | null;
+  getPercentileView?: () => PercentileViewMode;
+  onPercentileViewChange?: (mode: PercentileViewMode) => void;
   onCancelRun?: (id: string) => void;
   onCancelAllRuns?: () => void;
   onApplyRun?: (id: string) => void;
@@ -44,6 +59,7 @@ export function createResultsPanel(
 ): {
   setResult: (result: AnalysisResult | null) => void;
   setRuns: (runs: AnalysisRun[]) => void;
+  showTab: (tab: TabId) => void;
 } {
   let activeTab: TabId = "analysis";
   let currentResult: AnalysisResult | null = null;
@@ -654,7 +670,7 @@ export function createResultsPanel(
       }, null);
       const latestJustFinished =
         latest != null &&
-        latest.status === "completed" &&
+        (latest.status === "completed" || latest.status === "failed") &&
         prevById.get(latest.id)?.status === "running";
 
       activeRuns = runs;
@@ -662,11 +678,14 @@ export function createResultsPanel(
         setActiveTab("progress");
         return;
       }
-      if (latestJustFinished) {
+      if (latestJustFinished && latest.status === "completed") {
         setActiveTab("analysis");
         return;
       }
       renderContent();
+    },
+    showTab(tab: TabId) {
+      setActiveTab(tab);
     },
   };
 }
@@ -760,6 +779,236 @@ function renderAnalysisTab(
   }
 
   container.appendChild(stats);
+
+  const percentileView = parsePercentileViewMode(
+    handlers.getPercentileView?.() ?? "all",
+  );
+  const arch = buildArchitectureHealth(result.quality, {
+    modularityScore: result.dsm?.metrics.healthScore ?? null,
+    percentileView,
+  });
+  if (arch) {
+    container.appendChild(
+      renderArchitectureHealthSection(arch, handlers, percentileView, () => {
+        // Re-render Analysis tab in place when percentile view changes.
+        container.replaceChildren();
+        renderAnalysisTab(container, result, handlers);
+      }),
+    );
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "panel-empty arch-health-empty";
+    empty.textContent =
+      "Architecture quality metrics unavailable — re-run analysis to precompute them.";
+    container.appendChild(empty);
+  }
+}
+
+function renderPercentileViewSwitch(
+  mode: PercentileViewMode,
+  onChange: (mode: PercentileViewMode) => void,
+): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "percentile-view-switch";
+  wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", "Percentile view");
+
+  for (const option of PERCENTILE_VIEW_MODES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "percentile-view-btn";
+    btn.classList.toggle("active", option === mode);
+    btn.textContent = percentileViewLabel(option);
+    btn.title =
+      option === "all"
+        ? "Show p50 / p80 / p90 together"
+        : option === "avg"
+          ? "Show project/package average"
+          : `Show ${option} only`;
+    btn.addEventListener("click", () => {
+      if (option !== mode) onChange(option);
+    });
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+function renderArchitectureHealthSection(
+  arch: ArchitectureHealthReport,
+  handlers: ResultsPanelHandlers,
+  percentileView: PercentileViewMode,
+  onRerender: () => void,
+): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "arch-health";
+
+  const headingRow = document.createElement("div");
+  headingRow.className = "arch-health-heading-row";
+
+  const heading = document.createElement("h3");
+  heading.className = "arch-health-heading";
+  heading.textContent = "Architecture health";
+  headingRow.appendChild(heading);
+
+  headingRow.appendChild(
+    renderPercentileViewSwitch(percentileView, (mode) => {
+      handlers.onPercentileViewChange?.(mode);
+      onRerender();
+    }),
+  );
+  section.appendChild(headingRow);
+
+  const status = healthStatus(arch.rating);
+  const scorecard = document.createElement("div");
+  scorecard.className = `health-scorecard health-${status}`;
+
+  const viewLabel =
+    percentileView === "all"
+      ? "Architecture"
+      : `Architecture · ${percentileViewLabel(percentileView)}`;
+  const scoreEl = document.createElement("div");
+  scoreEl.className = "health-score";
+  scoreEl.innerHTML = `<span class="health-score-value">${arch.rating}</span><span class="health-score-label">/ 100 · ${viewLabel}</span>`;
+
+  const statusEl = document.createElement("div");
+  statusEl.className = "health-status-label";
+  const modBit =
+    arch.modularityScore != null
+      ? ` · DSM modularity ${arch.modularityScore}/100`
+      : "";
+  statusEl.textContent =
+    status === "healthy"
+      ? `Healthy relative quality across ${arch.packageCount} packages${modBit}`
+      : status === "fair"
+        ? `Fair — several modules above peer percentiles${modBit}`
+        : `Poor — high complexity / issues vs project peers${modBit}`;
+
+  scorecard.append(scoreEl, statusEl);
+  section.appendChild(scorecard);
+
+  const meta = document.createElement("div");
+  meta.className = "arch-health-meta";
+  meta.textContent = `${arch.fileCount.toLocaleString()} files · ${arch.totalLoc.toLocaleString()} LOC · ratings are percentile-based within this project`;
+  section.appendChild(meta);
+
+  const metrics = document.createElement("div");
+  metrics.className = "health-metrics arch-health-metrics";
+  for (const row of arch.metrics) {
+    const item = document.createElement("div");
+    item.className = "health-metric";
+    item.title = row.detail;
+    const digits = row.unit === "/kLOC" ? 1 : 0;
+    const asPercent = row.id === "coverage";
+    const primary = formatMetricPrimary(
+      row.avg,
+      row.percentiles,
+      percentileView,
+      digits,
+      asPercent,
+    );
+    const hint = formatMetricHint(
+      row.avg,
+      row.percentiles,
+      percentileView,
+      digits,
+    );
+    const unit = row.unit
+      ? ` <span class="arch-health-unit">${row.unit}</span>`
+      : "";
+    item.innerHTML = `
+      <div class="health-metric-label">${row.label}${percentileView !== "avg" && percentileView !== "all" ? ` · ${percentileView}` : ""}</div>
+      <div class="health-metric-value">${primary}${unit}</div>
+      ${hint ? `<div class="health-metric-hint">${hint}</div>` : ""}
+    `;
+    metrics.appendChild(item);
+  }
+  section.appendChild(metrics);
+
+  section.appendChild(
+    renderRatedModuleList(
+      "Package ratings",
+      arch.packages,
+      handlers,
+      "No package ratings",
+    ),
+  );
+  section.appendChild(
+    renderRatedModuleList(
+      "File ratings (top & bottom)",
+      pickTopAndBottom(arch.files, 8),
+      handlers,
+      "No file ratings",
+    ),
+  );
+
+  return section;
+}
+
+/** Keep strongest and weakest modules for a compact list. */
+function pickTopAndBottom(items: RatedEntity[], each: number): RatedEntity[] {
+  if (items.length <= each * 2) return items;
+  const top = items.slice(0, each);
+  const bottom = items.slice(-each);
+  const seen = new Set(top.map((i) => i.path));
+  const out = [...top];
+  for (const b of bottom) {
+    if (!seen.has(b.path)) out.push(b);
+  }
+  return out;
+}
+
+function renderRatedModuleList(
+  title: string,
+  items: RatedEntity[],
+  handlers: ResultsPanelHandlers,
+  emptyText: string,
+): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "arch-health-modules";
+
+  const h = document.createElement("h4");
+  h.className = "arch-health-subheading";
+  h.textContent = title;
+  wrap.appendChild(h);
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "panel-empty";
+    empty.textContent = emptyText;
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  const list = document.createElement("div");
+  list.className = "arch-health-module-list";
+
+  for (const item of items) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `arch-health-module-row arch-rating-${item.band}`;
+    row.title = `Show ${item.path} on graph and open details`;
+
+    const name = document.createElement("span");
+    name.className = "arch-health-module-name";
+    name.textContent = item.label;
+
+    const path = document.createElement("span");
+    path.className = "arch-health-module-path";
+    path.textContent = item.path;
+
+    const score = document.createElement("span");
+    score.className = "arch-health-module-score";
+    score.textContent = `${item.rating}/100`;
+
+    row.append(name, path, score);
+    row.addEventListener("click", () => {
+      handlers.onShowModuleOnGraph?.(item.path);
+    });
+    list.appendChild(row);
+  }
+
+  wrap.appendChild(list);
+  return wrap;
 }
 
 function renderHealthTab(

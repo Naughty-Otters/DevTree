@@ -1,7 +1,12 @@
-import type { AnalysisResult, HierarchyIndex } from "../analysis/types";
+import type {
+  AnalysisResult,
+  HierarchyIndex,
+  QualityIndex,
+  SuggestionItem,
+  ValidationItem,
+} from "../analysis/types";
 import type { DsmResult } from "../analysis/dsm";
 import type { Graph } from "../graph/types";
-import type { SuggestionItem, ValidationItem } from "../analysis/types";
 import {
   defaultPersistedState,
   type PersistedAppState,
@@ -11,10 +16,30 @@ import {
 const UI_STATE_KEY = "app";
 const ANALYSIS_META_KEY = "analysis-meta";
 const ANALYSIS_HIERARCHY_KEY = "analysis-hierarchy";
+const ANALYSIS_QUALITY_KEY = "analysis-quality";
 /** @deprecated Migrated to split keys */
 const ANALYSIS_STATE_KEY = "analysis";
 const LEGACY_PANEL_KEY = "devtree-panel-sizes";
 const LEGACY_OPTIONS_KEY = "devtree-analysis-options";
+
+function emptyHierarchy(): HierarchyIndex {
+  return {
+    files: [],
+    packages: [],
+    file_imports: {},
+    package_edges: [],
+    symbols: {},
+    symbol_edges: [],
+  };
+}
+
+function qualityIsHydrated(quality: QualityIndex | null | undefined): boolean {
+  if (!quality) return false;
+  return (
+    Object.keys(quality.files).length > 0 ||
+    Object.keys(quality.packages).length > 0
+  );
+}
 
 export interface PersistedAnalysisMeta {
   graph: Graph;
@@ -141,6 +166,7 @@ async function saveSplitAnalysis(result: AnalysisResult | null): Promise<void> {
     await Promise.all([
       saveRaw(ANALYSIS_META_KEY, "null"),
       saveRaw(ANALYSIS_HIERARCHY_KEY, "null"),
+      saveRaw(ANALYSIS_QUALITY_KEY, "null"),
     ]);
     return;
   }
@@ -152,9 +178,14 @@ async function saveSplitAnalysis(result: AnalysisResult | null): Promise<void> {
     summary: result.summary,
     dsm: result.dsm ?? null,
   };
+  const quality = qualityIsHydrated(result.quality) ? result.quality : null;
   await Promise.all([
     saveRaw(ANALYSIS_META_KEY, JSON.stringify(meta)),
     saveRaw(ANALYSIS_HIERARCHY_KEY, JSON.stringify(result.hierarchy)),
+    saveRaw(
+      ANALYSIS_QUALITY_KEY,
+      quality ? JSON.stringify(quality) : "null",
+    ),
   ]);
 }
 
@@ -197,25 +228,26 @@ export async function loadPersistedAnalysisHierarchy(): Promise<HierarchyIndex |
   return legacy?.hierarchy ?? null;
 }
 
+export async function loadPersistedAnalysisQuality(): Promise<QualityIndex | null> {
+  const quality = parseJson<QualityIndex>(await loadRaw(ANALYSIS_QUALITY_KEY));
+  if (qualityIsHydrated(quality)) return quality;
+
+  const legacy = await migrateLegacyAnalysisBlob();
+  return qualityIsHydrated(legacy?.quality) ? legacy!.quality! : null;
+}
+
 export async function loadPersistedAnalysis(): Promise<AnalysisResult | null> {
-  const [meta, hierarchy] = await Promise.all([
+  const [meta, hierarchy, quality] = await Promise.all([
     loadPersistedAnalysisMeta(),
     loadPersistedAnalysisHierarchy(),
+    loadPersistedAnalysisQuality(),
   ]);
   if (!meta) return null;
 
   return {
     ...meta,
-    hierarchy:
-      hierarchy ??
-      ({
-        files: [],
-        packages: [],
-        file_imports: {},
-        package_edges: [],
-        symbols: {},
-        symbol_edges: [],
-      } satisfies HierarchyIndex),
+    hierarchy: hierarchy ?? emptyHierarchy(),
+    quality: quality ?? null,
   };
 }
 

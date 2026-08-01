@@ -1,0 +1,548 @@
+/**
+ * Architecture health ratings (0–100) from QualityIndex percentiles.
+ * Higher is better. Lower-better metrics invert percentile rank.
+ */
+import { locPercentiles, type LocPercentiles } from "./moduleStats";
+import { healthStatus } from "./dsm";
+import {
+  parsePercentileViewMode,
+  type PercentileViewMode,
+} from "./percentileView";
+import type {
+  FileQualityMetrics,
+  PackageMetricRollup,
+  PackageQualityMetrics,
+  QualityIndex,
+} from "./types";
+
+export type HealthBand = "healthy" | "fair" | "poor";
+
+export interface MetricSummaryRow {
+  id: string;
+  label: string;
+  avg: number;
+  display: string;
+  unit?: string;
+  percentiles: LocPercentiles;
+  detail: string;
+}
+
+export interface RatedEntity {
+  path: string;
+  kind: "file" | "package";
+  label: string;
+  rating: number;
+  band: HealthBand;
+  fileCount?: number;
+  loc: number;
+}
+
+export interface ArchitectureHealthReport {
+  /** Project overall 0–100 (percentile-based quality). */
+  rating: number;
+  band: HealthBand;
+  /** Statistic used for package/project rating (avg / p50 / p80 / p90). */
+  percentileView: PercentileViewMode;
+  /** Optional blend with DSM modularity when present. */
+  modularityScore: number | null;
+  fileCount: number;
+  packageCount: number;
+  totalLoc: number;
+  metrics: MetricSummaryRow[];
+  /** Packages sorted best→worst. */
+  packages: RatedEntity[];
+  /** Files sorted best→worst. */
+  files: RatedEntity[];
+  ratingByPath: Record<string, number>;
+}
+
+type Direction = "lower-better" | "higher-better";
+
+interface FileMetricDef {
+  id: string;
+  label: string;
+  key: keyof FileQualityMetrics;
+  direction: Direction;
+  weight: number;
+  digits?: number;
+  unit?: string;
+  asPercent?: boolean;
+}
+
+interface AbsoluteThresholds {
+  healthy: number;
+  fair: number;
+}
+
+const FILE_METRIC_DEFS: Array<FileMetricDef & { thresholds: AbsoluteThresholds }> = [
+  {
+    id: "complexity",
+    label: "Complexity",
+    key: "cyclomatic",
+    direction: "lower-better",
+    weight: 1.1,
+    thresholds: { healthy: 10, fair: 25 },
+  },
+  {
+    id: "halstead",
+    label: "Halstead",
+    key: "halsteadVolume",
+    direction: "lower-better",
+    weight: 1,
+    unit: "V",
+    thresholds: { healthy: 500, fair: 2000 },
+  },
+  {
+    id: "cognitive",
+    label: "Cognitive",
+    key: "cognitive",
+    direction: "lower-better",
+    weight: 1.1,
+    thresholds: { healthy: 15, fair: 30 },
+  },
+  {
+    id: "maintainability",
+    label: "Maintain.",
+    key: "maintainability",
+    direction: "higher-better",
+    weight: 1.4,
+    unit: "/100",
+    thresholds: { healthy: 70, fair: 50 },
+  },
+  {
+    id: "cbo",
+    label: "CBO",
+    key: "cbo",
+    direction: "lower-better",
+    weight: 1,
+    thresholds: { healthy: 5, fair: 12 },
+  },
+  {
+    id: "coverage",
+    label: "Coverage",
+    key: "coverage",
+    direction: "higher-better",
+    weight: 1,
+    asPercent: true,
+    thresholds: { healthy: 80, fair: 50 },
+  },
+  {
+    id: "issues",
+    label: "Issues",
+    key: "issueDensity",
+    direction: "lower-better",
+    weight: 1.2,
+    digits: 1,
+    unit: "/kLOC",
+    thresholds: { healthy: 2, fair: 10 },
+  },
+  {
+    id: "security",
+    label: "Security",
+    key: "securityDensity",
+    direction: "lower-better",
+    weight: 1.2,
+    digits: 1,
+    unit: "/kLOC",
+    thresholds: { healthy: 0, fair: 2 },
+  },
+  {
+    id: "aiQuality",
+    label: "AI quality",
+    key: "aiDensity",
+    direction: "lower-better",
+    weight: 0.9,
+    digits: 1,
+    unit: "/kLOC",
+    thresholds: { healthy: 0, fair: 3 },
+  },
+  {
+    id: "size",
+    label: "Size",
+    key: "loc",
+    direction: "lower-better",
+    weight: 0.6,
+    unit: "LOC",
+    thresholds: { healthy: 200, fair: 400 },
+  },
+];
+
+interface PackageMetricDef {
+  id: string;
+  label: string;
+  pick: (pkg: PackageQualityMetrics) => PackageMetricRollup | null | undefined;
+  direction: Direction;
+  weight: number;
+  digits?: number;
+  unit?: string;
+  asPercent?: boolean;
+}
+
+const PACKAGE_METRIC_DEFS: PackageMetricDef[] = [
+  { id: "complexity", label: "Complexity", pick: (p) => p.complexity, direction: "lower-better", weight: 1.1 },
+  { id: "halstead", label: "Halstead", pick: (p) => p.halstead, direction: "lower-better", weight: 1, unit: "V" },
+  { id: "cognitive", label: "Cognitive", pick: (p) => p.cognitive, direction: "lower-better", weight: 1.1 },
+  {
+    id: "maintainability",
+    label: "Maintain.",
+    pick: (p) => p.maintainability,
+    direction: "higher-better",
+    weight: 1.4,
+    unit: "/100",
+  },
+  { id: "cbo", label: "CBO", pick: (p) => p.cbo, direction: "lower-better", weight: 1 },
+  {
+    id: "coverage",
+    label: "Coverage",
+    pick: (p) => p.coverage,
+    direction: "higher-better",
+    weight: 1,
+    asPercent: true,
+  },
+  {
+    id: "issues",
+    label: "Issues",
+    pick: (p) => p.issues,
+    direction: "lower-better",
+    weight: 1.2,
+    digits: 1,
+    unit: "/kLOC",
+  },
+  {
+    id: "security",
+    label: "Security",
+    pick: (p) => p.security,
+    direction: "lower-better",
+    weight: 1.2,
+    digits: 1,
+    unit: "/kLOC",
+  },
+  {
+    id: "aiQuality",
+    label: "AI quality",
+    pick: (p) => p.aiQuality,
+    direction: "lower-better",
+    weight: 0.9,
+    digits: 1,
+    unit: "/kLOC",
+  },
+  { id: "size", label: "Size", pick: (p) => p.size, direction: "lower-better", weight: 0.6, unit: "LOC" },
+];
+
+function formatNum(n: number, digits = 0): string {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  });
+}
+
+function formatPct(p: LocPercentiles, digits = 0): string {
+  return `${formatNum(p.p50, digits)} / ${formatNum(p.p80, digits)} / ${formatNum(p.p90, digits)}`;
+}
+
+function bandForRating(rating: number): HealthBand {
+  return healthStatus(rating);
+}
+
+/**
+ * Peer-relative score 0–100 (higher = better).
+ * lower-better: % of peers with value ≥ yours (best/lowest → 100).
+ * higher-better: % of peers with value ≤ yours (best/highest → 100).
+ * Ties / single sample → 100 (no relative penalty).
+ */
+function peerScore(
+  sample: number[],
+  value: number,
+  direction: Direction,
+): number {
+  if (sample.length === 0) return 100;
+  let favorable = 0;
+  for (const v of sample) {
+    if (direction === "lower-better") {
+      if (v >= value) favorable += 1;
+    } else if (v <= value) {
+      favorable += 1;
+    }
+  }
+  return Math.round((favorable / sample.length) * 100);
+}
+
+function weightedScore(
+  parts: Array<{ score: number; weight: number }>,
+): number {
+  let sum = 0;
+  let w = 0;
+  for (const p of parts) {
+    if (!Number.isFinite(p.score)) continue;
+    sum += p.score * p.weight;
+    w += p.weight;
+  }
+  if (w <= 0) return 100;
+  return Math.max(0, Math.min(100, Math.round(sum / w)));
+}
+
+function numericFileValue(file: FileQualityMetrics, key: keyof FileQualityMetrics): number | null {
+  const v = file[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function rateFiles(files: FileQualityMetrics[]): RatedEntity[] {
+  if (files.length === 0) return [];
+
+  const samples = new Map<string, number[]>();
+  for (const def of FILE_METRIC_DEFS) {
+    const vals: number[] = [];
+    for (const f of files) {
+      const v = numericFileValue(f, def.key);
+      if (v != null) vals.push(v);
+    }
+    samples.set(def.id, vals);
+  }
+
+  return files.map((file) => {
+    const parts: Array<{ score: number; weight: number }> = [];
+    for (const def of FILE_METRIC_DEFS) {
+      const v = numericFileValue(file, def.key);
+      const sample = samples.get(def.id) ?? [];
+      if (v == null || sample.length === 0) continue;
+      parts.push({
+        score: peerScore(sample, v, def.direction),
+        weight: def.weight,
+      });
+    }
+    const rating = weightedScore(parts);
+    const label = file.path.includes("/")
+      ? file.path.slice(file.path.lastIndexOf("/") + 1)
+      : file.path;
+    return {
+      path: file.path,
+      kind: "file" as const,
+      label,
+      rating,
+      band: bandForRating(rating),
+      loc: file.loc,
+    };
+  });
+}
+
+/** Package statistic used for peer rating under the active percentile view. */
+function rollupStat(
+  rollup: PackageMetricRollup,
+  mode: PercentileViewMode,
+): number | null {
+  if (mode === "p50" || mode === "p80" || mode === "p90") {
+    const v = rollup.percentiles[mode];
+    return Number.isFinite(v) ? v : null;
+  }
+  // avg + all → compare package averages
+  return Number.isFinite(rollup.avg) ? rollup.avg : null;
+}
+
+function ratePackages(
+  packages: PackageQualityMetrics[],
+  mode: PercentileViewMode,
+): RatedEntity[] {
+  if (packages.length === 0) return [];
+
+  const samples = new Map<string, number[]>();
+  for (const def of PACKAGE_METRIC_DEFS) {
+    const vals: number[] = [];
+    for (const pkg of packages) {
+      const rollup = def.pick(pkg);
+      if (!rollup) continue;
+      const v = rollupStat(rollup, mode);
+      if (v != null) vals.push(v);
+    }
+    samples.set(def.id, vals);
+  }
+
+  return packages.map((pkg) => {
+    const parts: Array<{ score: number; weight: number }> = [];
+    for (const def of PACKAGE_METRIC_DEFS) {
+      const rollup = def.pick(pkg);
+      const sample = samples.get(def.id) ?? [];
+      if (!rollup || sample.length === 0) continue;
+      const v = rollupStat(rollup, mode);
+      if (v == null) continue;
+      parts.push({
+        score: peerScore(sample, v, def.direction),
+        weight: def.weight,
+      });
+    }
+    const rating = weightedScore(parts);
+    const label =
+      pkg.path === "." ? "(root)" : pkg.path.split("/").pop() ?? pkg.path;
+    return {
+      path: pkg.path,
+      kind: "package" as const,
+      label,
+      rating,
+      band: bandForRating(rating),
+      fileCount: pkg.fileCount,
+      loc: pkg.totalLoc,
+    };
+  });
+}
+
+function projectMetricsFromFiles(files: FileQualityMetrics[]): MetricSummaryRow[] {
+  const rows: MetricSummaryRow[] = [];
+  for (const def of FILE_METRIC_DEFS) {
+    const vals: number[] = [];
+    for (const f of files) {
+      const v = numericFileValue(f, def.key);
+      if (v != null) vals.push(v);
+    }
+    if (vals.length === 0) continue;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const percentiles = locPercentiles(vals);
+    const digits = def.digits ?? 0;
+    const display = def.asPercent
+      ? `${formatNum(avg, digits)}%`
+      : formatNum(avg, digits);
+    rows.push({
+      id: def.id,
+      label: def.label,
+      avg,
+      display,
+      unit: def.unit,
+      percentiles,
+      detail: `Project file avg · p50/p80/p90 ${formatPct(percentiles, digits)}`,
+    });
+  }
+  return rows;
+}
+
+function metricFocusValue(
+  row: MetricSummaryRow,
+  mode: PercentileViewMode,
+): number {
+  if (mode === "p50" || mode === "p80" || mode === "p90") {
+    return row.percentiles[mode];
+  }
+  return row.avg;
+}
+
+/** Map a metric value to 0–100 using Codacy-style healthy/fair thresholds. */
+function absoluteMetricScore(
+  value: number,
+  direction: Direction,
+  healthy: number,
+  fair: number,
+): number {
+  if (!Number.isFinite(value)) return 100;
+  if (direction === "lower-better") {
+    if (value <= healthy) return 100;
+    if (value <= fair) {
+      const t = (value - healthy) / Math.max(1e-9, fair - healthy);
+      return Math.round(100 - 50 * t);
+    }
+    const over = (value - fair) / Math.max(1e-9, fair);
+    return Math.round(Math.max(0, 50 - 50 * Math.min(1, over)));
+  }
+  // higher-better: healthy is min-good, fair is min-acceptable
+  if (value >= healthy) return 100;
+  if (value >= fair) {
+    const t = (healthy - value) / Math.max(1e-9, healthy - fair);
+    return Math.round(100 - 50 * t);
+  }
+  const under = (fair - value) / Math.max(1e-9, fair);
+  return Math.round(Math.max(0, 50 - 50 * Math.min(1, under)));
+}
+
+/**
+ * Overall project score from the selected distribution focus (avg/p50/p80/p90).
+ * Uses absolute thresholds so switching percentile view moves the headline rating.
+ */
+function overallRatingFromView(
+  rows: MetricSummaryRow[],
+  mode: PercentileViewMode,
+): number {
+  const parts: Array<{ score: number; weight: number }> = [];
+  for (const def of FILE_METRIC_DEFS) {
+    const row = rows.find((r) => r.id === def.id);
+    if (!row) continue;
+    const value = metricFocusValue(row, mode);
+    parts.push({
+      score: absoluteMetricScore(
+        value,
+        def.direction,
+        def.thresholds.healthy,
+        def.thresholds.fair,
+      ),
+      weight: def.weight,
+    });
+  }
+  return weightedScore(parts);
+}
+
+/**
+ * Build architecture health for Analysis tab + module ratings.
+ * Ratings are relative (percentile among peers in this project).
+ * `percentileView` selects which package/project statistic drives ratings.
+ */
+export function buildArchitectureHealth(
+  quality: QualityIndex | null | undefined,
+  opts?: {
+    modularityScore?: number | null;
+    percentileView?: PercentileViewMode | null;
+  },
+): ArchitectureHealthReport | null {
+  if (!quality) return null;
+  const files = Object.values(quality.files);
+  const packages = Object.values(quality.packages);
+  if (files.length === 0 && packages.length === 0) return null;
+
+  const percentileView = parsePercentileViewMode(opts?.percentileView ?? "all");
+  const metrics = projectMetricsFromFiles(files);
+
+  const ratedFiles = rateFiles(files).sort((a, b) => b.rating - a.rating);
+  const ratedPackages = ratePackages(packages, percentileView).sort(
+    (a, b) => b.rating - a.rating,
+  );
+
+  // Headline rating tracks the selected percentile/avg against absolute thresholds.
+  let rating = overallRatingFromView(metrics, percentileView);
+
+  const modularityScore =
+    opts?.modularityScore != null && Number.isFinite(opts.modularityScore)
+      ? Math.round(opts.modularityScore)
+      : null;
+
+  // Blend lightly with DSM modularity when available (architecture = quality + structure).
+  if (modularityScore != null) {
+    rating = Math.round(rating * 0.7 + modularityScore * 0.3);
+  }
+
+  const ratingByPath: Record<string, number> = {};
+  for (const e of ratedFiles) ratingByPath[e.path] = e.rating;
+  for (const e of ratedPackages) ratingByPath[e.path] = e.rating;
+
+  return {
+    rating: Math.max(0, Math.min(100, rating)),
+    band: bandForRating(rating),
+    percentileView,
+    modularityScore,
+    fileCount: files.length,
+    packageCount: packages.length,
+    totalLoc: files.reduce((s, f) => s + f.loc, 0),
+    metrics,
+    packages: ratedPackages,
+    files: ratedFiles,
+    ratingByPath,
+  };
+}
+
+/** Lookup a precomputed rating for a module path (file or package). */
+export function ratingForPath(
+  report: ArchitectureHealthReport | null | undefined,
+  path: string,
+): number | null {
+  if (!report) return null;
+  const v = report.ratingByPath[path];
+  return typeof v === "number" ? v : null;
+}
+
+export function ratingBand(rating: number): HealthBand {
+  return bandForRating(rating);
+}

@@ -264,6 +264,42 @@ export async function listLlmModels(
   return [];
 }
 
+export interface GitFileChurn {
+  path: string;
+  linesAdded: number;
+  linesDeleted: number;
+  commits: number;
+}
+
+export interface GitChurnResult {
+  available: boolean;
+  days: number;
+  files: GitFileChurn[];
+  message?: string | null;
+}
+
+/** Git lines added/deleted/commits under a path for the last `days` (default 90). */
+export async function gitCodeChurn(
+  projectPath: string,
+  path: string,
+  days = 90,
+): Promise<GitChurnResult> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<GitChurnResult>("git_code_churn", {
+      projectPath,
+      path,
+      days,
+    });
+  }
+  return {
+    available: false,
+    days,
+    files: [],
+    message: "Git churn requires the desktop app",
+  };
+}
+
 export async function readProjectFile(
   projectRoot: string,
   relativePath: string,

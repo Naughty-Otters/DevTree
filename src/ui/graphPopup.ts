@@ -25,7 +25,7 @@ function ensurePopup(): HTMLElement {
   return popupEl;
 }
 
-function relatedModules(
+export function relatedModules(
   nodeId: string,
   nodes: GraphNode[],
   edges: GraphEdge[],

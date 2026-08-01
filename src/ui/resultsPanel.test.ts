@@ -36,7 +36,10 @@ function makeDsm(overrides: Partial<DsmResult> = {}): DsmResult {
   };
 }
 
-function makeResult(dsm: DsmResult | null): AnalysisResult {
+function makeResult(
+  dsm: DsmResult | null,
+  overrides: Partial<AnalysisResult> = {},
+): AnalysisResult {
   return {
     graph: { nodes: [], edges: [] },
     hierarchy: {
@@ -52,6 +55,86 @@ function makeResult(dsm: DsmResult | null): AnalysisResult {
     suggestions: [],
     summary: "test",
     dsm,
+    ...overrides,
+  };
+}
+
+function makeQuality(): NonNullable<AnalysisResult["quality"]> {
+  const rollup = (avg: number) => ({
+    avg,
+    percentiles: { p50: avg, p80: avg * 1.5, p90: avg * 2 },
+  });
+  return {
+    files: {
+      "a/x.ts": {
+        path: "a/x.ts",
+        loc: 40,
+        cyclomatic: 4,
+        structural: 4,
+        halsteadVolume: 120,
+        halsteadDifficulty: 8,
+        cognitive: 4,
+        maintainability: 75,
+        dit: 1,
+        cbo: 2,
+        coverage: 100,
+        issueDensity: 0,
+        securityDensity: 0,
+        aiDensity: 0,
+        duplicationHits: 0,
+      },
+      "b/y.ts": {
+        path: "b/y.ts",
+        loc: 200,
+        cyclomatic: 30,
+        structural: 20,
+        halsteadVolume: 900,
+        halsteadDifficulty: 20,
+        cognitive: 25,
+        maintainability: 40,
+        dit: 2,
+        cbo: 8,
+        coverage: 0,
+        issueDensity: 5,
+        securityDensity: 1,
+        aiDensity: 0,
+        duplicationHits: 1,
+      },
+    },
+    packages: {
+      a: {
+        path: "a",
+        fileCount: 1,
+        totalLoc: 40,
+        complexity: rollup(4),
+        halstead: rollup(120),
+        cognitive: rollup(4),
+        maintainability: rollup(75),
+        cbo: rollup(2),
+        coverage: rollup(100),
+        issues: rollup(0),
+        security: rollup(0),
+        aiQuality: rollup(0),
+        duplication: rollup(0),
+        size: rollup(40),
+      },
+      b: {
+        path: "b",
+        fileCount: 1,
+        totalLoc: 200,
+        complexity: rollup(30),
+        halstead: rollup(900),
+        cognitive: rollup(25),
+        maintainability: rollup(40),
+        cbo: rollup(8),
+        coverage: rollup(0),
+        issues: rollup(5),
+        security: rollup(1),
+        aiQuality: rollup(0),
+        duplication: rollup(1),
+        size: rollup(200),
+      },
+    },
   };
 }
 
@@ -236,6 +319,61 @@ describe("resultsPanel", () => {
     ).toBe(false);
     expect(container.querySelector(".analysis-run-stream")).toBeTruthy();
     expect(container.textContent).toContain("Finding one");
+  });
+
+  it("renders architecture health and switches percentile view", () => {
+    const container = document.createElement("div");
+    let view: "avg" | "p50" | "p80" | "p90" | "all" = "all";
+    const onShowModuleOnGraph = vi.fn();
+    const panel = createResultsPanel(container, {
+      getPercentileView: () => view,
+      onPercentileViewChange: (mode) => {
+        view = mode;
+      },
+      onShowModuleOnGraph,
+    });
+    panel.setResult(makeResult(makeDsm(), { quality: makeQuality() }));
+
+    expect(container.textContent).toContain("Architecture health");
+    expect(container.querySelector(".percentile-view-switch")).toBeTruthy();
+    expect(container.textContent).toContain("Package ratings");
+
+    const p50Btn = [...container.querySelectorAll(".percentile-view-btn")].find(
+      (b) => b.textContent === "p50",
+    ) as HTMLButtonElement;
+    p50Btn.click();
+    expect(view).toBe("p50");
+    expect(container.textContent).toMatch(/Architecture · p50/);
+
+    const packageRow = container.querySelector(
+      ".arch-health-module-row",
+    ) as HTMLButtonElement;
+    expect(packageRow).toBeTruthy();
+    packageRow.click();
+    expect(onShowModuleOnGraph).toHaveBeenCalled();
+  });
+
+  it("shows quality unavailable guidance without quality index", () => {
+    const container = document.createElement("div");
+    const panel = createResultsPanel(container);
+    panel.setResult(makeResult(makeDsm()));
+    expect(container.textContent).toMatch(/Architecture quality metrics unavailable/);
+  });
+
+  it("showTab switches to Analysis after completion path", () => {
+    const container = document.createElement("div");
+    const panel = createResultsPanel(container);
+    panel.showTab("progress");
+    const progressTab = [...container.querySelectorAll(".results-tab")].find(
+      (t) => t.textContent === "Progress",
+    ) as HTMLButtonElement;
+    expect(progressTab.classList.contains("active")).toBe(true);
+
+    panel.showTab("analysis");
+    const analysisTab = [...container.querySelectorAll(".results-tab")].find(
+      (t) => t.textContent === "Analysis",
+    ) as HTMLButtonElement;
+    expect(analysisTab.classList.contains("active")).toBe(true);
   });
 
   it("places newest runs first and auto-collapses older ones", () => {

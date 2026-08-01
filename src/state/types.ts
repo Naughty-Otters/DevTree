@@ -45,6 +45,19 @@ export interface PersistedUiState {
   dsmLevel?: "package" | "file";
   /** DSM view: partitioned | hierarchical */
   dsmOrdering?: "partitioned" | "hierarchical";
+  /** Quality metric distribution emphasis: avg | p50 | p80 | p90 | all */
+  percentileView?: "avg" | "p50" | "p80" | "p90" | "all";
+  /** Modularization graph layout algorithm */
+  layoutMode?: "organic" | "direct" | "hierarchical" | "circular" | "radial" | "tree";
+  /** Dependency edge routing: straight, orthogonal (H/V), or curved */
+  edgeStyle?: "straight" | "orthogonal" | "curved";
+  /** Which dependency-role module groups are shown on the graph */
+  moduleFilters?: {
+    withDependencies: boolean;
+    independent: boolean;
+    circular: boolean;
+    hub: boolean;
+  };
   /** LDM design rules for architecture conformance */
   designRules?: DesignRule[];
   /** True after the user finishes or skips the first-run setup wizard */
@@ -81,6 +94,15 @@ export function defaultPersistedState(): PersistedAppState {
     graphNavigation: null,
     dsmLevel: "package",
     dsmOrdering: "partitioned",
+    percentileView: "all",
+    layoutMode: "organic",
+    edgeStyle: "straight",
+    moduleFilters: {
+      withDependencies: true,
+      independent: true,
+      circular: true,
+      hub: true,
+    },
     designRules: defaultDesignRules(),
     setupWizardCompleted: false,
     analysisResult: null,

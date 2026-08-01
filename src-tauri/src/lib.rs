@@ -4,7 +4,9 @@ mod analysis_session;
 mod db;
 mod design_rules;
 mod dsm;
+mod git_metrics;
 mod hierarchy;
+mod quality;
 mod linter;
 mod lsp;
 mod project;
@@ -171,6 +173,25 @@ fn compute_project_dsm(hierarchy: HierarchyIndex, options: DsmOptions) -> DsmRes
 }
 
 #[tauri::command]
+async fn git_code_churn(
+    project_path: String,
+    path: String,
+    days: Option<u32>,
+) -> git_metrics::GitChurnResult {
+    let days = days.unwrap_or(90);
+    tauri::async_runtime::spawn_blocking(move || {
+        git_metrics::collect_git_churn(std::path::Path::new(&project_path), &path, days)
+    })
+    .await
+    .unwrap_or_else(|e| git_metrics::GitChurnResult {
+        available: false,
+        days,
+        files: vec![],
+        message: Some(format!("git churn task failed: {e}")),
+    })
+}
+
+#[tauri::command]
 async fn list_lsp_servers() -> Vec<LspServerStatus> {
     tauri::async_runtime::spawn_blocking(lsp::list_lsp_servers)
         .await
@@ -206,6 +227,7 @@ pub fn run() {
             read_project_file,
             write_project_file,
             compute_project_dsm,
+            git_code_churn,
             list_lsp_servers,
             install_lsp_server,
             list_language_linters,
