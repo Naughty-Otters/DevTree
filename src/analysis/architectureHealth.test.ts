@@ -22,6 +22,10 @@ function file(
   return {
     path,
     loc: 100,
+    nloc: 80,
+    cloc: 10,
+    codeDensity: 80,
+    commentDensity: 11,
     cyclomatic: 5,
     structural: 5,
     halsteadVolume: 100,
@@ -35,6 +39,9 @@ function file(
     securityDensity: 0,
     aiDensity: 0,
     duplicationHits: 0,
+    duplicatedPct: 2,
+    deadCodePct: 5,
+    staleDecisionDensity: 0,
     ...overrides,
   };
 }
@@ -55,6 +62,8 @@ function pkg(
     path,
     fileCount: 2,
     totalLoc: 200,
+    totalNloc: 160,
+    totalCloc: 20,
     complexity: rollup(complexityAvg),
     halstead: rollup(100),
     cognitive: rollup(5),
@@ -65,6 +74,13 @@ function pkg(
     security: rollup(0),
     aiQuality: rollup(0),
     duplication: rollup(0),
+    duplicatedCode: rollup(2),
+    nloc: rollup(80),
+    cloc: rollup(10),
+    codeDensity: rollup(80),
+    commentDensity: rollup(11),
+    deadCode: rollup(5),
+    staleDecisions: rollup(0),
     size: rollup(100),
     ...rest,
   };
@@ -146,9 +162,9 @@ describe("buildArchitectureHealth", () => {
   it("exposes project metric averages with percentiles", () => {
     const quality: QualityIndex = {
       files: {
-        "a.ts": file("a.ts", { cyclomatic: 1, loc: 10 }),
-        "b.ts": file("b.ts", { cyclomatic: 10, loc: 100 }),
-        "c.ts": file("c.ts", { cyclomatic: 20, loc: 200 }),
+        "a.ts": file("a.ts", { cyclomatic: 1, loc: 10, nloc: 8 }),
+        "b.ts": file("b.ts", { cyclomatic: 10, loc: 100, nloc: 80 }),
+        "c.ts": file("c.ts", { cyclomatic: 20, loc: 200, nloc: 160 }),
       },
       packages: {},
     };
@@ -157,6 +173,10 @@ describe("buildArchitectureHealth", () => {
     expect(complexity).toBeDefined();
     expect(complexity!.percentiles.p50).toBe(10);
     expect(complexity!.percentiles.p90).toBe(20);
+    expect(report.metrics.find((m) => m.id === "nloc")).toBeDefined();
+    expect(report.metrics.find((m) => m.id === "deadCode")).toBeDefined();
+    expect(report.metrics.find((m) => m.id === "staleDecisions")).toBeDefined();
+    expect(report.metrics.find((m) => m.id === "duplicatedCode")).toBeDefined();
     expect(report.fileCount).toBe(3);
   });
 
@@ -227,5 +247,33 @@ describe("buildArchitectureHealth", () => {
     const report = buildArchitectureHealth(quality)!;
     expect(report.packages[0]!.label).toBe("(root)");
     expect(report.files[0]!.label).toBe("x.ts");
+  });
+
+  it("lowers overall rating when dead/stale/duplicated metrics worsen", () => {
+    const healthy = buildArchitectureHealth({
+      files: {
+        "a.ts": file("a.ts", {
+          duplicatedPct: 0,
+          deadCodePct: 0,
+          staleDecisionDensity: 0,
+          commentDensity: 20,
+          codeDensity: 80,
+        }),
+      },
+      packages: {},
+    })!;
+    const dirty = buildArchitectureHealth({
+      files: {
+        "a.ts": file("a.ts", {
+          duplicatedPct: 60,
+          deadCodePct: 80,
+          staleDecisionDensity: 40,
+          commentDensity: 0,
+          codeDensity: 20,
+        }),
+      },
+      packages: {},
+    })!;
+    expect(healthy.rating).toBeGreaterThan(dirty.rating);
   });
 });

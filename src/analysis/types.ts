@@ -148,6 +148,14 @@ export interface FileQualityMetrics {
   path: string;
   package?: string;
   loc: number;
+  /** Non-comment lines of code. */
+  nloc?: number;
+  /** Comment lines of code. */
+  cloc?: number;
+  /** NLOC / LOC × 100. */
+  codeDensity?: number;
+  /** CLOC / (NLOC + CLOC) × 100. */
+  commentDensity?: number;
   cyclomatic: number;
   structural: number;
   halsteadVolume: number;
@@ -161,6 +169,12 @@ export interface FileQualityMetrics {
   securityDensity: number;
   aiDensity: number;
   duplicationHits: number;
+  /** % of NLOC matching project-wide clone fingerprints. */
+  duplicatedPct?: number;
+  /** % of symbols with no inbound references. */
+  deadCodePct?: number;
+  /** TODO/FIXME/HACK-style markers per kLOC. */
+  staleDecisionDensity?: number;
   documentationScore?: number | null;
 }
 
@@ -168,6 +182,8 @@ export interface PackageQualityMetrics {
   path: string;
   fileCount: number;
   totalLoc: number;
+  totalNloc?: number;
+  totalCloc?: number;
   complexity: PackageMetricRollup;
   halstead: PackageMetricRollup;
   cognitive: PackageMetricRollup;
@@ -178,6 +194,13 @@ export interface PackageQualityMetrics {
   security: PackageMetricRollup;
   aiQuality: PackageMetricRollup;
   duplication: PackageMetricRollup;
+  duplicatedCode?: PackageMetricRollup;
+  nloc?: PackageMetricRollup;
+  cloc?: PackageMetricRollup;
+  codeDensity?: PackageMetricRollup;
+  commentDensity?: PackageMetricRollup;
+  deadCode?: PackageMetricRollup;
+  staleDecisions?: PackageMetricRollup;
   size: PackageMetricRollup;
   documentation?: PackageMetricRollup | null;
 }

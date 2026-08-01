@@ -5,8 +5,8 @@ pub mod metrics;
 
 pub use layout::{layout, layout_with_mode, LayoutMode};
 pub use metrics::{
-    analyze_source_classic, FileQualityMetrics, PackageQualityMetrics, QualityIndex,
-    SourceClassicMetrics,
+    analyze_loc_breakdown, analyze_source_classic, FileQualityMetrics, LocBreakdown,
+    PackageQualityMetrics, QualityIndex, SourceClassicMetrics,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

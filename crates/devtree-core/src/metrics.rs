@@ -28,12 +28,30 @@ pub struct SourceClassicMetrics {
     pub cyclomatic_complexity: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Percentiles {
     pub p50: f64,
     pub p80: f64,
     pub p90: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocBreakdown {
+    /// Physical lines (including blanks + comments).
+    pub loc: u32,
+    /// Non-comment lines of code (Sonar-style ncloc / NLOC).
+    pub nloc: u32,
+    /// Comment lines of code (CLOC).
+    pub cloc: u32,
+    pub blank: u32,
+    /// NLOC / LOC × 100.
+    pub code_density: f64,
+    /// CLOC / (NLOC + CLOC) × 100 (Sonar comment density).
+    pub comment_density: f64,
+    /// TODO/FIXME/HACK/XXX/DEPRECATED marker count.
+    pub stale_markers: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +62,14 @@ pub struct FileQualityMetrics {
     #[serde(default)]
     pub package: String,
     pub loc: u32,
+    #[serde(default)]
+    pub nloc: u32,
+    #[serde(default)]
+    pub cloc: u32,
+    #[serde(default)]
+    pub code_density: f64,
+    #[serde(default)]
+    pub comment_density: f64,
     pub cyclomatic: f64,
     pub structural: f64,
     pub halstead_volume: f64,
@@ -58,11 +84,20 @@ pub struct FileQualityMetrics {
     pub security_density: f64,
     pub ai_density: f64,
     pub duplication_hits: f64,
+    /// % of NLOC whose normalized line appears ≥2× in the project.
+    #[serde(default)]
+    pub duplicated_pct: f64,
+    /// % of file symbols with no inbound references.
+    #[serde(default)]
+    pub dead_code_pct: f64,
+    /// Stale-decision markers (TODO/FIXME/…) per kLOC.
+    #[serde(default)]
+    pub stale_decision_density: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation_score: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageMetricRollup {
     pub avg: f64,
@@ -75,6 +110,10 @@ pub struct PackageQualityMetrics {
     pub path: String,
     pub file_count: u32,
     pub total_loc: u32,
+    #[serde(default)]
+    pub total_nloc: u32,
+    #[serde(default)]
+    pub total_cloc: u32,
     pub complexity: PackageMetricRollup,
     pub halstead: PackageMetricRollup,
     pub cognitive: PackageMetricRollup,
@@ -85,6 +124,20 @@ pub struct PackageQualityMetrics {
     pub security: PackageMetricRollup,
     pub ai_quality: PackageMetricRollup,
     pub duplication: PackageMetricRollup,
+    #[serde(default)]
+    pub duplicated_code: PackageMetricRollup,
+    #[serde(default)]
+    pub nloc: PackageMetricRollup,
+    #[serde(default)]
+    pub cloc: PackageMetricRollup,
+    #[serde(default)]
+    pub code_density: PackageMetricRollup,
+    #[serde(default)]
+    pub comment_density: PackageMetricRollup,
+    #[serde(default)]
+    pub dead_code: PackageMetricRollup,
+    #[serde(default)]
+    pub stale_decisions: PackageMetricRollup,
     pub size: PackageMetricRollup,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation: Option<PackageMetricRollup>,
@@ -506,6 +559,159 @@ pub fn density_per_kloc(count: f64, loc: u32) -> f64 {
     (count / loc as f64) * 1000.0
 }
 
+fn line_is_hash_comment_lang(path_hint: &str) -> bool {
+    let lower = path_hint.to_ascii_lowercase();
+    lower.ends_with(".py")
+        || lower.ends_with(".rb")
+        || lower.ends_with(".sh")
+        || lower.ends_with(".yaml")
+        || lower.ends_with(".yml")
+        || lower.ends_with(".toml")
+        || lower.ends_with(".pl")
+}
+
+/// Physical LOC breakdown + stale-decision markers for a source file.
+pub fn analyze_loc_breakdown(source: &str, path_hint: &str) -> LocBreakdown {
+    let hash_comments = line_is_hash_comment_lang(path_hint);
+    let mut nloc = 0u32;
+    let mut cloc = 0u32;
+    let mut blank = 0u32;
+    let mut stale_markers = 0u32;
+    let mut in_block = false;
+
+    let stale_re = [
+        "TODO", "FIXME", "HACK", "XXX", "DEPRECATED", "STALE", "@todo",
+    ];
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            blank += 1;
+            continue;
+        }
+
+        let upper = trimmed.to_ascii_uppercase();
+        for marker in stale_re {
+            if upper.contains(marker) {
+                stale_markers += 1;
+                break;
+            }
+        }
+
+        let mut is_comment = false;
+        let mut is_code = false;
+
+        if in_block {
+            is_comment = true;
+            if trimmed.contains("*/") {
+                in_block = false;
+            }
+        } else if trimmed.starts_with("/*") {
+            is_comment = true;
+            if !trimmed.contains("*/") {
+                in_block = true;
+            }
+            // code before /* on same line
+            if let Some(idx) = trimmed.find("/*") {
+                if trimmed[..idx].chars().any(|c| !c.is_whitespace()) {
+                    is_code = true;
+                }
+            }
+        } else if trimmed.starts_with("//")
+            || trimmed.starts_with("///")
+            || trimmed.starts_with("//!")
+            || (hash_comments && trimmed.starts_with('#'))
+        {
+            is_comment = true;
+        } else {
+            is_code = true;
+            // trailing line comment still counts as code (NLOC), Sonar-style
+            if trimmed.contains("/*") && !trimmed.contains("*/") {
+                in_block = true;
+            }
+        }
+
+        if is_code {
+            nloc += 1;
+        } else if is_comment {
+            cloc += 1;
+        }
+    }
+
+    let loc = (nloc + cloc + blank).max(source.lines().count() as u32);
+    let code_density = if loc == 0 {
+        0.0
+    } else {
+        (nloc as f64 / loc as f64) * 100.0
+    };
+    let comment_density = if nloc + cloc == 0 {
+        0.0
+    } else {
+        (cloc as f64 / (nloc + cloc) as f64) * 100.0
+    };
+
+    LocBreakdown {
+        loc,
+        nloc,
+        cloc,
+        blank,
+        code_density,
+        comment_density,
+        stale_markers,
+    }
+}
+
+/// Normalized code lines suitable for clone / duplication hashing.
+pub fn normalized_code_lines(source: &str, path_hint: &str) -> Vec<String> {
+    let breakdown_path = path_hint;
+    let hash_comments = line_is_hash_comment_lang(breakdown_path);
+    let mut out = Vec::new();
+    let mut in_block = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if in_block {
+            if trimmed.contains("*/") {
+                in_block = false;
+            }
+            continue;
+        }
+        if trimmed.starts_with("/*") {
+            if !trimmed.contains("*/") {
+                in_block = true;
+            }
+            continue;
+        }
+        if trimmed.starts_with("//")
+            || trimmed.starts_with("///")
+            || (hash_comments && trimmed.starts_with('#'))
+        {
+            continue;
+        }
+        // Skip tiny / import-noise lines for clone detection.
+        let norm = trimmed
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if norm.len() < 24 {
+            continue;
+        }
+        let lower = norm.to_ascii_lowercase();
+        if lower.starts_with("import ")
+            || lower.starts_with("use ")
+            || lower.starts_with("from ")
+            || lower.starts_with("package ")
+            || lower.starts_with("#include")
+        {
+            continue;
+        }
+        out.push(norm);
+    }
+    out
+}
+
 pub fn is_test_path(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     name.contains(".test.")
@@ -579,5 +785,30 @@ mod tests {
         let start = std::time::Instant::now();
         let _ = compute_halstead(&src);
         assert!(start.elapsed().as_millis() < 500, "halstead too slow for ~100KB");
+    }
+
+    #[test]
+    fn loc_breakdown_counts_nloc_cloc_and_stale() {
+        let src = r#"
+// header comment
+function main() {
+  // TODO: revisit decision
+  return 1;
+}
+"#;
+        let b = analyze_loc_breakdown(src, "main.ts");
+        assert!(b.nloc >= 3);
+        assert!(b.cloc >= 2);
+        assert!(b.stale_markers >= 1);
+        assert!(b.code_density > 0.0);
+        assert!(b.comment_density > 0.0);
+    }
+
+    #[test]
+    fn normalized_code_lines_skips_imports_and_comments() {
+        let src = "import x from 'y';\nconst meaningfulVariableNameHere = 1;\n// c\n";
+        let lines = normalized_code_lines(src, "a.ts");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("meaningfulVariableNameHere"));
     }
 }

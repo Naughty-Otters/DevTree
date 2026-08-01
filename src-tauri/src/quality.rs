@@ -3,8 +3,9 @@
 use crate::analysis::ValidationItem;
 use crate::hierarchy::{HierarchyIndex, SymbolInfo};
 use devtree_core::metrics::{
-    analyze_source_classic, density_per_kloc, has_companion_test, rollup, structural_complexity,
-    FileQualityMetrics, PackageQualityMetrics, QualityIndex,
+    analyze_loc_breakdown, analyze_source_classic, density_per_kloc, has_companion_test,
+    normalized_code_lines, rollup, structural_complexity, FileQualityMetrics,
+    PackageQualityMetrics, QualityIndex,
 };
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -169,6 +170,66 @@ fn files_in_package<'a>(hierarchy: &'a HierarchyIndex, package_path: &str) -> Ve
         .collect()
 }
 
+/// % of symbols in a file with no inbound symbol-edge references.
+fn dead_code_pct(
+    hierarchy: &HierarchyIndex,
+    path: &str,
+    symbol_file: &HashMap<String, String>,
+) -> f64 {
+    let Some(symbols) = hierarchy.symbols.get(path) else {
+        return 0.0;
+    };
+    if symbols.is_empty() {
+        return 0.0;
+    }
+    let mut referenced = HashSet::new();
+    for edge in &hierarchy.symbol_edges {
+        if symbol_file.get(&edge.target).map(|p| p.as_str()) == Some(path) {
+            referenced.insert(edge.target.as_str());
+        }
+    }
+    let dead = symbols
+        .iter()
+        .filter(|s| !referenced.contains(s.id.as_str()))
+        .count();
+    (dead as f64 / symbols.len() as f64) * 100.0
+}
+
+/// Project-wide clone fingerprint: normalized code line → occurrence count.
+fn build_duplication_index(
+    contents: &HashMap<String, String>,
+) -> (HashMap<String, u32>, HashMap<String, Vec<String>>) {
+    let mut global: HashMap<String, u32> = HashMap::new();
+    let mut per_file: HashMap<String, Vec<String>> = HashMap::new();
+    for (path, source) in contents {
+        let lines = normalized_code_lines(source, path);
+        for line in &lines {
+            *global.entry(line.clone()).or_insert(0) += 1;
+        }
+        per_file.insert(path.clone(), lines);
+    }
+    (global, per_file)
+}
+
+fn duplicated_pct_for_file(
+    path: &str,
+    nloc: u32,
+    global: &HashMap<String, u32>,
+    per_file: &HashMap<String, Vec<String>>,
+) -> f64 {
+    let Some(lines) = per_file.get(path) else {
+        return 0.0;
+    };
+    if lines.is_empty() || nloc == 0 {
+        return 0.0;
+    }
+    let dup = lines
+        .iter()
+        .filter(|l| global.get(*l).copied().unwrap_or(0) >= 2)
+        .count();
+    ((dup as f64 / nloc as f64) * 100.0).min(100.0)
+}
+
 /// Precompute per-file and per-package quality metrics.
 /// Per-file classic metrics run on a Rayon thread pool; package rollups stay cheap/serial.
 /// `on_progress(current, total)` is called while processing files (1-based current).
@@ -185,6 +246,7 @@ where
     let all_paths: HashSet<String> = hierarchy.files.iter().map(|f| f.path.clone()).collect();
     let symbol_file = symbol_file_map(&hierarchy.symbols);
     let (internal_calls, coupled) = precompute_edge_stats(hierarchy, &symbol_file);
+    let (dup_global, dup_per_file) = build_duplication_index(contents);
 
     let total = hierarchy.files.len() as u32;
     let progress = Mutex::new(on_progress);
@@ -205,8 +267,9 @@ where
             let path = &file.path;
             let loc = file.loc;
             let source = contents.get(path).map(|s| s.as_str()).unwrap_or("");
+            let loc_info = analyze_loc_breakdown(source, path);
             // Dominates cost — parallelized across CPU cores.
-            let classic = analyze_source_classic(source, Some(loc));
+            let classic = analyze_source_classic(source, Some(loc.max(loc_info.loc)));
             let symbol_count = hierarchy
                 .symbols
                 .get(path)
@@ -234,11 +297,19 @@ where
                 None
             };
             let cbo = coupled.get(path).map(|s| s.len() as f64).unwrap_or(0.0);
+            let nloc = if loc_info.nloc > 0 { loc_info.nloc } else { loc };
+            let duplicated_pct =
+                duplicated_pct_for_file(path, nloc, &dup_global, &dup_per_file);
+            let dead_pct = dead_code_pct(hierarchy, path, &symbol_file);
 
             let metrics = FileQualityMetrics {
                 path: path.clone(),
                 package: file.package.clone(),
-                loc,
+                loc: loc.max(loc_info.loc),
+                nloc,
+                cloc: loc_info.cloc,
+                code_density: loc_info.code_density,
+                comment_density: loc_info.comment_density,
                 cyclomatic: classic.cyclomatic_complexity,
                 structural,
                 halstead_volume: classic.halstead.volume,
@@ -252,10 +323,16 @@ where
                 } else {
                     0.0
                 },
-                issue_density: density_per_kloc(total_issues, loc),
-                security_density: density_per_kloc(security, loc),
-                ai_density: density_per_kloc(ai, loc),
+                issue_density: density_per_kloc(total_issues, loc.max(1)),
+                security_density: density_per_kloc(security, loc.max(1)),
+                ai_density: density_per_kloc(ai, loc.max(1)),
                 duplication_hits: duplication,
+                duplicated_pct,
+                dead_code_pct: dead_pct,
+                stale_decision_density: density_per_kloc(
+                    loc_info.stale_markers as f64,
+                    loc.max(1),
+                ),
                 documentation_score,
             };
 
@@ -309,6 +386,13 @@ where
             let security: Vec<f64> = members.iter().map(|m| m.security_density).collect();
             let ai: Vec<f64> = members.iter().map(|m| m.ai_density).collect();
             let duplication: Vec<f64> = members.iter().map(|m| m.duplication_hits).collect();
+            let duplicated_code: Vec<f64> = members.iter().map(|m| m.duplicated_pct).collect();
+            let nloc_v: Vec<f64> = members.iter().map(|m| m.nloc as f64).collect();
+            let cloc_v: Vec<f64> = members.iter().map(|m| m.cloc as f64).collect();
+            let code_density: Vec<f64> = members.iter().map(|m| m.code_density).collect();
+            let comment_density: Vec<f64> = members.iter().map(|m| m.comment_density).collect();
+            let dead_code: Vec<f64> = members.iter().map(|m| m.dead_code_pct).collect();
+            let stale: Vec<f64> = members.iter().map(|m| m.stale_decision_density).collect();
             let size: Vec<f64> = members.iter().map(|m| m.loc as f64).collect();
             let docs: Vec<f64> = members
                 .iter()
@@ -316,10 +400,14 @@ where
                 .collect();
 
             let total_loc: u32 = members.iter().map(|m| m.loc).sum();
+            let total_nloc: u32 = members.iter().map(|m| m.nloc).sum();
+            let total_cloc: u32 = members.iter().map(|m| m.cloc).sum();
             Some(PackageQualityMetrics {
                 path: pkg.clone(),
                 file_count: members.len() as u32,
                 total_loc,
+                total_nloc,
+                total_cloc,
                 complexity: rollup(&complexity),
                 halstead: rollup(&halstead),
                 cognitive: rollup(&cognitive),
@@ -330,6 +418,13 @@ where
                 security: rollup(&security),
                 ai_quality: rollup(&ai),
                 duplication: rollup(&duplication),
+                duplicated_code: rollup(&duplicated_code),
+                nloc: rollup(&nloc_v),
+                cloc: rollup(&cloc_v),
+                code_density: rollup(&code_density),
+                comment_density: rollup(&comment_density),
+                dead_code: rollup(&dead_code),
+                stale_decisions: rollup(&stale),
                 size: rollup(&size),
                 documentation: if docs.is_empty() {
                     None
@@ -463,7 +558,40 @@ mod tests {
         assert!(a.cyclomatic >= 1.0);
         assert_eq!(a.coverage, 100.0);
         assert!(a.security_density > 0.0);
+        assert!(a.nloc > 0);
+        assert!(a.code_density > 0.0);
+        let pkg = index.packages.get("src").expect("src package");
+        assert!(pkg.total_nloc > 0);
+        assert!(pkg.code_density.avg > 0.0);
         assert_eq!(last.1, 3);
         assert_eq!(last.0, 3);
+    }
+
+    #[test]
+    fn duplicated_and_stale_signals_surface() {
+        let mut hierarchy = sample_hierarchy();
+        hierarchy.files.push(FileInfo {
+            path: "src/c.ts".into(),
+            label: "c.ts".into(),
+            loc: 8,
+            package: "src".into(),
+        });
+        let mut contents = HashMap::new();
+        let shared = "const sharedDuplicatedIdentifierValue = 42;";
+        contents.insert(
+            "src/a.ts".into(),
+            format!("{shared}\n// TODO: stale decision here\nexport function a() {{ return 1; }}\n"),
+        );
+        contents.insert(
+            "src/b.ts".into(),
+            format!("{shared}\nexport function b() {{ return 2; }}\n"),
+        );
+        contents.insert("src/c.ts".into(), "export const onlyHere = 1;\n".into());
+        contents.insert("src/a.test.ts".into(), "test('a', () => {});".into());
+
+        let index = build_quality_index(&hierarchy, &contents, &[], |_, _| {});
+        let a = index.files.get("src/a.ts").unwrap();
+        assert!(a.duplicated_pct > 0.0, "shared line should count as duplicated");
+        assert!(a.stale_decision_density > 0.0, "TODO marker should count");
     }
 }

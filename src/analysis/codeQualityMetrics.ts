@@ -33,9 +33,16 @@ export type MetricId =
   | "security"
   | "documentation"
   | "duplication"
+  | "duplicatedCode"
   | "issues"
   | "aiQuality"
-  | "size";
+  | "size"
+  | "nloc"
+  | "cloc"
+  | "codeDensity"
+  | "commentDensity"
+  | "deadCode"
+  | "staleDecisions";
 
 /** Source-derived classic metrics attached after file enrichment. */
 export type FileSourceMetrics = SourceClassicMetrics;
