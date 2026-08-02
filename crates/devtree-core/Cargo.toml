@@ -3,7 +3,7 @@ name = "devtree-core"
 version = "0.1.1"
 edition = "2021"
 description = "Graph layout and metrics for DevTree"
-license = "MIT"
+license = "AGPL-3.0-only"
 repository = "https://github.com/devtree/devtree"
 
 [lib]

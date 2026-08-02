@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/.github/badges/version.json)](https://github.com/Naughty-Otters/DevTree/releases)
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/.github/badges/coverage.json)](https://github.com/Naughty-Otters/DevTree/actions/workflows/ci.yml?query=branch%3Amain)
 [![npm](https://img.shields.io/npm/v/devtree-ai.svg)](https://www.npmjs.com/package/devtree-ai)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 **Bridge vibe-coding demo quality → production quality. Guardrail everything you continuously deliver.**
 
@@ -14,7 +14,7 @@ DevTree is a desktop watchdog for AI-assisted development — architecture graph
   <img src="media/video/video_run_app.gif" alt="Open a project and run analysis in DevTree" width="720" />
 </p>
 
-**License:** [MIT](LICENSE) · **Why / rules catalog:** [docs/FOR_VIBE_CODERS.md](docs/FOR_VIBE_CODERS.md) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Distribution:** [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)
+**License:** [AGPL-3.0](LICENSE) · **Why / rules catalog:** [docs/FOR_VIBE_CODERS.md](docs/FOR_VIBE_CODERS.md) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) · **Distribution:** [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)
 
 ---
 
