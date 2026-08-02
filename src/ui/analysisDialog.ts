@@ -12,6 +12,31 @@ export interface AnalysisRunChoice {
 
 export const DEFAULT_WATCH_DEBOUNCE_MS = 3000;
 
+/** Debounce presets for file-watch mode (milliseconds). */
+export const WATCH_DEBOUNCE_OPTIONS_MS = [
+  1_000,
+  2_000,
+  3_000,
+  5_000,
+  10_000,
+  60_000,
+  2 * 60_000,
+  5 * 60_000,
+  10 * 60_000,
+  15 * 60_000,
+] as const;
+
+export function formatWatchDebounceMs(ms: number): string {
+  if (ms >= 60_000 && ms % 60_000 === 0) {
+    const mins = ms / 60_000;
+    return mins === 1 ? "1 min" : `${mins} mins`;
+  }
+  if (ms >= 1_000 && ms % 1_000 === 0) {
+    return `${ms / 1_000}s`;
+  }
+  return `${ms}ms`;
+}
+
 export const CRON_PRESETS: { label: string; value: string }[] = [
   { label: "Every 15 minutes", value: "*/15 * * * *" },
   { label: "Every 30 minutes", value: "*/30 * * * *" },
@@ -144,10 +169,15 @@ export function showAnalysisDialog(
     debounceLabel.innerHTML = `<span>Debounce after changes</span>`;
     const debounceSelect = document.createElement("select");
     debounceSelect.className = "run-mode-select";
-    for (const ms of [1000, 2000, 3000, 5000, 10000]) {
+    const debounceOptions: number[] = [...WATCH_DEBOUNCE_OPTIONS_MS];
+    if (!debounceOptions.includes(debounceMs)) {
+      debounceOptions.push(debounceMs);
+      debounceOptions.sort((a, b) => a - b);
+    }
+    for (const ms of debounceOptions) {
       const opt = document.createElement("option");
       opt.value = String(ms);
-      opt.textContent = ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`;
+      opt.textContent = formatWatchDebounceMs(ms);
       if (ms === debounceMs) opt.selected = true;
       debounceSelect.appendChild(opt);
     }

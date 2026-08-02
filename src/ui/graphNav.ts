@@ -464,9 +464,9 @@ export function renderGraphNav(
 
   const hint = document.createElement("span");
   hint.className = "graph-nav-hint";
-  hint.textContent = "Click = details · Double-click = drill / open source";
+  hint.textContent = "Click = details · Double-click = drill / open file";
   hint.title =
-    "Click a module for details. Double-click to drill into a package or open a file.";
+    "Click a module for details. Double-click a package to drill in, or a file to open it in the editor.";
   bar.append(
     controls,
     layoutControls,

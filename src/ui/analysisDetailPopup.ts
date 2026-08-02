@@ -1,4 +1,5 @@
 import type { AnalysisResult, ValidationItem } from "../analysis/types";
+import { openableSourceForNode } from "../graph/openSource";
 import type { GraphEdge, GraphNode } from "../graph/types";
 import { cycleGroupsFromValidation } from "../validation/cycles";
 import { appendPagedItems } from "./pagedList";
@@ -16,6 +17,7 @@ export type AnalysisStatKind =
 
 export interface AnalysisDetailHandlers {
   onShowModuleOnGraph?: (nodeId: string) => void;
+  onOpenModuleFile?: (path: string, line?: number) => void;
   onShowDependencyOnGraph?: (source: string, target: string) => void;
   validation?: ValidationDetailHandlers;
 }
@@ -124,6 +126,18 @@ function renderModuleList(
         handlers.onShowModuleOnGraph?.(node.id);
       });
       actions.appendChild(graphBtn);
+
+      const openable = openableSourceForNode(node);
+      if (openable && handlers.onOpenModuleFile) {
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "btn-text validation-detail-action";
+        openBtn.textContent = "Open file";
+        openBtn.addEventListener("click", () => {
+          handlers.onOpenModuleFile?.(openable.path, openable.line);
+        });
+        actions.appendChild(openBtn);
+      }
 
       li.append(main, actions);
       return li;

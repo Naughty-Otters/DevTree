@@ -54,6 +54,7 @@ export interface ResultsPanelHandlers {
   onShowValidationOnGraph?: ValidationDetailHandlers["onShowOnGraph"];
   onShowCycleOnGraph?: ValidationDetailHandlers["onShowCycleOnGraph"];
   onShowModuleOnGraph?: AnalysisDetailHandlers["onShowModuleOnGraph"];
+  onOpenModuleFile?: AnalysisDetailHandlers["onOpenModuleFile"];
   onShowDependencyOnGraph?: AnalysisDetailHandlers["onShowDependencyOnGraph"];
   onShowDsm?: (highlightIds?: string[]) => void;
   getHierarchy?: () => HierarchyIndex | null;
@@ -1030,6 +1031,7 @@ function renderAnalysisTab(
       card.addEventListener("click", () => {
         showAnalysisStatDetail(def.kind!, result, {
           onShowModuleOnGraph: handlers.onShowModuleOnGraph,
+          onOpenModuleFile: handlers.onOpenModuleFile,
           onShowDependencyOnGraph: handlers.onShowDependencyOnGraph,
           validation: validationHandlers,
         });
@@ -1432,7 +1434,10 @@ function renderRatingGridCard(
   const card = document.createElement("button");
   card.type = "button";
   card.className = `arch-rating-card arch-rating-${item.band}`;
-  card.title = `Show ${item.path} on graph and open details`;
+  const opensFile = item.kind === "file";
+  card.title = opensFile
+    ? `Show ${item.path} on graph`
+    : `Show ${item.path} on graph and open details`;
 
   const score = document.createElement("span");
   score.className = "arch-rating-card-score";

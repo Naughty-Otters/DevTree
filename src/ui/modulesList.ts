@@ -1,4 +1,5 @@
 import type { GraphNode } from "../graph/types";
+import { openableSourceForNode } from "../graph/openSource";
 import { createNodeKindShapeWrap, nodeKindLabel } from "../canvas/nodeIcons";
 import { nodeColor } from "../canvas/colors";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
@@ -18,6 +19,8 @@ export interface ModulesListCallbacks {
   onVisibilityChange: (visibleIds: Set<string>) => void;
   onHighlight: (nodeId: string | null) => void;
   onShowDetails?: (nodeId: string, clientX: number, clientY: number) => void;
+  /** Navigate to this module on the Graph (e.g. double-click a file). */
+  onOpenFile?: (path: string) => void;
 }
 
 export function renderModulesList(
@@ -254,6 +257,13 @@ function moduleRow(
     if (prev && prev !== row) prev.classList.remove("selected");
     row.classList.add("selected");
     callbacks.onFocus(node.id);
+  });
+
+  row.addEventListener("dblclick", () => {
+    const openable = openableSourceForNode(node);
+    if (openable && callbacks.onOpenFile) {
+      callbacks.onOpenFile(openable.path);
+    }
   });
 
   return row;

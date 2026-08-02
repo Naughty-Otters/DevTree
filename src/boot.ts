@@ -297,18 +297,19 @@ export async function startApp(): Promise<void> {
       resultsPanel?.setResult(app.analysisResult);
     },
     onSelectRelated: (nodeId) => {
-      focusModuleOnGraph(nodeId);
-      openModuleDetails(nodeId);
+      void showModuleOnGraph(nodeId);
     },
     onOpenContent: (nodeId) => {
       if (app.renderState?.nodes.some((node) => node.id === nodeId)) {
-        focusModuleOnGraph(nodeId);
-        openModuleDetails(nodeId);
+        void showModuleOnGraph(nodeId);
         return;
       }
       // Contents live one level deeper — open that level on the graph.
       const parentId = moduleDetailsPanel.currentNodeId();
       if (parentId) drillIntoNode(parentId);
+    },
+    onOpenSource: (path, line) => {
+      void handleFileOpen(path, line);
     },
     onDrillInto: (nodeId) => {
       drillIntoNode(nodeId);
@@ -443,6 +444,9 @@ export async function startApp(): Promise<void> {
       },
       onShowModuleOnGraph: (nodeId) => {
         void showModuleOnGraph(nodeId);
+      },
+      onOpenModuleFile: (path, line) => {
+        void handleFileOpen(path, line);
       },
       onShowDependencyOnGraph: (source, target) => {
         void showDependencyOnGraph(source, target);
@@ -1567,6 +1571,9 @@ export async function startApp(): Promise<void> {
         focusModuleOnGraph(nodeId);
         openModuleDetails(nodeId);
       },
+      onOpenFile: (path) => {
+        void showModuleOnGraph(path);
+      },
     });
   }
 
@@ -2018,6 +2025,10 @@ export async function startApp(): Promise<void> {
         (node.line ?? 0) > 0
       ) {
         void openSymbolSource(id);
+        return;
+      }
+      if (node?.kind === "file") {
+        void handleFileOpen(node.path || node.id);
         return;
       }
       drillIntoNode(id);

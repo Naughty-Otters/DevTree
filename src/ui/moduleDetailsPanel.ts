@@ -28,6 +28,7 @@ import {
   isDrillableNode,
   type GraphNavigation,
 } from "../graph/navigation";
+import { openableSourceForNode } from "../graph/openSource";
 import type { GraphEdge, GraphNode } from "../graph/types";
 import { lucideIcon } from "./icons";
 import { relatedModules } from "./graphPopup";
@@ -38,6 +39,8 @@ import { X } from "lucide";
 export interface ModuleDetailsHandlers {
   onSelectRelated?: (nodeId: string) => void;
   onOpenContent?: (nodeId: string) => void;
+  /** Open a file (or symbol location) in the file viewer. */
+  onOpenSource?: (path: string, line?: number) => void;
   onDrillInto?: (nodeId: string) => void;
   onClose?: () => void;
   getPercentileView?: () => PercentileViewMode;
@@ -354,7 +357,10 @@ export function createModuleDetailsPanel(
       (item) => {
         const li = document.createElement("li");
         li.className = "module-details-item";
-        li.title = item.path;
+        const openable = openableSourceForNode(item);
+        li.title = openable
+          ? `Show ${openable.path} on graph`
+          : item.path;
 
         const dot = document.createElement("span");
         dot.className = "module-details-dot";
@@ -371,7 +377,16 @@ export function createModuleDetailsPanel(
         meta.textContent = nodeKindLabel(item.kind || "symbol");
 
         li.append(dot, kind, name, meta);
-        li.addEventListener("click", () => onItem(item.id));
+        li.addEventListener("click", () => {
+          // Prefer the Graph file node so metrics/details are one click away.
+          // Explicit "Open file" on the panel is for source content.
+          const openable = openableSourceForNode(item);
+          if (openable) {
+            handlers.onSelectRelated?.(openable.path);
+            return;
+          }
+          onItem(item.id);
+        });
         return li;
       },
       60,
@@ -469,7 +484,26 @@ export function createModuleDetailsPanel(
 
     const meta = document.createElement("div");
     meta.className = "module-details-meta";
-    appendMetaRow(meta, "Path", node.path, { title: node.path });
+    const selfOpenable = openableSourceForNode(node);
+    if (selfOpenable && handlers.onOpenSource) {
+      const pathRow = document.createElement("div");
+      pathRow.className = "module-details-row";
+      const pathLabel = document.createElement("span");
+      pathLabel.className = "module-details-label";
+      pathLabel.textContent = "Path";
+      const pathBtn = document.createElement("button");
+      pathBtn.type = "button";
+      pathBtn.className = "btn-text module-details-value module-details-path-link";
+      pathBtn.textContent = node.path;
+      pathBtn.title = `Open ${selfOpenable.path}`;
+      pathBtn.addEventListener("click", () => {
+        handlers.onOpenSource?.(selfOpenable.path, selfOpenable.line);
+      });
+      pathRow.append(pathLabel, pathBtn);
+      meta.appendChild(pathRow);
+    } else {
+      appendMetaRow(meta, "Path", node.path, { title: node.path });
+    }
     if (report?.kind === "package") {
       appendMetaRow(meta, "Files", formatInt(report.fileCount));
     } else if (node.line && node.line > 0) {
@@ -505,6 +539,19 @@ export function createModuleDetailsPanel(
       ),
     );
 
+    const actions = document.createElement("div");
+    actions.className = "module-details-actions";
+    if (selfOpenable && handlers.onOpenSource) {
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "btn btn-ghost module-details-open-file";
+      openBtn.textContent =
+        selfOpenable.line != null ? "Open at line" : "Open file";
+      openBtn.addEventListener("click", () => {
+        handlers.onOpenSource?.(selfOpenable.path, selfOpenable.line);
+      });
+      actions.appendChild(openBtn);
+    }
     if (drillable) {
       const drill = document.createElement("button");
       drill.type = "button";
@@ -514,8 +561,9 @@ export function createModuleDetailsPanel(
           ? "Open symbols on graph"
           : "Open contents on graph";
       drill.addEventListener("click", () => handlers.onDrillInto?.(node.id));
-      body.appendChild(drill);
+      actions.appendChild(drill);
     }
+    if (actions.childElementCount > 0) body.appendChild(actions);
 
     const depsSection = document.createElement("section");
     depsSection.className = "module-details-section";
