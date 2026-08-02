@@ -3,7 +3,7 @@ use crate::agent::ai_output_parse::parse_ai_findings;
 use crate::agent::providers::{run_validation_provider_stream, ValidationProviderStreamConfig};
 use crate::agent::runtime_limits::{
     clamp_agent_turns, clamp_validation_tokens, clamp_validation_turns, default_agent_max_turns,
-    default_validation_max_tokens, default_validation_max_turns, MAX_VALIDATION_TURNS,
+    default_validation_max_tokens, default_validation_max_turns,
 };
 use crate::agent::architecture_assessments::{
     architecture_rule_settings, build_architecture_assessment_prompt,
@@ -718,6 +718,7 @@ fn append_capped_log(buf: &mut String, chunk: &str, max: usize) {
 mod tests {
     use super::*;
     use crate::agent::code_review_lenses::CODE_REVIEW_LENSES;
+    use crate::agent::runtime_limits::MAX_VALIDATION_TURNS;
     use crate::analysis::RuleSettingsMap;
     use serde_json::json;
 
