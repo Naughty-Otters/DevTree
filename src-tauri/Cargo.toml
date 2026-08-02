@@ -1,6 +1,6 @@
 [package]
 name = "devtree"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop codebase dependency graph and architecture validation"
 authors = ["DevTree contributors"]
 license = "MIT"

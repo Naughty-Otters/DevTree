@@ -1,7 +1,7 @@
 {
   "name": "devtree",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "repository": {
     "type": "git",
@@ -22,6 +22,7 @@
     "test:coverage": "vitest run --coverage",
     "test:all": "npm run test:files && npm run test:rust && npm run test:coverage",
     "sync:version": "node scripts/sync-cli-version.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
     "badges": "npm run test:coverage && node scripts/write-ci-badges.mjs",
     "precommit": "npm run test:all",
     "prepare": "husky"
