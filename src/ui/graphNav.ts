@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Circle,
   CornerDownRight,
+  Crosshair,
   GitFork,
   Minus,
   Share2,
@@ -38,6 +39,8 @@ export interface GraphNavOptions {
   layoutMode?: LayoutMode;
   edgeStyle?: EdgeStyle;
   moduleFilters?: ModuleFilterFlags;
+  /** Enable Focus (relayout visible + fit) in the graph toolbar. */
+  focusEnabled?: boolean;
 }
 
 export interface GraphNavCallbacks {
@@ -47,6 +50,7 @@ export interface GraphNavCallbacks {
   onLayoutModeChange?: (mode: LayoutMode) => void;
   onEdgeStyleChange?: (style: EdgeStyle) => void;
   onModuleFiltersChange?: (filters: ModuleFilterFlags) => void;
+  onFocusView?: () => void;
 }
 
 const LAYOUT_ICONS: Record<LayoutFamily, IconNode> = {
@@ -303,6 +307,25 @@ export function renderGraphNav(
     callbacks.onModuleFiltersChange?.(next);
   });
 
+  const focusTool = document.createElement("div");
+  focusTool.className = "graph-nav-tool";
+  const focusLabel = document.createElement("span");
+  focusLabel.className = "graph-nav-tool-label";
+  focusLabel.textContent = "View";
+  const focusList = document.createElement("div");
+  focusList.className = "graph-nav-icon-list";
+  focusList.setAttribute("aria-label", "Graph view actions");
+  const focusBtn = document.createElement("button");
+  focusBtn.type = "button";
+  focusBtn.className = "graph-nav-icon-btn";
+  focusBtn.setAttribute("aria-label", "Focus");
+  focusBtn.title = "Focus — relayout visible modules and fit view";
+  focusBtn.disabled = options.focusEnabled === false;
+  focusBtn.appendChild(lucideIcon(Crosshair, TOOL_ICON));
+  focusBtn.addEventListener("click", () => callbacks.onFocusView?.());
+  focusList.appendChild(focusBtn);
+  focusTool.append(focusLabel, focusList);
+
   const crumbs = document.createElement("nav");
   crumbs.className = "graph-nav-crumbs";
   crumbs.setAttribute("aria-label", "Graph location");
@@ -341,7 +364,15 @@ export function renderGraphNav(
   const hint = document.createElement("span");
   hint.className = "graph-nav-hint";
   hint.textContent = "click · details  ·  double-click · drill / open source";
-  bar.append(controls, layoutControls, edgeStyleControl, filterDropdown, crumbs, hint);
+  bar.append(
+    controls,
+    layoutControls,
+    edgeStyleControl,
+    filterDropdown,
+    focusTool,
+    crumbs,
+    hint,
+  );
   container.appendChild(bar);
 
   if (options.staleImports) {

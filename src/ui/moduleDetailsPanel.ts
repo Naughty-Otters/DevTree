@@ -6,9 +6,8 @@ import {
   type QualityReport,
 } from "../analysis/codeQualityMetrics";
 import {
-  buildArchitectureHealth,
   ratingBand,
-  ratingForPath,
+  ratingForQualityPath,
 } from "../analysis/architectureHealth";
 import {
   formatMetricHint,
@@ -32,6 +31,7 @@ import {
 import type { GraphEdge, GraphNode } from "../graph/types";
 import { lucideIcon } from "./icons";
 import { relatedModules } from "./graphPopup";
+import { appendPagedItems } from "./pagedList";
 import { X } from "lucide";
 
 export interface ModuleDetailsHandlers {
@@ -315,42 +315,52 @@ export function createModuleDetailsPanel(
     emptyText: string,
     onItem: (id: string) => void,
   ): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "module-details-list-wrap";
+
     const list = document.createElement("ul");
     list.className = "module-details-list";
+    wrap.appendChild(list);
 
     if (items.length === 0) {
       const empty = document.createElement("li");
       empty.className = "module-details-empty";
       empty.textContent = emptyText;
       list.appendChild(empty);
-      return list;
+      return wrap;
     }
 
-    for (const item of items) {
-      const li = document.createElement("li");
-      li.className = "module-details-item";
-      li.title = item.path;
+    appendPagedItems(
+      list,
+      items,
+      (item) => {
+        const li = document.createElement("li");
+        li.className = "module-details-item";
+        li.title = item.path;
 
-      const dot = document.createElement("span");
-      dot.className = "module-details-dot";
-      dot.style.background = nodeColor(item.id);
+        const dot = document.createElement("span");
+        dot.className = "module-details-dot";
+        dot.style.background = nodeColor(item.id);
 
-      const kind = createNodeKindShape(item.kind || "symbol", 16);
+        const kind = createNodeKindShape(item.kind || "symbol", 16);
 
-      const name = document.createElement("span");
-      name.className = "module-details-item-name";
-      name.textContent = item.label;
+        const name = document.createElement("span");
+        name.className = "module-details-item-name";
+        name.textContent = item.label;
 
-      const meta = document.createElement("span");
-      meta.className = "module-details-item-meta";
-      meta.textContent = nodeKindLabel(item.kind || "symbol");
+        const meta = document.createElement("span");
+        meta.className = "module-details-item-meta";
+        meta.textContent = nodeKindLabel(item.kind || "symbol");
 
-      li.append(dot, kind, name, meta);
-      li.addEventListener("click", () => onItem(item.id));
-      list.appendChild(li);
-    }
+        li.append(dot, kind, name, meta);
+        li.addEventListener("click", () => onItem(item.id));
+        return li;
+      },
+      60,
+      wrap,
+    );
 
-    return list;
+    return wrap;
   }
 
   function qualityReportFor(data: ModuleDetailsData): QualityReport | null {
@@ -450,11 +460,11 @@ export function createModuleDetailsPanel(
       appendMetaRow(meta, "Lines", formatInt(node.loc));
     }
 
-    const arch = buildArchitectureHealth(data.analysis?.quality, {
-      modularityScore: data.analysis?.dsm?.metrics.healthScore ?? null,
-      percentileView: currentPercentileView(),
-    });
-    const rating = ratingForPath(arch, node.path);
+    const rating = ratingForQualityPath(
+      data.analysis?.quality,
+      node.path,
+      currentPercentileView(),
+    );
     if (rating != null) {
       const band = ratingBand(rating);
       appendMetaRow(meta, "Rating", "", {

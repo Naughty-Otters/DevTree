@@ -30,6 +30,7 @@ import {
   getLlmProviders,
   openProjectDialog,
   scanProject,
+  listProjectChildren,
   readProjectFile,
   writeProjectFile,
   listLspServers as fetchLspServers,
@@ -129,7 +130,10 @@ import { applyPanelSizes, readPanelSizes } from "./state/panels";
 import { runWhenIdle, runWhenIdleAsync } from "./lazy/defer";
 import { loadAnalysisRules } from "./lazy/rules";
 import { clearHierarchyLoadCache, loadAnalysisHierarchy } from "./lazy/hierarchy";
-import { clearQualityLoadCache, loadAnalysisQuality } from "./lazy/quality";
+import {
+  clearQualityLoadCache,
+  loadAnalysisQualityWithFiles,
+} from "./lazy/quality";
 
 interface AppState {
   projectPath: string | null;
@@ -167,7 +171,6 @@ export async function startApp(): Promise<void> {
   const btnOpen = document.querySelector<HTMLButtonElement>("#btn-open-project")!;
   const btnRun = document.querySelector<HTMLButtonElement>("#btn-run-analysis")!;
   const btnStop = document.querySelector<HTMLButtonElement>("#btn-stop-analysis")!;
-  const btnFocus = document.querySelector<HTMLButtonElement>("#btn-focus-view")!;
   const btnSaveFile = document.querySelector<HTMLButtonElement>("#btn-save-file")!;
   const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings")!;
   const btnSetupWizard = document.querySelector<HTMLButtonElement>("#btn-setup-wizard");
@@ -441,39 +444,53 @@ export async function startApp(): Promise<void> {
     },
   });
 
+  /** Camera / visibility to apply on the first graph hydrate after session restore. */
+  let pendingGraphRestore: {
+    visibleIds?: string[];
+    camera?: PersistedAppState["camera"];
+    selectedId?: string | null;
+  } | null = null;
+  let hierarchyLoadGeneration = 0;
+
   async function applyAnalysisResult(result: AnalysisResult): Promise<void> {
     clearHierarchyLoadCache();
     clearQualityLoadCache();
-    if (!result.dsm && result.hierarchy) {
-      result = { ...result, dsm: computeDsm(result.hierarchy) };
-    }
-    if (result.hierarchy && app.designRules.length > 0) {
-      const violations = checkDesignRules(result.hierarchy, app.designRules);
-      if (result.dsm) {
-        result = {
-          ...result,
-          dsm: { ...result.dsm, violations },
-        };
-      }
-      const item = designRulesValidationItem(violations);
-      const without = result.validation.filter(
-        (v) => v.rule_id !== "architecture_conformance",
-      );
-      result = { ...result, validation: [...without, item] };
-    }
+    hierarchyLoadGeneration += 1;
+    app.renderState = null;
+    pendingGraphRestore = null;
+
+    // Slim IPC already has: summary, validation, package graph, package quality, dsm.
+    // Do NOT load hierarchy-lite / quality.files here — that freezes large projects.
     app.analysisResult = result;
-    app.hierarchy = result.hierarchy;
+    app.hierarchy = null;
     app.graphNavigation = rootNavigation();
     resultsPanel.setResult(result);
     resultsPanel.showTab("analysis");
     persist();
     persistAnalysis();
-    refreshDsmView();
-    // Prefetch repo-wide git churn off the click path.
-    void ensureProjectChurnLoaded();
+
+    app.centerView = "graph";
+    fileViewerEl.classList.add("hidden");
+    dsmViewEl.classList.add("hidden");
+    canvas.classList.remove("hidden");
+    setActiveViewTab("graph");
+
+    try {
+      if (result.graph?.nodes?.length) {
+        showOverlay("Computing layout…");
+        await loadGraph(result.graph);
+      } else {
+        showOverlay("Analysis complete — open a package to load details");
+      }
+    } catch (err) {
+      console.error("Failed to layout package graph", err);
+      showOverlay("Analysis complete — package graph layout failed");
+    }
+
+    // DSM refresh uses package-level data already on the result.
     runWhenIdle(() => {
-      void navigateGraph();
-    }, 1500);
+      refreshDsmView();
+    }, 300);
   }
 
   const fileViewer = createLazyFileViewer(
@@ -500,20 +517,46 @@ export async function startApp(): Promise<void> {
     }
 
     if (app.hierarchyLoading) {
-      return app.hierarchy;
+      // Wait briefly for the in-flight load instead of returning empty.
+      for (let i = 0; i < 200 && app.hierarchyLoading; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        if (hierarchyIsHydrated(app.hierarchy)) return app.hierarchy;
+        if (hierarchyIsHydrated(app.analysisResult?.hierarchy)) {
+          app.hierarchy = app.analysisResult!.hierarchy;
+          return app.hierarchy;
+        }
+      }
+      return hierarchyIsHydrated(app.hierarchy) ? app.hierarchy : null;
     }
 
+    const generation = ++hierarchyLoadGeneration;
     app.hierarchyLoading = true;
     showOverlay("Loading dependency graph…");
     try {
-      const hierarchy = await loadAnalysisHierarchy(app.analysisResult);
+      const hierarchy = await loadAnalysisHierarchy(
+        app.analysisResult,
+        app.projectPath,
+      );
+
+      // A fresher analysis may have landed while we were loading from disk.
+      if (hierarchyIsHydrated(app.hierarchy)) {
+        return app.hierarchy;
+      }
+      if (hierarchyIsHydrated(app.analysisResult?.hierarchy)) {
+        app.hierarchy = app.analysisResult!.hierarchy;
+        return app.hierarchy;
+      }
+      if (generation !== hierarchyLoadGeneration) {
+        return hierarchyIsHydrated(app.hierarchy) ? app.hierarchy : null;
+      }
+
       if (hierarchy && hierarchyIsHydrated(hierarchy)) {
         app.hierarchy = hierarchy;
-        app.analysisResult = { ...app.analysisResult, hierarchy };
+        app.analysisResult = { ...app.analysisResult!, hierarchy };
         return hierarchy;
       }
 
-      if (app.analysisResult.graph?.nodes?.length) {
+      if (app.analysisResult?.graph?.nodes?.length) {
         const rebuilt = hierarchyFromGraph(app.analysisResult.graph);
         app.hierarchy = rebuilt;
         app.analysisResult = { ...app.analysisResult, hierarchy: rebuilt };
@@ -523,8 +566,10 @@ export async function startApp(): Promise<void> {
       return null;
     } finally {
       app.hierarchyLoading = false;
-      if (app.hierarchy) {
-        hideOverlay();
+      if (hierarchyIsHydrated(app.hierarchy)) {
+        // loadGraph / caller will hide overlay after layout.
+      } else if (!app.renderState) {
+        showOverlay("Dependency graph unavailable — re-run analysis");
       }
     }
   }
@@ -573,7 +618,7 @@ export async function startApp(): Promise<void> {
   }
 
   function persistAnalysis(): void {
-    scheduleSaveAnalysis(app.analysisResult);
+    scheduleSaveAnalysis(app.analysisResult, app.projectPath);
   }
 
   function setActiveViewTab(view: "graph" | "dsm" | "file"): void {
@@ -676,11 +721,15 @@ export async function startApp(): Promise<void> {
     dsmViewEl.classList.add("hidden");
     canvas.classList.remove("hidden");
     setActiveViewTab("graph");
-    void ensureAnalysisHierarchy().then((hierarchy) => {
-      if (!hierarchy) return;
-      const graph = graphForNavigation(hierarchy, app.graphNavigation);
-      refreshGraphNav(graph);
-    });
+    if (app.analysisResult && !app.renderState) {
+      const opts = pendingGraphRestore;
+      pendingGraphRestore = null;
+      void navigateGraph(opts ?? undefined);
+      return;
+    }
+    if (app.analysisResult?.graph) {
+      refreshGraphNav(app.analysisResult.graph);
+    }
   }
 
   function showDsmView() {
@@ -689,13 +738,24 @@ export async function startApp(): Promise<void> {
     canvas.classList.add("hidden");
     dsmViewEl.classList.remove("hidden");
     setActiveViewTab("dsm");
-    void ensureAnalysisHierarchy().then((hierarchy) => {
-      if (hierarchy) {
-        app.hierarchy = hierarchy;
+    // Package DSM is already on the slim result — no hierarchy load required.
+    void (async () => {
+      if (app.analysisResult?.dsm) {
+        refreshDsmView();
+        refreshGraphNav(app.analysisResult.graph);
+        return;
+      }
+      const hierarchy = await ensureAnalysisHierarchy();
+      if (!hierarchy) return;
+      app.hierarchy = hierarchy;
+      if (app.analysisResult && !app.analysisResult.dsm) {
+        const dsm = computeDsm(hierarchy);
+        app.analysisResult = { ...app.analysisResult, dsm };
+        resultsPanel.setResult(app.analysisResult);
       }
       refreshDsmView();
       refreshGraphNav();
-    });
+    })();
   }
 
   function showFileView() {
@@ -946,21 +1006,55 @@ export async function startApp(): Promise<void> {
     void applyVisibilityThenReorganize(app.modulesListState.visibleIds);
   }
 
+  let activeModuleRow: HTMLElement | null = null;
+  let highlightDrawScheduled = false;
+
+  function setModuleRowActive(nodeId: string | null): void {
+    if (activeModuleRow?.dataset.nodeId === nodeId) return;
+    activeModuleRow?.classList.remove("module-row-active");
+    activeModuleRow = null;
+    if (nodeId == null) return;
+    const escaped =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(nodeId)
+        : nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const next = modulesContainer.querySelector<HTMLElement>(
+      `.module-row[data-node-id="${escaped}"]`,
+    );
+    if (next) {
+      next.classList.add("module-row-active");
+      activeModuleRow = next;
+    }
+  }
+
   function setHighlight(nodeId: string | null) {
     if (!app.renderState) return;
     if (nodeId === null && (isGraphPopupOpen() || moduleDetailsPanel.isOpen())) {
       return;
     }
+    if (
+      app.renderState.highlightId === nodeId &&
+      !app.renderState.highlightCycle
+    ) {
+      setModuleRowActive(nodeId);
+      return;
+    }
     app.renderState.highlightCycle = undefined;
     app.renderState.highlightId = nodeId;
-    modulesContainer.querySelectorAll<HTMLElement>(".module-row").forEach((row) => {
-      row.classList.toggle("module-row-active", row.dataset.nodeId === nodeId);
-    });
-    draw();
+    setModuleRowActive(nodeId);
+    // Coalesce paints — hovering many module rows used to redraw the full graph each time.
+    if (!highlightDrawScheduled) {
+      highlightDrawScheduled = true;
+      requestAnimationFrame(() => {
+        highlightDrawScheduled = false;
+        draw();
+      });
+    }
   }
 
   function refreshGraphNav(graph?: Graph) {
-    if (!app.hierarchy) {
+    const g = graph ?? app.analysisResult?.graph ?? null;
+    if (!app.hierarchy && !g) {
       graphNavContainer.innerHTML = "";
       return;
     }
@@ -1012,15 +1106,26 @@ export async function startApp(): Promise<void> {
             persist();
           }
         },
+        onFocusView: () => {
+          void reorganizeVisibleLayout();
+        },
       },
       {
-        stats: graph
-          ? { nodes: graph.nodes.length, edges: graph.edges.length }
-          : undefined,
-        staleImports: hasStaleImportIndex(app.hierarchy),
+        stats: g
+          ? { nodes: g.nodes.length, edges: g.edges.length }
+          : app.renderState
+            ? {
+                nodes: app.renderState.nodes.length,
+                edges: app.renderState.edges.length,
+              }
+            : undefined,
+        staleImports: app.hierarchy
+          ? hasStaleImportIndex(app.hierarchy)
+          : false,
         layoutMode,
         edgeStyle,
         moduleFilters,
+        focusEnabled: Boolean(app.renderState),
       },
     );
   }
@@ -1031,10 +1136,33 @@ export async function startApp(): Promise<void> {
     selectedId?: string | null;
     skipAutoAdvance?: boolean;
   }) {
+    const crumb =
+      app.graphNavigation.crumbs[app.graphNavigation.crumbs.length - 1];
+    const atPackageRoot = !crumb || crumb.level === "packages";
+
+    // First level: use the slim package graph from analysis — no hierarchy load.
+    if (
+      atPackageRoot &&
+      app.analysisResult?.graph?.nodes?.length &&
+      !hierarchyIsHydrated(app.hierarchy)
+    ) {
+      hideModuleOverlays();
+      await loadGraph(app.analysisResult.graph, opts);
+      if (app.centerView === "dsm") {
+        refreshDsmView();
+      }
+      return;
+    }
+
+    // Drill / DSM file level: load hierarchy-lite (~files+imports, no symbols).
     const hierarchy = await ensureAnalysisHierarchy();
     if (!hierarchy) {
       if (!app.analysisResult) {
         showOverlay("Run analysis to build the dependency graph");
+      } else if (app.analysisResult.graph?.nodes?.length) {
+        await loadGraph(app.analysisResult.graph, opts);
+      } else if (!app.renderState) {
+        showOverlay("Dependency graph unavailable — re-run analysis");
       }
       return;
     }
@@ -1047,14 +1175,28 @@ export async function startApp(): Promise<void> {
     }
     const graph = graphForNavigation(hierarchy, app.graphNavigation);
     await loadGraph(graph, opts);
-    refreshGraphNav(graph);
     if (app.centerView === "dsm") {
       refreshDsmView();
     }
   }
 
   function drillIntoNode(nodeId: string) {
-    if (!app.renderState || !app.hierarchy) return;
+    // Lazy-load hierarchy-lite the first time the user drills below packages.
+    if (!app.hierarchy) {
+      void (async () => {
+        const hierarchy = await ensureAnalysisHierarchy();
+        if (!hierarchy || !app.renderState) return;
+        const node = app.renderState.nodes.find((n) => n.id === nodeId);
+        if (!node || !isDrillableNode(node, app.graphNavigation)) return;
+        const next = drillTargetForNode(node, app.graphNavigation);
+        if (!next) return;
+        hideModuleOverlays();
+        app.graphNavigation = next;
+        void navigateGraph();
+      })();
+      return;
+    }
+    if (!app.renderState) return;
     const node = app.renderState.nodes.find((n) => n.id === nodeId);
     if (!node || !isDrillableNode(node, app.graphNavigation)) return;
     const next = drillTargetForNode(node, app.graphNavigation);
@@ -1185,7 +1327,7 @@ export async function startApp(): Promise<void> {
     app.renderState.selectedId = nodeId;
     setHighlight(nodeId);
     hideGraphPopup();
-    // Metrics are precomputed on analysis; click path is O(1) lookup + DOM.
+    // Package metrics are already in memory; file metrics load lazily below.
     moduleDetailsPanel.show({
       node,
       nodes: app.renderState.nodes,
@@ -1198,6 +1340,21 @@ export async function startApp(): Promise<void> {
     persist();
     if (!projectChurnCache) {
       void ensureProjectChurnLoaded();
+    }
+    // Lazy: pull per-file quality only when opening details (not on analysis apply).
+    if (
+      app.analysisResult &&
+      Object.keys(app.analysisResult.quality?.files ?? {}).length === 0
+    ) {
+      void loadAnalysisQualityWithFiles(app.analysisResult, app.projectPath).then(
+        (quality) => {
+          if (!quality || !app.analysisResult) return;
+          app.analysisResult = { ...app.analysisResult, quality };
+          if (moduleDetailsPanel.isOpen()) {
+            moduleDetailsPanel.updateQuality({});
+          }
+        },
+      );
     }
   }
 
@@ -1214,18 +1371,23 @@ export async function startApp(): Promise<void> {
   }
 
   function refreshModulesList() {
+    activeModuleRow = null;
     renderModulesList(modulesContainer, app.modulesListState, {
       onFocus: (nodeId) => {
         if (!app.renderState) return;
+        app.renderState.selectedId = nodeId;
+        setHighlight(nodeId);
         focusCameraOnNodeAnimated(app.renderState, canvas, nodeId, draw);
-        draw();
         persist();
       },
       onVisibilityChange: (visibleIds) => {
         app.modulesListState.visibleIds = visibleIds;
         syncHiddenFromVisible();
       },
-      onHighlight: setHighlight,
+      // List hover stays local — canvas highlight only on click (avoids hangs on large graphs).
+      onHighlight: (nodeId) => {
+        setModuleRowActive(nodeId);
+      },
       onShowDetails: (nodeId) => {
         showGraphView();
         focusModuleOnGraph(nodeId);
@@ -1298,18 +1460,25 @@ export async function startApp(): Promise<void> {
     hideOverlay();
     draw();
     refreshModulesList();
-    btnFocus.disabled = false;
+    // Always rebuild the graph toolbar (layout / filter / focus) after layout.
+    refreshGraphNav(graph);
     persist();
   }
 
   function clearMainPanel(): void {
     hideModuleOverlays();
     fileViewer.close();
-    showGraphView();
+    // Switch to graph chrome without hydrating hierarchy for the outgoing project.
+    app.centerView = "graph";
+    fileViewerEl.classList.add("hidden");
+    dsmViewEl.classList.add("hidden");
+    canvas.classList.remove("hidden");
+    setActiveViewTab("graph");
     clearHierarchyLoadCache();
     clearQualityLoadCache();
     projectChurnCache = null;
     projectChurnPromise = null;
+    pendingGraphRestore = null;
 
     app.analysisResult = null;
     app.hierarchy = null;
@@ -1324,7 +1493,6 @@ export async function startApp(): Promise<void> {
     resultsPanel.setResult(null);
     refreshModulesList();
     graphNavContainer.innerHTML = "";
-    btnFocus.disabled = true;
 
     const ctx2d = canvas.getContext("2d");
     if (ctx2d) {
@@ -1348,7 +1516,6 @@ export async function startApp(): Promise<void> {
       app.projectScan = scan;
       projectChurnCache = null;
       projectChurnPromise = null;
-      void ensureProjectChurnLoaded();
 
       const displayPath = scan.root.split("/").pop() ?? scan.root;
       projectPathEl.textContent = displayPath;
@@ -1356,6 +1523,8 @@ export async function startApp(): Promise<void> {
 
       renderProjectTree(treeContainer, scan.tree, {
         onFileOpen: handleFileOpen,
+        loadChildren: (relativePath) =>
+          listProjectChildren(scan.root, relativePath),
       });
       refreshModulesList();
       btnRun.disabled = false;
@@ -1777,9 +1946,6 @@ export async function startApp(): Promise<void> {
   btnStop.addEventListener("click", () => {
     analysisManager.cancelAll();
   });
-  btnFocus.addEventListener("click", () => {
-    void reorganizeVisibleLayout();
-  });
 
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
@@ -1905,11 +2071,20 @@ export async function startApp(): Promise<void> {
       const ok = await openProjectAt(persisted.projectPath!);
       if (!ok) return;
 
+      // Only restore analysis that belongs to this project (never another folder).
+      const projectRoot = app.projectPath ?? persisted.projectPath!;
       const [meta, quality] = await Promise.all([
-        loadPersistedAnalysisMeta(),
-        loadPersistedAnalysisQuality(),
+        loadPersistedAnalysisMeta(projectRoot),
+        loadPersistedAnalysisQuality(projectRoot),
       ]);
       if (!meta) return;
+      if (
+        meta.projectRoot &&
+        meta.projectRoot.replace(/\\/g, "/").replace(/\/+$/, "") !==
+          projectRoot.replace(/\\/g, "/").replace(/\/+$/, "")
+      ) {
+        return;
+      }
 
       const emptyHierarchy: HierarchyIndex = {
         files: [],
@@ -1925,37 +2100,25 @@ export async function startApp(): Promise<void> {
         hierarchy: emptyHierarchy,
         quality: quality ?? null,
       };
-      app.graphNavigation = persisted.graphNavigation ?? rootNavigation();
+      // Restore to package root so we can paint the slim graph without hierarchy.
+      app.graphNavigation = rootNavigation();
       resultsPanel.setResult(app.analysisResult);
 
-      // Hydrate heavy hierarchy (and quality fallback) off the critical path.
-      runWhenIdle(() => {
-        void (async () => {
-          const hierarchy = await ensureAnalysisHierarchy();
-          if (!app.analysisResult) return;
-
-          if (!app.analysisResult.quality) {
-            const loaded = await loadAnalysisQuality(app.analysisResult);
-            if (loaded) {
-              app.analysisResult = { ...app.analysisResult, quality: loaded };
-            }
-          }
-
-          if (hierarchy && !app.analysisResult.dsm) {
-            const dsm = computeDsm(hierarchy);
-            app.analysisResult = { ...app.analysisResult, dsm };
-          }
-
-          resultsPanel.setResult(app.analysisResult);
-          void navigateGraph({
+      if (meta.graph?.nodes?.length) {
+        try {
+          showOverlay("Computing layout…");
+          await loadGraph(meta.graph, {
             visibleIds: persisted.visibleModuleIds,
             camera: persisted.camera,
             selectedId: persisted.selectedNodeId,
-          }).then(() => {
-            refreshDsmView();
           });
-        })();
-      }, 3000);
+        } catch (err) {
+          console.warn("Restore package graph layout failed", err);
+          showOverlay("Analysis report ready — open Graph to retry layout");
+        }
+      } else {
+        showOverlay("Analysis report ready — run analysis to build the graph");
+      }
     });
   }
 }

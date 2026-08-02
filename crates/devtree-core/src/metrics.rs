@@ -328,8 +328,8 @@ pub fn compute_halstead(source: &str) -> HalsteadMetrics {
 }
 
 /// Skip full tokenization above this size — avoids multi-minute stalls on generated/minified files.
-pub const MAX_CLASSIC_SOURCE_BYTES: usize = 256 * 1024;
-pub const MAX_CLASSIC_SOURCE_LINES: u32 = 8_000;
+pub const MAX_CLASSIC_SOURCE_BYTES: usize = 96 * 1024;
+pub const MAX_CLASSIC_SOURCE_LINES: u32 = 4_000;
 
 fn approximate_classic_from_size(loc: u32) -> SourceClassicMetrics {
     let loc_f = loc.max(1) as f64;
@@ -483,6 +483,18 @@ pub fn depth_of_inheritance(source: &str) -> f64 {
     max_depth
 }
 
+/// Prefix of `s` with at most `max_bytes`, never splitting a UTF-8 codepoint.
+fn prefix_at_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 pub fn analyze_source_classic(source: &str, loc_hint: Option<u32>) -> SourceClassicMetrics {
     let loc = loc_hint
         .map(|n| n.max(1))
@@ -494,11 +506,9 @@ pub fn analyze_source_classic(source: &str, loc_hint: Option<u32>) -> SourceClas
     }
 
     // Cap work even for "normal" files by analyzing a prefix (metrics stay representative).
-    let sample = if source.len() > 96 * 1024 {
-        &source[..96 * 1024]
-    } else {
-        source
-    };
+    // Must respect UTF-8 boundaries — CJK / emoji near the cut used to panic.
+    const SAMPLE_BYTES: usize = 48 * 1024;
+    let sample = prefix_at_char_boundary(source, SAMPLE_BYTES);
 
     let halstead = compute_halstead(sample);
     let cyclomatic = keyword_complexity(sample);
@@ -661,12 +671,12 @@ pub fn analyze_loc_breakdown(source: &str, path_hint: &str) -> LocBreakdown {
     }
 }
 
-/// Normalized code lines suitable for clone / duplication hashing.
-pub fn normalized_code_lines(source: &str, path_hint: &str) -> Vec<String> {
-    let breakdown_path = path_hint;
-    let hash_comments = line_is_hash_comment_lang(breakdown_path);
-    let mut out = Vec::new();
+/// Visit normalized code lines without retaining them (clone-detection / hashing).
+pub fn for_each_normalized_code_line(source: &str, path_hint: &str, mut visit: impl FnMut(&str)) {
+    let hash_comments = line_is_hash_comment_lang(path_hint);
     let mut in_block = false;
+    // Reuse one buffer so clone detection doesn't allocate a Vec per line.
+    let mut norm = String::with_capacity(128);
     for line in source.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -691,10 +701,15 @@ pub fn normalized_code_lines(source: &str, path_hint: &str) -> Vec<String> {
             continue;
         }
         // Skip tiny / import-noise lines for clone detection.
-        let norm = trimmed
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        norm.clear();
+        let mut first = true;
+        for part in trimmed.split_whitespace() {
+            if !first {
+                norm.push(' ');
+            }
+            first = false;
+            norm.push_str(part);
+        }
         if norm.len() < 24 {
             continue;
         }
@@ -707,9 +722,24 @@ pub fn normalized_code_lines(source: &str, path_hint: &str) -> Vec<String> {
         {
             continue;
         }
-        out.push(norm);
+        visit(&norm);
     }
+}
+
+/// Normalized code lines suitable for clone / duplication hashing.
+pub fn normalized_code_lines(source: &str, path_hint: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for_each_normalized_code_line(source, path_hint, |norm| out.push(norm.to_string()));
     out
+}
+
+/// Stable fingerprint for a normalized code line (8 bytes vs full string in maps).
+pub fn line_fingerprint(normalized: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    normalized.hash(&mut hasher);
+    hasher.finish()
 }
 
 pub fn is_test_path(path: &str) -> bool {
@@ -724,7 +754,7 @@ pub fn is_test_path(path: &str) -> bool {
         || path.contains("/tests/")
 }
 
-pub fn has_companion_test(path: &str, all_paths: &HashSet<String>) -> bool {
+pub fn has_companion_test(path: &str, all_paths: &HashSet<&str>) -> bool {
     if is_test_path(path) {
         return true;
     }
@@ -742,7 +772,7 @@ pub fn has_companion_test(path: &str, all_paths: &HashSet<String>) -> bool {
         format!("tests/{stem}.rs"),
         format!("{parent}/__tests__/{stem}.ts"),
     ];
-    candidates.iter().any(|c| all_paths.contains(c))
+    candidates.iter().any(|c| all_paths.contains(c.as_str()))
 }
 
 #[cfg(test)]
@@ -785,6 +815,19 @@ mod tests {
         let start = std::time::Instant::now();
         let _ = compute_halstead(&src);
         assert!(start.elapsed().as_millis() < 500, "halstead too slow for ~100KB");
+    }
+
+    #[test]
+    fn classic_sample_respects_utf8_char_boundary() {
+        // Place a 3-byte CJK char across the old hard cut at 48 KiB.
+        let mut src = "a".repeat(48 * 1024 - 1);
+        src.push('账');
+        src.push_str(&"b".repeat(1024));
+        let m = analyze_source_classic(&src, Some(100));
+        assert!(m.cyclomatic_complexity >= 1.0);
+        assert!(prefix_at_char_boundary(&src, 48 * 1024).is_char_boundary(
+            prefix_at_char_boundary(&src, 48 * 1024).len()
+        ));
     }
 
     #[test]

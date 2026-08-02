@@ -3,6 +3,7 @@ import {
   buildArchitectureHealth,
   ratingBand,
   ratingForPath,
+  ratingForQualityPath,
 } from "./architectureHealth";
 import type {
   FileQualityMetrics,
@@ -111,6 +112,10 @@ describe("buildArchitectureHealth", () => {
     expect(a.rating).toBeGreaterThan(b.rating);
     expect(a.rating - b.rating).toBeGreaterThanOrEqual(5);
     expect(ratingForPath(report, "a")).toBe(a.rating);
+    expect(ratingForQualityPath(quality, "a")).toBe(a.rating);
+    expect(ratingForQualityPath(quality, "a/x.ts")).toBe(
+      report!.files.find((f) => f.path === "a/x.ts")!.rating,
+    );
     expect(ratingBand(a.rating)).toMatch(/healthy|fair|poor/);
   });
 

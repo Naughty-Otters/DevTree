@@ -337,6 +337,7 @@ describe("resultsPanel", () => {
     expect(container.textContent).toContain("Architecture health");
     expect(container.querySelector(".percentile-view-switch")).toBeTruthy();
     expect(container.textContent).toContain("Package ratings");
+    expect(container.querySelector(".arch-ratings-subtabs")).toBeTruthy();
 
     const p50Btn = [...container.querySelectorAll(".percentile-view-btn")].find(
       (b) => b.textContent === "p50",
@@ -345,12 +346,25 @@ describe("resultsPanel", () => {
     expect(view).toBe("p50");
     expect(container.textContent).toMatch(/Architecture · p50/);
 
-    const packageRow = container.querySelector(
-      ".arch-health-module-row",
+    const packageCard = container.querySelector(
+      ".arch-rating-card",
     ) as HTMLButtonElement;
-    expect(packageRow).toBeTruthy();
-    packageRow.click();
+    expect(packageCard).toBeTruthy();
+    packageCard.click();
     expect(onShowModuleOnGraph).toHaveBeenCalled();
+
+    const fileTab = [...container.querySelectorAll(".arch-ratings-subtab")].find(
+      (b) => b.textContent?.includes("File ratings"),
+    ) as HTMLButtonElement;
+    fileTab.click();
+    expect(container.querySelector(".paged-grid-pager")).toBeTruthy();
+
+    const worseFirst = [...container.querySelectorAll(".arch-ratings-sort-btn")].find(
+      (b) => b.textContent === "Worse → good",
+    ) as HTMLButtonElement;
+    expect(worseFirst).toBeTruthy();
+    worseFirst.click();
+    expect(worseFirst.classList.contains("active")).toBe(true);
   });
 
   it("shows quality unavailable guidance without quality index", () => {

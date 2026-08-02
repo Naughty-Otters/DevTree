@@ -115,4 +115,32 @@ describe("ui/graphNav", () => {
     hub!.dispatchEvent(new Event("change"));
     expect(filters.hub).toBe(false);
   });
+
+  it("renders Focus in the graph view button list", () => {
+    const container = document.createElement("div");
+    let focused = false;
+    renderGraphNav(
+      container,
+      rootNavigation(),
+      false,
+      false,
+      {
+        onBack: () => {},
+        onForward: () => {},
+        onNavigate: () => {},
+        onFocusView: () => {
+          focused = true;
+        },
+      },
+      { focusEnabled: true },
+    );
+
+    const focusBtn = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Graph view actions"] [aria-label="Focus"]',
+    );
+    expect(focusBtn).toBeTruthy();
+    expect(focusBtn!.disabled).toBe(false);
+    focusBtn!.click();
+    expect(focused).toBe(true);
+  });
 });

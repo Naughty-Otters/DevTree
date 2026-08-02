@@ -3,9 +3,9 @@
 use crate::analysis::ValidationItem;
 use crate::hierarchy::{HierarchyIndex, SymbolInfo};
 use devtree_core::metrics::{
-    analyze_loc_breakdown, analyze_source_classic, density_per_kloc, has_companion_test,
-    normalized_code_lines, rollup, structural_complexity, FileQualityMetrics,
-    PackageQualityMetrics, QualityIndex,
+    analyze_loc_breakdown, analyze_source_classic, density_per_kloc,
+    for_each_normalized_code_line, has_companion_test, line_fingerprint, rollup,
+    structural_complexity, FileQualityMetrics, PackageQualityMetrics, QualityIndex,
 };
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -101,92 +101,87 @@ fn build_issue_index(validation: &[ValidationItem]) -> HashMap<String, IssueBuck
     map
 }
 
-fn symbol_file_map(symbols: &HashMap<String, Vec<SymbolInfo>>) -> HashMap<String, String> {
+/// Borrowed symbol→file map (no string clones of the full symbol table).
+fn symbol_file_map(symbols: &HashMap<String, Vec<SymbolInfo>>) -> HashMap<&str, &str> {
     let mut map = HashMap::new();
     for (file, list) in symbols {
         for s in list {
-            map.insert(
-                s.id.clone(),
-                if s.file.is_empty() {
-                    file.clone()
-                } else {
-                    s.file.clone()
-                },
-            );
+            let path = if s.file.is_empty() {
+                file.as_str()
+            } else {
+                s.file.as_str()
+            };
+            map.insert(s.id.as_str(), path);
         }
     }
     map
 }
 
-/// Precompute internal-call counts and CBO in one edge pass (avoids O(files×edges)).
-fn precompute_edge_stats(
-    hierarchy: &HierarchyIndex,
-    symbol_file: &HashMap<String, String>,
-) -> (HashMap<String, u32>, HashMap<String, HashSet<String>>) {
-    let mut internal_calls: HashMap<String, u32> = HashMap::new();
-    let mut coupled: HashMap<String, HashSet<String>> = HashMap::new();
+/// Internal-call counts + CBO unique-neighbor counts (borrowed keys, no path clones).
+fn precompute_edge_stats<'a>(
+    hierarchy: &'a HierarchyIndex,
+    symbol_file: &HashMap<&str, &'a str>,
+) -> (HashMap<&'a str, u32>, HashMap<&'a str, u32>) {
+    let mut internal_calls: HashMap<&str, u32> = HashMap::new();
+    // path → unique neighbors (as interned indices into a small side table)
+    let mut neighbor_sets: HashMap<&str, HashSet<&str>> = HashMap::new();
 
     for (path, imports) in &hierarchy.file_imports {
-        let entry = coupled.entry(path.clone()).or_default();
+        let entry = neighbor_sets.entry(path.as_str()).or_default();
         for t in imports {
             if t != path {
-                entry.insert(t.clone());
+                entry.insert(t.as_str());
             }
         }
     }
 
     for edge in &hierarchy.symbol_edges {
-        let Some(sf) = symbol_file.get(&edge.source) else {
+        let Some(&sf) = symbol_file.get(edge.source.as_str()) else {
             continue;
         };
-        let Some(tf) = symbol_file.get(&edge.target) else {
+        let Some(&tf) = symbol_file.get(edge.target.as_str()) else {
             continue;
         };
         if sf == tf {
-            *internal_calls.entry(sf.clone()).or_insert(0) += 1;
+            *internal_calls.entry(sf).or_insert(0) += 1;
         } else {
-            coupled.entry(sf.clone()).or_default().insert(tf.clone());
-            coupled.entry(tf.clone()).or_default().insert(sf.clone());
+            neighbor_sets.entry(sf).or_default().insert(tf);
+            neighbor_sets.entry(tf).or_default().insert(sf);
         }
     }
 
-    (internal_calls, coupled)
+    let cbo_counts: HashMap<&str, u32> = neighbor_sets
+        .into_iter()
+        .map(|(path, set)| (path, set.len() as u32))
+        .collect();
+
+    (internal_calls, cbo_counts)
 }
 
-fn files_in_package<'a>(hierarchy: &'a HierarchyIndex, package_path: &str) -> Vec<&'a str> {
-    hierarchy
-        .files
-        .iter()
-        .filter(|f| {
-            if hierarchy.packages.iter().any(|p| p == package_path) {
-                f.package == package_path
-            } else if package_path == "." {
-                f.package == "."
-            } else {
-                f.path == package_path || f.path.starts_with(&format!("{package_path}/"))
-            }
-        })
-        .map(|f| f.path.as_str())
-        .collect()
+/// One pass over symbol edges → set of referenced symbol ids.
+fn precompute_referenced_symbols(hierarchy: &HierarchyIndex) -> HashSet<&str> {
+    let mut referenced = HashSet::with_capacity(hierarchy.symbol_edges.len());
+    for edge in &hierarchy.symbol_edges {
+        referenced.insert(edge.target.as_str());
+    }
+    referenced
 }
 
-/// % of symbols in a file with no inbound symbol-edge references.
-fn dead_code_pct(
-    hierarchy: &HierarchyIndex,
-    path: &str,
-    symbol_file: &HashMap<String, String>,
-) -> f64 {
-    let Some(symbols) = hierarchy.symbols.get(path) else {
-        return 0.0;
-    };
+/// O(files) package → member paths (avoids O(packages²×files) rollups that freeze the UI).
+fn index_files_by_package(hierarchy: &HierarchyIndex) -> HashMap<&str, Vec<&str>> {
+    let mut map: HashMap<&str, Vec<&str>> = HashMap::with_capacity(hierarchy.packages.len());
+    for f in &hierarchy.files {
+        map.entry(f.package.as_str())
+            .or_default()
+            .push(f.path.as_str());
+    }
+    map
+}
+
+/// % of symbols in a file with no inbound references (uses precomputed set).
+fn dead_code_pct(symbols: &[SymbolInfo], referenced: &HashSet<&str>) -> f64 {
     if symbols.is_empty() {
         return 0.0;
-    }
-    let mut referenced = HashSet::new();
-    for edge in &hierarchy.symbol_edges {
-        if symbol_file.get(&edge.target).map(|p| p.as_str()) == Some(path) {
-            referenced.insert(edge.target.as_str());
-        }
     }
     let dead = symbols
         .iter()
@@ -195,214 +190,236 @@ fn dead_code_pct(
     (dead as f64 / symbols.len() as f64) * 100.0
 }
 
-/// Project-wide clone fingerprint: normalized code line → occurrence count.
-fn build_duplication_index(
-    contents: &HashMap<String, String>,
-) -> (HashMap<String, u32>, HashMap<String, Vec<String>>) {
-    let mut global: HashMap<String, u32> = HashMap::new();
-    let mut per_file: HashMap<String, Vec<String>> = HashMap::new();
-    for (path, source) in contents {
-        let lines = normalized_code_lines(source, path);
-        for line in &lines {
-            *global.entry(line.clone()).or_insert(0) += 1;
-        }
-        per_file.insert(path.clone(), lines);
-    }
-    (global, per_file)
+fn collect_line_fingerprints(source: &str, path: &str) -> Vec<u64> {
+    let mut fps = Vec::new();
+    for_each_normalized_code_line(source, path, |norm| {
+        fps.push(line_fingerprint(norm));
+    });
+    fps
 }
 
-fn duplicated_pct_for_file(
-    path: &str,
-    nloc: u32,
-    global: &HashMap<String, u32>,
-    per_file: &HashMap<String, Vec<String>>,
-) -> f64 {
-    let Some(lines) = per_file.get(path) else {
-        return 0.0;
-    };
-    if lines.is_empty() || nloc == 0 {
+fn duplicated_pct_from_fps(fps: &[u64], nloc: u32, global: &HashMap<u64, u32>) -> f64 {
+    if nloc == 0 || fps.is_empty() {
         return 0.0;
     }
-    let dup = lines
+    let dup = fps
         .iter()
-        .filter(|l| global.get(*l).copied().unwrap_or(0) >= 2)
+        .filter(|fp| global.get(*fp).copied().unwrap_or(0) >= 2)
         .count();
     ((dup as f64 / nloc as f64) * 100.0).min(100.0)
 }
 
+fn quality_thread_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(1).clamp(1, 6))
+        .unwrap_or(4)
+}
+
+fn emit_progress(progress: &Mutex<impl FnMut(u32, u32)>, current: u32, total: u32) {
+    // try_lock: never block workers behind a slow IPC/UI callback.
+    if let Ok(mut cb) = progress.try_lock() {
+        cb(current, total);
+    }
+}
+
 /// Precompute per-file and per-package quality metrics.
-/// Per-file classic metrics run on a Rayon thread pool; package rollups stay cheap/serial.
 /// `on_progress(current, total)` is called while processing files (1-based current).
+/// Returns `Err` when `cancel` is set so the UI Cancel button stays responsive.
 pub fn build_quality_index<F>(
     hierarchy: &HierarchyIndex,
     contents: &HashMap<String, String>,
     validation: &[ValidationItem],
-    on_progress: F,
-) -> QualityIndex
+    cancel: &std::sync::atomic::AtomicBool,
+    mut on_progress: F,
+) -> Result<QualityIndex, String>
 where
     F: FnMut(u32, u32) + Send,
 {
-    let issues = build_issue_index(validation);
-    let all_paths: HashSet<String> = hierarchy.files.iter().map(|f| f.path.clone()).collect();
-    let symbol_file = symbol_file_map(&hierarchy.symbols);
-    let (internal_calls, coupled) = precompute_edge_stats(hierarchy, &symbol_file);
-    let (dup_global, dup_per_file) = build_duplication_index(contents);
-
     let total = hierarchy.files.len() as u32;
+    on_progress(0, total);
+    if crate::analysis_session::is_cancelled(cancel) {
+        return Err("Analysis cancelled".into());
+    }
+
+    let issues = build_issue_index(validation);
+    let all_paths: HashSet<&str> = hierarchy.files.iter().map(|f| f.path.as_str()).collect();
+    let symbol_file = symbol_file_map(&hierarchy.symbols);
+    let (internal_calls, cbo_counts) = precompute_edge_stats(hierarchy, &symbol_file);
+    let referenced_symbols = precompute_referenced_symbols(hierarchy);
+    let by_package = index_files_by_package(hierarchy);
+
+    if crate::analysis_session::is_cancelled(cancel) {
+        return Err("Analysis cancelled".into());
+    }
+
     let progress = Mutex::new(on_progress);
-    {
-        let mut cb = progress.lock().unwrap();
-        if total == 0 {
-            cb(0, 0);
-        } else {
-            cb(0, total);
+    let done = AtomicU32::new(0);
+    let cancelled = AtomicU32::new(0);
+
+    // Leave a core for the webview; cap concurrency so quality can't pin every CPU.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(quality_thread_count())
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // One parallel pass: classic metrics + line fingerprints (no silent full-repo pre-scan).
+    let file_work: Vec<(FileQualityMetrics, Vec<u64>)> = pool.install(|| {
+        hierarchy
+            .files
+            .par_iter()
+            .filter_map(|file| {
+                if crate::analysis_session::is_cancelled(cancel) {
+                    cancelled.store(1, Ordering::Relaxed);
+                    return None;
+                }
+                let path = file.path.as_str();
+                let loc = file.loc;
+                let source = contents.get(path).map(|s| s.as_str()).unwrap_or("");
+                let loc_info = analyze_loc_breakdown(source, path);
+                let classic = analyze_source_classic(source, Some(loc.max(loc_info.loc)));
+                let symbols = hierarchy.symbols.get(path);
+                let symbol_count = symbols.map(|s| s.len() as u32).unwrap_or(0);
+                let imports = hierarchy
+                    .file_imports
+                    .get(path)
+                    .map(|i| i.len() as u32)
+                    .unwrap_or(0);
+                let structural = structural_complexity(
+                    symbol_count,
+                    *internal_calls.get(path).unwrap_or(&0),
+                    imports,
+                );
+                let bucket = issues.get(path);
+                let total_issues = bucket.map(|b| b.total).unwrap_or(0.0);
+                let security = bucket.map(|b| b.security).unwrap_or(0.0);
+                let ai = bucket.map(|b| b.ai).unwrap_or(0.0);
+                let duplication = bucket.map(|b| b.duplication).unwrap_or(0.0);
+                let doc_hits = bucket.map(|b| b.documentation).unwrap_or(0.0);
+                let documentation_score = if doc_hits > 0.0 {
+                    Some((100.0 - doc_hits * 25.0).max(0.0))
+                } else {
+                    None
+                };
+                let cbo = cbo_counts.get(path).copied().unwrap_or(0) as f64;
+                let nloc = if loc_info.nloc > 0 { loc_info.nloc } else { loc };
+                let fps = collect_line_fingerprints(source, path);
+                let dead_pct =
+                    dead_code_pct(symbols.map(|s| s.as_slice()).unwrap_or(&[]), &referenced_symbols);
+
+                let metrics = FileQualityMetrics {
+                    path: file.path.clone(),
+                    package: file.package.clone(),
+                    loc: loc.max(loc_info.loc),
+                    nloc,
+                    cloc: loc_info.cloc,
+                    code_density: loc_info.code_density,
+                    comment_density: loc_info.comment_density,
+                    cyclomatic: classic.cyclomatic_complexity,
+                    structural,
+                    halstead_volume: classic.halstead.volume,
+                    halstead_difficulty: classic.halstead.difficulty,
+                    cognitive: classic.cognitive_complexity,
+                    maintainability: classic.maintainability_index,
+                    dit: classic.depth_of_inheritance,
+                    cbo,
+                    coverage: if has_companion_test(path, &all_paths) {
+                        100.0
+                    } else {
+                        0.0
+                    },
+                    issue_density: density_per_kloc(total_issues, loc.max(1)),
+                    security_density: density_per_kloc(security, loc.max(1)),
+                    ai_density: density_per_kloc(ai, loc.max(1)),
+                    duplication_hits: duplication,
+                    duplicated_pct: 0.0, // filled after global fingerprint merge
+                    dead_code_pct: dead_pct,
+                    stale_decision_density: density_per_kloc(
+                        loc_info.stale_markers as f64,
+                        loc.max(1),
+                    ),
+                    documentation_score,
+                };
+
+                let current = done.fetch_add(1, Ordering::Relaxed) + 1;
+                let near_end = total.saturating_sub(current) <= 32;
+                if current == 1 || current == total || near_end || current % 32 == 0 {
+                    emit_progress(&progress, current, total);
+                }
+
+                Some((metrics, fps))
+            })
+            .collect()
+    });
+
+    if cancelled.load(Ordering::Relaxed) == 1 || crate::analysis_session::is_cancelled(cancel) {
+        return Err("Analysis cancelled".into());
+    }
+
+    let mut dup_counts: HashMap<u64, u32> = HashMap::new();
+    for (_, fps) in &file_work {
+        for fp in fps {
+            *dup_counts.entry(*fp).or_insert(0) += 1;
         }
     }
 
-    let done = AtomicU32::new(0);
-    let file_rows: Vec<FileQualityMetrics> = hierarchy
-        .files
-        .par_iter()
-        .map(|file| {
-            let path = &file.path;
-            let loc = file.loc;
-            let source = contents.get(path).map(|s| s.as_str()).unwrap_or("");
-            let loc_info = analyze_loc_breakdown(source, path);
-            // Dominates cost — parallelized across CPU cores.
-            let classic = analyze_source_classic(source, Some(loc.max(loc_info.loc)));
-            let symbol_count = hierarchy
-                .symbols
-                .get(path)
-                .map(|s| s.len() as u32)
-                .unwrap_or(0);
-            let imports = hierarchy
-                .file_imports
-                .get(path)
-                .map(|i| i.len() as u32)
-                .unwrap_or(0);
-            let structural = structural_complexity(
-                symbol_count,
-                *internal_calls.get(path).unwrap_or(&0),
-                imports,
-            );
-            let bucket = issues.get(path.as_str());
-            let total_issues = bucket.map(|b| b.total).unwrap_or(0.0);
-            let security = bucket.map(|b| b.security).unwrap_or(0.0);
-            let ai = bucket.map(|b| b.ai).unwrap_or(0.0);
-            let duplication = bucket.map(|b| b.duplication).unwrap_or(0.0);
-            let doc_hits = bucket.map(|b| b.documentation).unwrap_or(0.0);
-            let documentation_score = if doc_hits > 0.0 {
-                Some((100.0 - doc_hits * 25.0).max(0.0))
-            } else {
-                None
-            };
-            let cbo = coupled.get(path).map(|s| s.len() as f64).unwrap_or(0.0);
-            let nloc = if loc_info.nloc > 0 { loc_info.nloc } else { loc };
-            let duplicated_pct =
-                duplicated_pct_for_file(path, nloc, &dup_global, &dup_per_file);
-            let dead_pct = dead_code_pct(hierarchy, path, &symbol_file);
-
-            let metrics = FileQualityMetrics {
-                path: path.clone(),
-                package: file.package.clone(),
-                loc: loc.max(loc_info.loc),
-                nloc,
-                cloc: loc_info.cloc,
-                code_density: loc_info.code_density,
-                comment_density: loc_info.comment_density,
-                cyclomatic: classic.cyclomatic_complexity,
-                structural,
-                halstead_volume: classic.halstead.volume,
-                halstead_difficulty: classic.halstead.difficulty,
-                cognitive: classic.cognitive_complexity,
-                maintainability: classic.maintainability_index,
-                dit: classic.depth_of_inheritance,
-                cbo,
-                coverage: if has_companion_test(path, &all_paths) {
-                    100.0
-                } else {
-                    0.0
-                },
-                issue_density: density_per_kloc(total_issues, loc.max(1)),
-                security_density: density_per_kloc(security, loc.max(1)),
-                ai_density: density_per_kloc(ai, loc.max(1)),
-                duplication_hits: duplication,
-                duplicated_pct,
-                dead_code_pct: dead_pct,
-                stale_decision_density: density_per_kloc(
-                    loc_info.stale_markers as f64,
-                    loc.max(1),
-                ),
-                documentation_score,
-            };
-
-            let current = done.fetch_add(1, Ordering::Relaxed) + 1;
-            // Emit frequently near the end so a few heavy files don't look "stuck".
-            let near_end = total.saturating_sub(current) <= 32;
-            if current == 1 || current == total || near_end || current % 8 == 0 {
-                if let Ok(mut cb) = progress.lock() {
-                    cb(current, total);
-                }
-            }
-
-            metrics
-        })
-        .collect();
-
     let mut files: HashMap<String, FileQualityMetrics> =
-        HashMap::with_capacity(file_rows.len());
-    for row in file_rows {
-        files.insert(row.path.clone(), row);
+        HashMap::with_capacity(file_work.len());
+    for (mut metrics, fps) in file_work {
+        metrics.duplicated_pct = duplicated_pct_from_fps(&fps, metrics.nloc, &dup_counts);
+        files.insert(metrics.path.clone(), metrics);
     }
+    drop(dup_counts);
 
     let mut packages: HashMap<String, PackageQualityMetrics> = HashMap::new();
     let mut package_ids: Vec<String> = hierarchy.packages.clone();
     package_ids.sort();
     package_ids.dedup();
 
-    // Package rollups are cheap; parallelize when there are many packages.
-    let package_rows: Vec<PackageQualityMetrics> = package_ids
-        .par_iter()
-        .filter_map(|pkg| {
-            let member_paths = files_in_package(hierarchy, pkg);
-            if member_paths.is_empty() {
-                return None;
-            }
-            let members: Vec<&FileQualityMetrics> = member_paths
-                .iter()
-                .filter_map(|p| files.get(*p))
-                .collect();
-            if members.is_empty() {
-                return None;
-            }
+    // O(files + packages) — previously O(packages²×files) and looked like a hang.
+    for pkg in &package_ids {
+        if crate::analysis_session::is_cancelled(cancel) {
+            return Err("Analysis cancelled".into());
+        }
+        let Some(member_paths) = by_package.get(pkg.as_str()) else {
+            continue;
+        };
+        let members: Vec<&FileQualityMetrics> = member_paths
+            .iter()
+            .filter_map(|p| files.get(*p))
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
 
-            let complexity: Vec<f64> = members.iter().map(|m| m.cyclomatic).collect();
-            let halstead: Vec<f64> = members.iter().map(|m| m.halstead_volume).collect();
-            let cognitive: Vec<f64> = members.iter().map(|m| m.cognitive).collect();
-            let maintainability: Vec<f64> = members.iter().map(|m| m.maintainability).collect();
-            let cbo: Vec<f64> = members.iter().map(|m| m.cbo).collect();
-            let coverage: Vec<f64> = members.iter().map(|m| m.coverage).collect();
-            let issues_v: Vec<f64> = members.iter().map(|m| m.issue_density).collect();
-            let security: Vec<f64> = members.iter().map(|m| m.security_density).collect();
-            let ai: Vec<f64> = members.iter().map(|m| m.ai_density).collect();
-            let duplication: Vec<f64> = members.iter().map(|m| m.duplication_hits).collect();
-            let duplicated_code: Vec<f64> = members.iter().map(|m| m.duplicated_pct).collect();
-            let nloc_v: Vec<f64> = members.iter().map(|m| m.nloc as f64).collect();
-            let cloc_v: Vec<f64> = members.iter().map(|m| m.cloc as f64).collect();
-            let code_density: Vec<f64> = members.iter().map(|m| m.code_density).collect();
-            let comment_density: Vec<f64> = members.iter().map(|m| m.comment_density).collect();
-            let dead_code: Vec<f64> = members.iter().map(|m| m.dead_code_pct).collect();
-            let stale: Vec<f64> = members.iter().map(|m| m.stale_decision_density).collect();
-            let size: Vec<f64> = members.iter().map(|m| m.loc as f64).collect();
-            let docs: Vec<f64> = members
-                .iter()
-                .filter_map(|m| m.documentation_score)
-                .collect();
+        let complexity: Vec<f64> = members.iter().map(|m| m.cyclomatic).collect();
+        let halstead: Vec<f64> = members.iter().map(|m| m.halstead_volume).collect();
+        let cognitive: Vec<f64> = members.iter().map(|m| m.cognitive).collect();
+        let maintainability: Vec<f64> = members.iter().map(|m| m.maintainability).collect();
+        let cbo: Vec<f64> = members.iter().map(|m| m.cbo).collect();
+        let coverage: Vec<f64> = members.iter().map(|m| m.coverage).collect();
+        let issues_v: Vec<f64> = members.iter().map(|m| m.issue_density).collect();
+        let security: Vec<f64> = members.iter().map(|m| m.security_density).collect();
+        let ai: Vec<f64> = members.iter().map(|m| m.ai_density).collect();
+        let duplication: Vec<f64> = members.iter().map(|m| m.duplication_hits).collect();
+        let duplicated_code: Vec<f64> = members.iter().map(|m| m.duplicated_pct).collect();
+        let nloc_v: Vec<f64> = members.iter().map(|m| m.nloc as f64).collect();
+        let cloc_v: Vec<f64> = members.iter().map(|m| m.cloc as f64).collect();
+        let code_density: Vec<f64> = members.iter().map(|m| m.code_density).collect();
+        let comment_density: Vec<f64> = members.iter().map(|m| m.comment_density).collect();
+        let dead_code: Vec<f64> = members.iter().map(|m| m.dead_code_pct).collect();
+        let stale: Vec<f64> = members.iter().map(|m| m.stale_decision_density).collect();
+        let size: Vec<f64> = members.iter().map(|m| m.loc as f64).collect();
+        let docs: Vec<f64> = members
+            .iter()
+            .filter_map(|m| m.documentation_score)
+            .collect();
 
-            let total_loc: u32 = members.iter().map(|m| m.loc).sum();
-            let total_nloc: u32 = members.iter().map(|m| m.nloc).sum();
-            let total_cloc: u32 = members.iter().map(|m| m.cloc).sum();
-            Some(PackageQualityMetrics {
+        let total_loc: u32 = members.iter().map(|m| m.loc).sum();
+        let total_nloc: u32 = members.iter().map(|m| m.nloc).sum();
+        let total_cloc: u32 = members.iter().map(|m| m.cloc).sum();
+        packages.insert(
+            pkg.clone(),
+            PackageQualityMetrics {
                 path: pkg.clone(),
                 file_count: members.len() as u32,
                 total_loc,
@@ -431,21 +448,15 @@ where
                 } else {
                     Some(rollup(&docs))
                 },
-            })
-        })
-        .collect();
-
-    for pkg in package_rows {
-        packages.insert(pkg.path.clone(), pkg);
+            },
+        );
     }
 
     if total > 0 {
-        if let Ok(mut cb) = progress.lock() {
-            cb(total, total);
-        }
+        emit_progress(&progress, total, total);
     }
 
-    QualityIndex { files, packages }
+    Ok(QualityIndex { files, packages })
 }
 
 #[cfg(test)]
@@ -547,10 +558,12 @@ mod tests {
             cycle_groups: None,
         }];
 
+        let cancel = std::sync::atomic::AtomicBool::new(false);
         let mut last = (0u32, 0u32);
-        let index = build_quality_index(&hierarchy, &contents, &validation, |c, t| {
+        let index = build_quality_index(&hierarchy, &contents, &validation, &cancel, |c, t| {
             last = (c, t);
-        });
+        })
+        .expect("quality index");
 
         assert_eq!(index.files.len(), 3);
         assert!(index.packages.contains_key("src"));
@@ -589,9 +602,47 @@ mod tests {
         contents.insert("src/c.ts".into(), "export const onlyHere = 1;\n".into());
         contents.insert("src/a.test.ts".into(), "test('a', () => {});".into());
 
-        let index = build_quality_index(&hierarchy, &contents, &[], |_, _| {});
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let index = build_quality_index(&hierarchy, &contents, &[], &cancel, |_, _| {})
+            .expect("quality index");
         let a = index.files.get("src/a.ts").unwrap();
         assert!(a.duplicated_pct > 0.0, "shared line should count as duplicated");
         assert!(a.stale_decision_density > 0.0, "TODO marker should count");
+    }
+
+    #[test]
+    fn dead_code_uses_precomputed_references() {
+        let mut hierarchy = sample_hierarchy();
+        // b.ts::unused is never targeted by a symbol edge → dead.
+        hierarchy.symbols.insert(
+            "src/b.ts".into(),
+            vec![SymbolInfo {
+                id: "src/b.ts::unused".into(),
+                label: "unused".into(),
+                kind: "function".into(),
+                file: "src/b.ts".into(),
+                line: 1,
+            }],
+        );
+        let mut contents = HashMap::new();
+        contents.insert("src/a.ts".into(), "export function main() { return 1; }\n".into());
+        contents.insert("src/b.ts".into(), "export function unused() { return 2; }\n".into());
+        contents.insert("src/a.test.ts".into(), "test('a', () => {});".into());
+
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let index = build_quality_index(&hierarchy, &contents, &[], &cancel, |_, _| {})
+            .expect("quality index");
+        let b = index.files.get("src/b.ts").unwrap();
+        assert!(b.dead_code_pct >= 99.0, "unreferenced symbol should be 100% dead");
+        let a = index.files.get("src/a.ts").unwrap();
+        // a.ts::main references itself in sample_hierarchy → not dead.
+        assert!(a.dead_code_pct < 50.0);
+    }
+
+    #[test]
+    fn package_index_is_linear_in_files() {
+        let hierarchy = sample_hierarchy();
+        let by = index_files_by_package(&hierarchy);
+        assert_eq!(by.get("src").map(|v| v.len()), Some(3));
     }
 }

@@ -221,7 +221,11 @@ export function render(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const visibleNodes = state.nodes.filter((n) => isVisible(state, n.id));
-  const maxLoc = Math.max(1, ...visibleNodes.map((n) => n.loc));
+  // Avoid Math.max(...hugeArray) — spread blows the stack / hangs on large graphs.
+  let maxLoc = 1;
+  for (const n of visibleNodes) {
+    if (n.loc > maxLoc) maxLoc = n.loc;
+  }
   const locs = locById(state);
 
   const focusId = state.highlightId;

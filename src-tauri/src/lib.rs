@@ -1,5 +1,6 @@
 mod agent;
 mod analysis;
+mod analysis_cache;
 mod analysis_session;
 mod db;
 mod design_rules;
@@ -16,7 +17,8 @@ mod tray;
 
 use agent::ai_validation::{AiValidationRuntimeSettings, LlmConfigurations};
 use analysis::{
-    run_analysis_with_progress, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
+    load_cached_hierarchy_lite, load_cached_quality_files, run_analysis_with_progress,
+    slim_analysis_for_ipc, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
 };
 use agent::{cancel_agent_run, list_agent_skills, list_llm_provider_models, list_llm_providers, run_agent_skill};
 use agent::types::{AgentEvent, AgentRunRequest, AgentRunResult, AgentSkillInfo, LlmProvider, LlmProviderInfo};
@@ -27,7 +29,7 @@ use design_rules::DesignRule;
 use hierarchy::HierarchyIndex;
 use linter::{LinterInstallResult, LinterSettingsMap, LanguageLinterGroup};
 use lsp::{LspInstallResult, LspServerStatus, LspSettingsMap};
-use project::{scan_project, ProjectScan};
+use project::{list_project_children, scan_project, ProjectScan, TreeEntry};
 use schedule::AnalysisTriggerState;
 use tauri::ipc::Channel;
 
@@ -37,8 +39,20 @@ fn get_analysis_rules() -> Vec<AnalysisRule> {
 }
 
 #[tauri::command]
-fn scan_project_dir(path: String) -> Result<ProjectScan, String> {
-    scan_project(&path)
+async fn scan_project_dir(path: String) -> Result<ProjectScan, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_project(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn list_project_children_cmd(
+    path: String,
+    relative_path: String,
+) -> Result<Vec<TreeEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_project_children(&path, &relative_path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -59,7 +73,7 @@ async fn run_project_analysis(
     let progress_id = analysis_id.clone();
     let design_rules = design_rules.unwrap_or_default();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        run_analysis_with_progress(
+        let full = run_analysis_with_progress(
             &path,
             &rules,
             &rule_settings,
@@ -73,12 +87,44 @@ async fn run_project_analysis(
             move |progress| {
                 let _ = on_progress.send(progress);
             },
-        )
+        )?;
+        // Persist slim cache/files before IPC; never fail the run if disk is read-only.
+        if let Err(err) = analysis::persist_analysis_result(&path, &full) {
+            eprintln!("[devtree] persist analysis cache failed: {err}");
+        }
+        // Hierarchy/quality on disk — do not push them through Tauri IPC.
+        Ok(slim_analysis_for_ipc(full))
     })
     .await
     .map_err(|e| e.to_string())?;
     registry.unregister(&analysis_id);
+    // Reclaim space from legacy multi-hundred-MB SQLite blobs (off the UI path).
+    tauri::async_runtime::spawn_blocking(|| {
+        if let Ok(path) = db::db_path() {
+            if let Ok(meta) = std::fs::metadata(path) {
+                if meta.len() > 32 * 1024 * 1024 {
+                    let _ = db::vacuum_db();
+                }
+            }
+        }
+    });
     result
+}
+
+#[tauri::command]
+async fn load_analysis_hierarchy_lite(path: String) -> Result<HierarchyIndex, String> {
+    tauri::async_runtime::spawn_blocking(move || load_cached_hierarchy_lite(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn load_analysis_quality_files(
+    path: String,
+) -> Result<std::collections::HashMap<String, devtree_core::FileQualityMetrics>, String> {
+    tauri::async_runtime::spawn_blocking(move || load_cached_quality_files(&path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -222,7 +268,10 @@ pub fn run() {
             cancel_agent_run_command,
             get_analysis_rules,
             scan_project_dir,
+            list_project_children_cmd,
             run_project_analysis,
+            load_analysis_hierarchy_lite,
+            load_analysis_quality_files,
             cancel_project_analysis,
             read_project_file,
             write_project_file,

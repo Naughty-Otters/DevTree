@@ -1,6 +1,6 @@
 import { lucideIcon } from "./icons";
 import { attachTooltip } from "./tooltip";
-import { Crosshair, FolderOpen, ListChecks, Play, Save, Settings, Square } from "lucide";
+import { FolderOpen, ListChecks, Play, Save, Settings, Square } from "lucide";
 
 const TOOLBAR_ICON = {
   size: 13,
@@ -12,7 +12,6 @@ export function mountToolbarIcons(): void {
   const btnOpen = document.querySelector<HTMLButtonElement>("#btn-open-project");
   const btnRun = document.querySelector<HTMLButtonElement>("#btn-run-analysis");
   const btnStop = document.querySelector<HTMLButtonElement>("#btn-stop-analysis");
-  const btnFocus = document.querySelector<HTMLButtonElement>("#btn-focus-view");
   const btnSave = document.querySelector<HTMLButtonElement>("#btn-save-file");
   const btnWizard = document.querySelector<HTMLButtonElement>("#btn-setup-wizard");
   const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings");
@@ -28,10 +27,6 @@ export function mountToolbarIcons(): void {
   if (btnStop) {
     btnStop.appendChild(lucideIcon(Square, { ...TOOLBAR_ICON, size: 11 }));
     attachTooltip(btnStop, "Stop running analysis");
-  }
-  if (btnFocus) {
-    btnFocus.appendChild(lucideIcon(Crosshair, TOOLBAR_ICON));
-    attachTooltip(btnFocus, "Focus — relayout visible modules and fit view");
   }
   if (btnSave) {
     btnSave.appendChild(lucideIcon(Save, TOOLBAR_ICON));

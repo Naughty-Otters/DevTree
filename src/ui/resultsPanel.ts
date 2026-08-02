@@ -35,6 +35,7 @@ import {
   type AnalysisDetailHandlers,
   type AnalysisStatKind,
 } from "./analysisDetailPopup";
+import { renderPagedGrid } from "./pagedList";
 
 type TabId = "analysis" | "validation" | "health" | "progress";
 
@@ -145,6 +146,8 @@ export function createResultsPanel(
     pipelineBars: Map<string, TaskBarRefs>;
     ruleBars: Map<string, TaskBarRefs>;
     aiStreamHost: HTMLElement | null;
+    /** Last status used to build action buttons — skip rebuild when unchanged. */
+    actionStatus: AnalysisRun["status"] | null;
   }
 
   const runCards = new Map<string, RunCardRefs>();
@@ -340,6 +343,7 @@ export function createResultsPanel(
       pipelineBars,
       ruleBars: new Map(),
       aiStreamHost,
+      actionStatus: null,
     };
   }
 
@@ -366,6 +370,9 @@ export function createResultsPanel(
   }
 
   function updateRunActions(refs: RunCardRefs, run: AnalysisRun): void {
+    // Rebuild only when status changes (every progress tick used to recreate Cancel).
+    if (refs.actionStatus === run.status) return;
+    refs.actionStatus = run.status;
     refs.actions.replaceChildren();
     if (run.status === "running") {
       const cancelBtn = document.createElement("button");
@@ -468,15 +475,27 @@ export function createResultsPanel(
       refs.message.textContent = progress?.message ?? "Preparing…";
     }
 
-    const overallPct = overallProgressPercent(progress);
+    const pipelineFinished =
+      run.status === "completed" ||
+      progress?.stage === "done" ||
+      (progress?.percent ?? 0) >= 100;
+    const overallPct = pipelineFinished
+      ? 100
+      : overallProgressPercent(progress);
     refs.overallTrack.setAttribute("aria-valuenow", String(overallPct));
     refs.overallFill.style.width = `${overallPct}%`;
     refs.overallFill.className = "analysis-progress-fill";
-    if (run.status === "completed") {
+    if (pipelineFinished) {
       refs.overallFill.classList.add("analysis-progress-fill-done");
     }
 
-    if (run.status === "running" && progress) {
+    if (run.status === "running" && progress?.stage === "done") {
+      refs.overallMeta.textContent =
+        progress.percent < 100 || /saving/i.test(progress.message)
+          ? "Finalizing results… · 100%"
+          : "Complete · transferring… · 100%";
+      refs.overallMeta.hidden = false;
+    } else if (run.status === "running" && progress) {
       refs.overallMeta.textContent = overallProgressMeta(progress);
       refs.overallMeta.hidden = false;
     } else if (run.status === "completed") {
@@ -489,8 +508,13 @@ export function createResultsPanel(
     for (const stage of getPipelineStages()) {
       const bar = refs.pipelineBars.get(stage.id);
       if (!bar) continue;
-      const status = pipelineStageStatus(currentStage, stage.id);
-      const fill = pipelineStageFillPercent(currentStage, stage.id, progress);
+      // Treat pipeline as fully done once stage is "done" even before run.status flips.
+      const status = pipelineFinished
+        ? "done"
+        : pipelineStageStatus(currentStage, stage.id);
+      const fill = pipelineFinished
+        ? 100
+        : pipelineStageFillPercent(currentStage, stage.id, progress);
       updateTaskBar(bar, status, fill);
     }
 
@@ -516,6 +540,17 @@ export function createResultsPanel(
   }
 
   function updateProgressRuns(): void {
+    const scrollRoot = content;
+    const savedRootScroll = scrollRoot.scrollTop;
+    const savedColScroll = new Map<string, number>();
+    const savedRulesScroll = new Map<string, number>();
+    for (const [id, refs] of runCards) {
+      savedColScroll.set(id, refs.progressCol.scrollTop);
+      if (refs.rulesList) {
+        savedRulesScroll.set(id, refs.rulesList.scrollTop);
+      }
+    }
+
     const orderedRuns = [...activeRuns].sort((a, b) => b.startedAt - a.startedAt);
     const runIds = new Set(orderedRuns.map((run) => run.id));
     const running = orderedRuns.filter((run) => run.status === "running");
@@ -607,10 +642,26 @@ export function createResultsPanel(
       updateRunCard(refs, run);
     }
 
-    // Keep DOM order newest-first.
-    for (const run of orderedRuns) {
+    // Reorder only when needed — appendChild every tick was resetting scroll.
+    const needsReorder = orderedRuns.some((run, index) => {
       const refs = runCards.get(run.id);
-      if (refs) runsCardsHost.appendChild(refs.root);
+      return !refs || runsCardsHost!.children[index] !== refs.root;
+    });
+    if (needsReorder) {
+      for (const run of orderedRuns) {
+        const refs = runCards.get(run.id);
+        if (refs) runsCardsHost.appendChild(refs.root);
+      }
+    }
+
+    scrollRoot.scrollTop = savedRootScroll;
+    for (const [id, refs] of runCards) {
+      const colTop = savedColScroll.get(id);
+      if (colTop != null) refs.progressCol.scrollTop = colTop;
+      const rulesTop = savedRulesScroll.get(id);
+      if (rulesTop != null && refs.rulesList) {
+        refs.rulesList.scrollTop = rulesTop;
+      }
     }
   }
 
@@ -783,17 +834,32 @@ function renderAnalysisTab(
   const percentileView = parsePercentileViewMode(
     handlers.getPercentileView?.() ?? "all",
   );
-  const arch = buildArchitectureHealth(result.quality, {
+  const archOpts = {
     modularityScore: result.dsm?.metrics.healthScore ?? null,
     percentileView,
+  };
+  // Summary only — rated entity lists hydrate when the user expands a section.
+  const arch = buildArchitectureHealth(result.quality, {
+    ...archOpts,
+    includeEntityLists: false,
   });
   if (arch) {
     container.appendChild(
-      renderArchitectureHealthSection(arch, handlers, percentileView, () => {
-        // Re-render Analysis tab in place when percentile view changes.
-        container.replaceChildren();
-        renderAnalysisTab(container, result, handlers);
-      }),
+      renderArchitectureHealthSection(
+        arch,
+        () =>
+          buildArchitectureHealth(result.quality, {
+            ...archOpts,
+            includeEntityLists: true,
+          }),
+        handlers,
+        percentileView,
+        () => {
+          // Re-render Analysis tab in place when percentile view changes.
+          container.replaceChildren();
+          renderAnalysisTab(container, result, handlers);
+        },
+      ),
     );
   } else {
     const empty = document.createElement("div");
@@ -835,10 +901,17 @@ function renderPercentileViewSwitch(
 
 function renderArchitectureHealthSection(
   arch: ArchitectureHealthReport,
+  loadFullArch: () => ArchitectureHealthReport | null,
   handlers: ResultsPanelHandlers,
   percentileView: PercentileViewMode,
   onRerender: () => void,
 ): HTMLElement {
+  let cachedFull: ArchitectureHealthReport | null | undefined;
+  const fullArch = (): ArchitectureHealthReport | null => {
+    if (cachedFull === undefined) cachedFull = loadFullArch();
+    return cachedFull;
+  };
+
   const section = document.createElement("section");
   section.className = "arch-health";
 
@@ -923,92 +996,182 @@ function renderArchitectureHealthSection(
     metrics.appendChild(item);
   }
   section.appendChild(metrics);
-
   section.appendChild(
-    renderRatedModuleList(
-      "Package ratings",
-      arch.packages,
-      handlers,
-      "No package ratings",
-    ),
-  );
-  section.appendChild(
-    renderRatedModuleList(
-      "File ratings (top & bottom)",
-      pickTopAndBottom(arch.files, 8),
-      handlers,
-      "No file ratings",
-    ),
+    renderRatingsSubtabs(arch, fullArch, handlers),
   );
 
   return section;
 }
 
-/** Keep strongest and weakest modules for a compact list. */
-function pickTopAndBottom(items: RatedEntity[], each: number): RatedEntity[] {
-  if (items.length <= each * 2) return items;
-  const top = items.slice(0, each);
-  const bottom = items.slice(-each);
-  const seen = new Set(top.map((i) => i.path));
-  const out = [...top];
-  for (const b of bottom) {
-    if (!seen.has(b.path)) out.push(b);
-  }
-  return out;
+type RatingsSubtab = "packages" | "files";
+/** good→worse = high rating first; worse→good = low rating first. */
+type RatingsSort = "best-first" | "worst-first";
+
+function sortRatedEntities(
+  items: RatedEntity[],
+  sort: RatingsSort,
+): RatedEntity[] {
+  const copy = items.slice();
+  copy.sort((a, b) =>
+    sort === "best-first" ? b.rating - a.rating : a.rating - b.rating,
+  );
+  return copy;
 }
 
-function renderRatedModuleList(
-  title: string,
-  items: RatedEntity[],
+function renderRatingsSubtabs(
+  arch: ArchitectureHealthReport,
+  fullArch: () => ArchitectureHealthReport | null,
   handlers: ResultsPanelHandlers,
-  emptyText: string,
 ): HTMLElement {
   const wrap = document.createElement("div");
-  wrap.className = "arch-health-modules";
+  wrap.className = "arch-ratings";
 
-  const h = document.createElement("h4");
-  h.className = "arch-health-subheading";
-  h.textContent = title;
-  wrap.appendChild(h);
+  const toolbar = document.createElement("div");
+  toolbar.className = "arch-ratings-toolbar";
 
-  if (items.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "panel-empty";
-    empty.textContent = emptyText;
-    wrap.appendChild(empty);
-    return wrap;
-  }
+  const tabs = document.createElement("div");
+  tabs.className = "arch-ratings-subtabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Ratings");
 
-  const list = document.createElement("div");
-  list.className = "arch-health-module-list";
+  const sortSwitch = document.createElement("div");
+  sortSwitch.className = "arch-ratings-sort";
+  sortSwitch.setAttribute("role", "group");
+  sortSwitch.setAttribute("aria-label", "Sort ratings");
 
-  for (const item of items) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = `arch-health-module-row arch-rating-${item.band}`;
-    row.title = `Show ${item.path} on graph and open details`;
+  const panel = document.createElement("div");
+  panel.className = "arch-ratings-panel";
 
-    const name = document.createElement("span");
-    name.className = "arch-health-module-name";
-    name.textContent = item.label;
+  let active: RatingsSubtab = "packages";
+  let sort: RatingsSort = "best-first";
+  const tabBtns = new Map<RatingsSubtab, HTMLButtonElement>();
+  const sortBtns = new Map<RatingsSort, HTMLButtonElement>();
 
-    const path = document.createElement("span");
-    path.className = "arch-health-module-path";
-    path.textContent = item.path;
+  const loadSorted = (id: RatingsSubtab): RatedEntity[] => {
+    const report = fullArch();
+    const raw =
+      id === "packages" ? (report?.packages ?? []) : (report?.files ?? []);
+    return sortRatedEntities(raw, sort);
+  };
 
-    const score = document.createElement("span");
-    score.className = "arch-health-module-score";
-    score.textContent = `${item.rating}/100`;
+  const syncSortButtons = (): void => {
+    for (const [key, btn] of sortBtns) {
+      btn.classList.toggle("active", key === sort);
+      btn.setAttribute("aria-pressed", key === sort ? "true" : "false");
+    }
+  };
 
-    row.append(name, path, score);
-    row.addEventListener("click", () => {
-      handlers.onShowModuleOnGraph?.(item.path);
+  const paintTab = (id: RatingsSubtab): void => {
+    active = id;
+    for (const [key, btn] of tabBtns) {
+      const on = key === id;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    panel.replaceChildren();
+    const host = document.createElement("div");
+    panel.appendChild(host);
+
+    renderPagedGrid(
+      host,
+      () => loadSorted(id),
+      (item) => renderRatingGridCard(item, handlers),
+      {
+        pageSize: 24,
+        emptyText: id === "packages" ? "No package ratings" : "No file ratings",
+        className: "arch-ratings-grid",
+      },
+    );
+  };
+
+  const defs: Array<{ id: RatingsSubtab; label: string; count: number }> = [
+    { id: "packages", label: "Package ratings", count: arch.packageCount },
+    { id: "files", label: "File ratings", count: arch.fileCount },
+  ];
+
+  for (const def of defs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "arch-ratings-subtab";
+    btn.setAttribute("role", "tab");
+    btn.textContent = `${def.label} (${def.count.toLocaleString()})`;
+    btn.addEventListener("click", () => {
+      if (active !== def.id) paintTab(def.id);
     });
-    list.appendChild(row);
+    tabBtns.set(def.id, btn);
+    tabs.appendChild(btn);
   }
 
-  wrap.appendChild(list);
+  const sortDefs: Array<{ id: RatingsSort; label: string; title: string }> = [
+    {
+      id: "best-first",
+      label: "Good → worse",
+      title: "Sort highest rating first",
+    },
+    {
+      id: "worst-first",
+      label: "Worse → good",
+      title: "Sort lowest rating first",
+    },
+  ];
+
+  for (const def of sortDefs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "arch-ratings-sort-btn";
+    btn.textContent = def.label;
+    btn.title = def.title;
+    btn.addEventListener("click", () => {
+      if (sort === def.id) return;
+      sort = def.id;
+      syncSortButtons();
+      paintTab(active);
+    });
+    sortBtns.set(def.id, btn);
+    sortSwitch.appendChild(btn);
+  }
+
+  toolbar.append(tabs, sortSwitch);
+  wrap.append(toolbar, panel);
+  syncSortButtons();
+  paintTab("packages");
   return wrap;
+}
+
+function renderRatingGridCard(
+  item: RatedEntity,
+  handlers: ResultsPanelHandlers,
+): HTMLElement {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = `arch-rating-card arch-rating-${item.band}`;
+  card.title = `Show ${item.path} on graph and open details`;
+
+  const score = document.createElement("span");
+  score.className = "arch-rating-card-score";
+  score.textContent = `${item.rating}`;
+
+  const scoreUnit = document.createElement("span");
+  scoreUnit.className = "arch-rating-card-score-unit";
+  scoreUnit.textContent = "/100";
+
+  const scoreWrap = document.createElement("div");
+  scoreWrap.className = "arch-rating-card-score-wrap";
+  scoreWrap.append(score, scoreUnit);
+
+  const name = document.createElement("span");
+  name.className = "arch-rating-card-name";
+  name.textContent = item.label;
+
+  const path = document.createElement("span");
+  path.className = "arch-rating-card-path";
+  path.textContent = item.path;
+
+  card.append(scoreWrap, name, path);
+  card.addEventListener("click", () => {
+    handlers.onShowModuleOnGraph?.(item.path);
+  });
+  return card;
 }
 
 function renderHealthTab(

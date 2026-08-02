@@ -542,6 +542,44 @@ function projectMetricsFromFiles(files: FileQualityMetrics[]): MetricSummaryRow[
   return rows;
 }
 
+/** Scorecard rows from package rollups when per-file quality is not loaded yet. */
+function projectMetricsFromPackages(
+  packages: PackageQualityMetrics[],
+  mode: PercentileViewMode,
+): MetricSummaryRow[] {
+  const rows: MetricSummaryRow[] = [];
+  for (const def of PACKAGE_METRIC_DEFS) {
+    const fileDef = FILE_METRIC_DEFS.find((f) => f.id === def.id);
+    if (!fileDef) continue;
+    const vals: number[] = [];
+    for (const pkg of packages) {
+      const rollup = def.pick(pkg);
+      if (!rollup) continue;
+      const v = rollupStat(rollup, mode === "all" ? "avg" : mode);
+      if (v != null) vals.push(v);
+    }
+    if (vals.length === 0) continue;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const percentiles = locPercentiles(vals);
+    const digits = def.digits ?? fileDef.digits ?? 0;
+    const unit = def.unit ?? fileDef.unit;
+    const asPercent = def.asPercent ?? fileDef.asPercent;
+    const display = asPercent
+      ? `${formatNum(avg, digits)}%`
+      : formatNum(avg, digits);
+    rows.push({
+      id: def.id,
+      label: def.label,
+      avg,
+      display,
+      unit,
+      percentiles,
+      detail: `Package ${mode} · p50/p80/p90 ${formatPct(percentiles, digits)}`,
+    });
+  }
+  return rows;
+}
+
 function metricFocusValue(
   row: MetricSummaryRow,
   mode: PercentileViewMode,
@@ -615,6 +653,11 @@ export function buildArchitectureHealth(
   opts?: {
     modularityScore?: number | null;
     percentileView?: PercentileViewMode | null;
+    /**
+     * When false, skip rating every file/package for lists (Analysis tab summary).
+     * Lists/ratingByPath are filled when true (default) or when a detail view needs them.
+     */
+    includeEntityLists?: boolean;
   },
 ): ArchitectureHealthReport | null {
   if (!quality) return null;
@@ -623,15 +666,24 @@ export function buildArchitectureHealth(
   if (files.length === 0 && packages.length === 0) return null;
 
   const percentileView = parsePercentileViewMode(opts?.percentileView ?? "all");
-  const metrics = projectMetricsFromFiles(files);
-
-  const ratedFiles = rateFiles(files).sort((a, b) => b.rating - a.rating);
-  const ratedPackages = ratePackages(packages, percentileView).sort(
-    (a, b) => b.rating - a.rating,
-  );
+  // Prefer file metrics; fall back to package rollups (slim IPC / first paint).
+  const metrics =
+    files.length > 0
+      ? projectMetricsFromFiles(files)
+      : projectMetricsFromPackages(packages, percentileView);
+  const includeEntityLists = opts?.includeEntityLists !== false;
 
   // Headline rating tracks the selected percentile/avg against absolute thresholds.
-  let rating = overallRatingFromView(metrics, percentileView);
+  let rating =
+    metrics.length > 0
+      ? overallRatingFromView(metrics, percentileView)
+      : (() => {
+          const rated = ratePackages(packages, percentileView);
+          if (rated.length === 0) return 100;
+          return Math.round(
+            rated.reduce((sum, e) => sum + e.rating, 0) / rated.length,
+          );
+        })();
 
   const modularityScore =
     opts?.modularityScore != null && Number.isFinite(opts.modularityScore)
@@ -643,18 +695,37 @@ export function buildArchitectureHealth(
     rating = Math.round(rating * 0.7 + modularityScore * 0.3);
   }
 
+  let ratedFiles: RatedEntity[] = [];
+  let ratedPackages: RatedEntity[] = [];
   const ratingByPath: Record<string, number> = {};
-  for (const e of ratedFiles) ratingByPath[e.path] = e.rating;
-  for (const e of ratedPackages) ratingByPath[e.path] = e.rating;
+  if (includeEntityLists) {
+    if (files.length > 0) {
+      ratedFiles = rateFiles(files).sort((a, b) => b.rating - a.rating);
+    }
+    ratedPackages = ratePackages(packages, percentileView).sort(
+      (a, b) => b.rating - a.rating,
+    );
+    for (const e of ratedFiles) ratingByPath[e.path] = e.rating;
+    for (const e of ratedPackages) ratingByPath[e.path] = e.rating;
+  }
+
+  const fileCount =
+    files.length > 0
+      ? files.length
+      : packages.reduce((sum, p) => sum + (p.fileCount ?? 0), 0);
+  const totalLoc =
+    files.length > 0
+      ? files.reduce((s, f) => s + f.loc, 0)
+      : packages.reduce((s, p) => s + (p.totalLoc ?? 0), 0);
 
   return {
     rating: Math.max(0, Math.min(100, rating)),
     band: bandForRating(rating),
     percentileView,
     modularityScore,
-    fileCount: files.length,
+    fileCount,
     packageCount: packages.length,
-    totalLoc: files.reduce((s, f) => s + f.loc, 0),
+    totalLoc,
     metrics,
     packages: ratedPackages,
     files: ratedFiles,
@@ -670,6 +741,77 @@ export function ratingForPath(
   if (!report) return null;
   const v = report.ratingByPath[path];
   return typeof v === "number" ? v : null;
+}
+
+/**
+ * Rate a single file/package against peers without building full entity lists.
+ * Used by module details so opening one row stays responsive on large projects.
+ */
+export function ratingForQualityPath(
+  quality: QualityIndex | null | undefined,
+  path: string,
+  percentileView?: PercentileViewMode | null,
+): number | null {
+  if (!quality) return null;
+  const mode = parsePercentileViewMode(percentileView ?? "all");
+
+  const file = quality.files[path];
+  if (file) {
+    const peers = Object.values(quality.files);
+    if (peers.length === 0) return null;
+    const samples = new Map<string, number[]>();
+    for (const def of FILE_METRIC_DEFS) {
+      const vals: number[] = [];
+      for (const f of peers) {
+        const v = numericFileValue(f, def.key);
+        if (v != null) vals.push(v);
+      }
+      samples.set(def.id, vals);
+    }
+    const parts: Array<{ score: number; weight: number }> = [];
+    for (const def of FILE_METRIC_DEFS) {
+      const v = numericFileValue(file, def.key);
+      const sample = samples.get(def.id) ?? [];
+      if (v == null || sample.length === 0) continue;
+      parts.push({
+        score: peerScore(sample, v, def.direction),
+        weight: def.weight,
+      });
+    }
+    return weightedScore(parts);
+  }
+
+  const pkg = quality.packages[path];
+  if (pkg) {
+    const peers = Object.values(quality.packages);
+    if (peers.length === 0) return null;
+    const samples = new Map<string, number[]>();
+    for (const def of PACKAGE_METRIC_DEFS) {
+      const vals: number[] = [];
+      for (const p of peers) {
+        const rollup = def.pick(p);
+        if (!rollup) continue;
+        const v = rollupStat(rollup, mode);
+        if (v != null) vals.push(v);
+      }
+      samples.set(def.id, vals);
+    }
+    const parts: Array<{ score: number; weight: number }> = [];
+    for (const def of PACKAGE_METRIC_DEFS) {
+      const rollup = def.pick(pkg);
+      const sample = samples.get(def.id) ?? [];
+      if (!rollup || sample.length === 0) continue;
+      const v = rollupStat(rollup, mode);
+      if (v == null) continue;
+      parts.push({
+        score: peerScore(sample, v, def.direction),
+        weight: def.weight,
+      });
+    }
+    return weightedScore(parts);
+  }
+
+  return null;
 }
 
 export function ratingBand(rating: number): HealthBand {

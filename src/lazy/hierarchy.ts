@@ -1,4 +1,5 @@
 import type { AnalysisResult, HierarchyIndex } from "../analysis/types";
+import { loadAnalysisHierarchyLite } from "../project/api";
 import { loadPersistedAnalysisHierarchy } from "../state/store";
 
 let hierarchyPromise: Promise<HierarchyIndex | null> | null = null;
@@ -14,17 +15,29 @@ function hierarchyIsHydrated(hierarchy: HierarchyIndex | null | undefined): bool
 }
 
 /**
- * Load persisted hierarchy on demand (separate from lightweight analysis meta).
- * Fresh analysis runs still attach hierarchy directly to the in-memory result.
+ * Load hierarchy-lite on demand (files + imports, no symbols).
+ * Never called on first paint after analysis — only on graph drill / DSM.
  */
 export function loadAnalysisHierarchy(
   result: AnalysisResult | null,
+  projectRoot?: string | null,
 ): Promise<HierarchyIndex | null> {
   if (hierarchyIsHydrated(result?.hierarchy)) {
     return Promise.resolve(result!.hierarchy);
   }
   if (!hierarchyPromise) {
-    hierarchyPromise = loadPersistedAnalysisHierarchy();
+    hierarchyPromise = (async () => {
+      if (projectRoot) {
+        try {
+          const lite = await loadAnalysisHierarchyLite(projectRoot);
+          if (hierarchyIsHydrated(lite)) return lite;
+        } catch (err) {
+          console.warn("Cached hierarchy-lite unavailable", err);
+        }
+      }
+      // Legacy SQLite / pointer fallback.
+      return loadPersistedAnalysisHierarchy(projectRoot);
+    })();
   }
   return hierarchyPromise;
 }

@@ -1,5 +1,8 @@
 import type { Camera, RenderState } from "./renderer";
 
+/** Cancel in-flight camera tweens when starting a new one (rapid module clicks). */
+let cameraAnimToken = 0;
+
 export function fitCameraToContent(
   state: RenderState,
   canvas: HTMLCanvasElement,
@@ -52,10 +55,12 @@ export function animateCamera(
   onFrame: () => void,
   durationMs = 300,
 ): void {
+  const token = ++cameraAnimToken;
   const start = { ...state.camera };
   const startTime = performance.now();
 
   function step(now: number) {
+    if (token !== cameraAnimToken) return;
     const t = Math.min(1, (now - startTime) / durationMs);
     const ease = 1 - Math.pow(1 - t, 3);
     state.camera.x = start.x + (target.x - start.x) * ease;
@@ -122,7 +127,7 @@ export function focusCameraOnNodesAnimated(
 
 export function focusCameraOnNodeAnimated(
   state: RenderState,
-  _canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement,
   nodeId: string,
   onFrame: () => void,
   zoom = 2.5,
@@ -131,6 +136,16 @@ export function focusCameraOnNodeAnimated(
   if (!pos) return;
 
   state.selectedId = nodeId;
+
+  // Large graphs: skip tween — each frame was a full canvas paint and felt like a hang.
+  const large = state.nodes.length > 400 || state.edges.length > 1200;
+  if (large) {
+    cameraAnimToken += 1; // cancel any in-flight tween
+    focusCameraOnNode(state, canvas, nodeId, zoom);
+    onFrame();
+    return;
+  }
+
   animateCamera(
     state,
     { x: -pos.x, y: -pos.y, zoom: Math.min(zoom, 6) },

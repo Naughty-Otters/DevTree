@@ -34,8 +34,10 @@ describe("lazy/hierarchy", () => {
   it("does not treat empty hierarchy as hydrated — loads from storage", async () => {
     const { savePersistedState } = await import("../state/store");
     const { defaultPersistedState } = await import("../state/types");
+    const projectPath = "/tmp/lazy-hierarchy-project";
     await savePersistedState({
       ...defaultPersistedState(),
+      projectPath,
       analysisResult: {
         graph: { nodes: [], edges: [] },
         hierarchy: hydrated,
@@ -57,13 +59,16 @@ describe("lazy/hierarchy", () => {
       symbols: {},
       symbol_edges: [],
     };
-    const loaded = await loadAnalysisHierarchy({
-      graph: { nodes: [], edges: [] },
-      hierarchy: empty,
-      validation: [],
-      suggestions: [],
-      summary: "",
-    });
+    const loaded = await loadAnalysisHierarchy(
+      {
+        graph: { nodes: [], edges: [] },
+        hierarchy: empty,
+        validation: [],
+        suggestions: [],
+        summary: "",
+      },
+      projectPath,
+    );
     expect(loaded?.files).toHaveLength(1);
     expect(loaded?.files[0]?.path).toBe("a.ts");
   });

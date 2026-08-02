@@ -3,6 +3,8 @@ export interface TreeEntry {
   path: string;
   kind: "file" | "directory";
   children?: TreeEntry[];
+  /** Directory has children not yet loaded (shallow scan / lazy expand). */
+  has_children?: boolean;
 }
 
 export interface ModuleEntry {

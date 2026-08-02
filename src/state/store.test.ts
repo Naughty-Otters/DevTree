@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnalysisResult, QualityIndex } from "../analysis/types";
 import { defaultPersistedState } from "./types";
 
+const PROJECT_A = "/tmp/project-a";
+const PROJECT_B = "/tmp/project-b";
+
 function sampleQuality(path = "a.ts"): QualityIndex {
   return {
     files: {
@@ -49,7 +52,10 @@ function sampleQuality(path = "a.ts"): QualityIndex {
 
 function sampleResult(quality?: QualityIndex | null): AnalysisResult {
   return {
-    graph: { nodes: [], edges: [] },
+    graph: {
+      nodes: [{ id: ".", label: "root", path: ".", loc: 10, kind: "package" }],
+      edges: [],
+    },
     hierarchy: {
       files: [{ path: "a.ts", label: "a.ts", loc: 10, package: "." }],
       packages: ["."],
@@ -64,6 +70,10 @@ function sampleResult(quality?: QualityIndex | null): AnalysisResult {
     dsm: null,
     quality: quality === undefined ? sampleQuality() : quality,
   };
+}
+
+function scopedKey(kind: string, root: string): string {
+  return `devtree-analysis-${kind}::${root}`;
 }
 
 describe("state/store", () => {
@@ -83,17 +93,55 @@ describe("state/store", () => {
     expect(defaultPersistedState().version).toBe(1);
   });
 
-  it("persists and restores quality index with analysis", async () => {
+  it("persists package quality and hierarchy-lite — never quality.files or symbols", async () => {
     const { loadPersistedAnalysis, savePersistedState } = await import("./store");
     const result = sampleResult();
-    await savePersistedState({ ...defaultPersistedState(), analysisResult: result });
+    result.hierarchy.symbols = {
+      "a.ts": [{ id: "a.ts::x", label: "x", kind: "fn", file: "a.ts", line: 1 }],
+    };
+    result.hierarchy.symbol_edges = [
+      { source: "a", target: "b", kind: "ref" },
+    ];
+    await savePersistedState({
+      ...defaultPersistedState(),
+      projectPath: PROJECT_A,
+      analysisResult: result,
+    });
 
-    expect(localStorage.getItem("devtree-analysis-quality")).toContain("a.ts");
+    const qualityRaw = localStorage.getItem(scopedKey("quality", PROJECT_A))!;
+    expect(qualityRaw).toContain('"packages"');
+    expect(qualityRaw).not.toContain("a.ts");
+    expect(JSON.parse(qualityRaw).files).toEqual({});
 
-    const loaded = await loadPersistedAnalysis();
-    expect(loaded?.quality?.files["a.ts"]?.cyclomatic).toBe(2);
+    const hierarchyRaw = localStorage.getItem(scopedKey("hierarchy", PROJECT_A))!;
+    const hierarchy = JSON.parse(hierarchyRaw);
+    expect(hierarchy.files).toHaveLength(1);
+    expect(hierarchy.symbols).toEqual({});
+    expect(hierarchy.symbol_edges).toEqual([]);
+
+    const loaded = await loadPersistedAnalysis(PROJECT_A);
     expect(loaded?.quality?.packages["."]?.fileCount).toBe(1);
+    expect(loaded?.quality?.files).toEqual({});
     expect(loaded?.hierarchy.files).toHaveLength(1);
+    expect(loaded?.hierarchy.symbol_edges).toEqual([]);
+  });
+
+  it("does not restore project A analysis when opening project B", async () => {
+    const { loadPersistedAnalysis, savePersistedState } = await import("./store");
+    await savePersistedState({
+      ...defaultPersistedState(),
+      projectPath: PROJECT_A,
+      analysisResult: sampleResult(sampleQuality("from-a.ts")),
+    });
+    await savePersistedState({
+      ...defaultPersistedState(),
+      projectPath: PROJECT_B,
+      analysisResult: null,
+    });
+
+    expect(await loadPersistedAnalysis(PROJECT_B)).toBeNull();
+    const a = await loadPersistedAnalysis(PROJECT_A);
+    expect(a?.quality?.packages["."]?.fileCount).toBe(1);
   });
 
   it("stores null quality when result has empty quality", async () => {
@@ -102,43 +150,48 @@ describe("state/store", () => {
     );
     await savePersistedState({
       ...defaultPersistedState(),
+      projectPath: PROJECT_A,
       analysisResult: sampleResult({ files: {}, packages: {} }),
     });
-    expect(localStorage.getItem("devtree-analysis-quality")).toBe("null");
-    expect(await loadPersistedAnalysisQuality()).toBeNull();
+    expect(localStorage.getItem(scopedKey("quality", PROJECT_A))).toBe("null");
+    expect(await loadPersistedAnalysisQuality(PROJECT_A)).toBeNull();
   });
 
-  it("clears quality when analysis is cleared", async () => {
+  it("clears quality when analysis is cleared for that project", async () => {
     const { loadPersistedAnalysisQuality, savePersistedState } = await import(
       "./store"
     );
     await savePersistedState({
       ...defaultPersistedState(),
+      projectPath: PROJECT_A,
       analysisResult: sampleResult(),
     });
     await savePersistedState({
       ...defaultPersistedState(),
+      projectPath: PROJECT_A,
       analysisResult: null,
     });
-    expect(await loadPersistedAnalysisQuality()).toBeNull();
+    expect(await loadPersistedAnalysisQuality(PROJECT_A)).toBeNull();
   });
 
   it("loadPersistedAnalysisQuality returns null when key missing", async () => {
     const { loadPersistedAnalysisQuality } = await import("./store");
-    expect(await loadPersistedAnalysisQuality()).toBeNull();
+    expect(await loadPersistedAnalysisQuality(PROJECT_A)).toBeNull();
   });
 
-  it("loadPersistedState includes quality when present", async () => {
+  it("loadPersistedState includes package quality for ui project", async () => {
     const { loadPersistedState, savePersistedState } = await import("./store");
     await savePersistedState({
       ...defaultPersistedState(),
+      projectPath: PROJECT_A,
       percentileView: "p50",
       analysisResult: sampleResult(sampleQuality("q.ts")),
     });
 
     const state = await loadPersistedState();
     expect(state.percentileView).toBe("p50");
-    expect(state.analysisResult?.quality?.files["q.ts"]?.path).toBe("q.ts");
+    expect(state.analysisResult?.quality?.packages["."]?.fileCount).toBe(1);
+    expect(state.analysisResult?.quality?.files).toEqual({});
   });
 
   it("loadPersistedUiState returns defaults when empty", async () => {
@@ -148,7 +201,7 @@ describe("state/store", () => {
     expect(ui.percentileView).toBe("all");
   });
 
-  it("migrates legacy combined analysis blob including quality", async () => {
+  it("migrates legacy combined analysis blob into slim split keys", async () => {
     const legacy = sampleResult(sampleQuality("legacy.ts"));
     localStorage.setItem("devtree-analysis", JSON.stringify(legacy));
 
@@ -158,33 +211,69 @@ describe("state/store", () => {
       loadPersistedAnalysisQuality,
     } = await import("./store");
 
-    const meta = await loadPersistedAnalysisMeta();
+    const meta = await loadPersistedAnalysisMeta(PROJECT_A);
     expect(meta?.summary).toBe("ok");
-    const hierarchy = await loadPersistedAnalysisHierarchy();
+    const hierarchy = await loadPersistedAnalysisHierarchy(PROJECT_A);
     expect(hierarchy?.files[0]?.path).toBe("a.ts");
-    const quality = await loadPersistedAnalysisQuality();
-    expect(quality?.files["legacy.ts"]?.path).toBe("legacy.ts");
-    expect(localStorage.getItem("devtree-analysis-quality")).toContain(
+    const quality = await loadPersistedAnalysisQuality(PROJECT_A);
+    expect(quality?.packages["."]?.fileCount).toBe(1);
+    expect(quality?.files).toEqual({});
+    expect(localStorage.getItem(scopedKey("quality", PROJECT_A))).not.toContain(
       "legacy.ts",
     );
   });
 
+  it("ignores oversized legacy hierarchy blobs in SQLite", async () => {
+    const edges = Array.from({ length: 50_001 }, (_, i) => ({
+      source: `s${i}`,
+      target: `t${i}`,
+      kind: "ref",
+    }));
+    localStorage.setItem(
+      scopedKey("meta", PROJECT_A),
+      JSON.stringify({
+        graph: { nodes: [], edges: [] },
+        validation: [],
+        suggestions: [],
+        summary: "huge",
+        dsm: null,
+        projectRoot: PROJECT_A,
+      }),
+    );
+    localStorage.setItem(
+      scopedKey("hierarchy", PROJECT_A),
+      JSON.stringify({
+        files: [{ path: "a.ts", label: "a.ts", loc: 1, package: "." }],
+        packages: ["."],
+        file_imports: {},
+        package_edges: [],
+        symbols: {},
+        symbol_edges: edges,
+      }),
+    );
+    localStorage.setItem(scopedKey("quality", PROJECT_A), "null");
+
+    const { loadPersistedAnalysisHierarchy } = await import("./store");
+    expect(await loadPersistedAnalysisHierarchy(PROJECT_A)).toBeNull();
+  });
+
   it("uses empty hierarchy when hierarchy key missing but meta exists", async () => {
     localStorage.setItem(
-      "devtree-analysis-meta",
+      scopedKey("meta", PROJECT_A),
       JSON.stringify({
         graph: { nodes: [], edges: [] },
         validation: [],
         suggestions: [],
         summary: "meta-only",
         dsm: null,
+        projectRoot: PROJECT_A,
       }),
     );
-    localStorage.setItem("devtree-analysis-hierarchy", "null");
-    localStorage.setItem("devtree-analysis-quality", "null");
+    localStorage.setItem(scopedKey("hierarchy", PROJECT_A), "null");
+    localStorage.setItem(scopedKey("quality", PROJECT_A), "null");
 
     const { loadPersistedAnalysis } = await import("./store");
-    const loaded = await loadPersistedAnalysis();
+    const loaded = await loadPersistedAnalysis(PROJECT_A);
     expect(loaded?.summary).toBe("meta-only");
     expect(loaded?.hierarchy.files).toEqual([]);
     expect(loaded?.quality).toBeNull();
@@ -202,7 +291,7 @@ describe("state/store", () => {
     expect(ui.percentileView).toBe("p80");
   });
 
-  it("scheduleSaveAnalysis writes split keys via idle callback", async () => {
+  it("scheduleSaveAnalysis writes package quality via idle callback", async () => {
     vi.useFakeTimers();
     const idleCallbacks: Array<() => void> = [];
     vi.stubGlobal("requestIdleCallback", (cb: () => void) => {
@@ -213,14 +302,15 @@ describe("state/store", () => {
     const { scheduleSaveAnalysis, loadPersistedAnalysisQuality } = await import(
       "./store"
     );
-    scheduleSaveAnalysis(sampleResult(sampleQuality("idle.ts")));
+    scheduleSaveAnalysis(sampleResult(sampleQuality("idle.ts")), PROJECT_A);
     await vi.advanceTimersByTimeAsync(2100);
     expect(idleCallbacks).toHaveLength(1);
     idleCallbacks[0]!();
     await Promise.resolve();
 
-    const quality = await loadPersistedAnalysisQuality();
-    expect(quality?.files["idle.ts"]?.path).toBe("idle.ts");
+    const quality = await loadPersistedAnalysisQuality(PROJECT_A);
+    expect(quality?.packages["."]?.fileCount).toBe(1);
+    expect(quality?.files).toEqual({});
     vi.unstubAllGlobals();
   });
 
@@ -233,21 +323,39 @@ describe("state/store", () => {
     const { scheduleSaveState, loadPersistedState } = await import("./store");
     scheduleSaveState({
       ...defaultPersistedState(),
+      projectPath: PROJECT_A,
       percentileView: "p90",
       analysisResult: sampleResult(),
     });
     await vi.advanceTimersByTimeAsync(2500);
     const state = await loadPersistedState();
     expect(state.percentileView).toBe("p90");
-    expect(state.analysisResult?.quality?.files["a.ts"]).toBeTruthy();
+    expect(state.analysisResult?.quality?.packages["."]).toBeTruthy();
+    expect(state.analysisResult?.graph.nodes.length).toBe(1);
     vi.unstubAllGlobals();
   });
 
   it("ignores invalid JSON in analysis keys", async () => {
-    localStorage.setItem("devtree-analysis-meta", "{not-json");
-    localStorage.setItem("devtree-analysis-hierarchy", "{bad");
-    localStorage.setItem("devtree-analysis-quality", "{bad");
+    localStorage.setItem(scopedKey("meta", PROJECT_A), "{not-json");
+    localStorage.setItem(scopedKey("hierarchy", PROJECT_A), "{bad");
+    localStorage.setItem(scopedKey("quality", PROJECT_A), "{bad");
     const { loadPersistedAnalysis } = await import("./store");
-    expect(await loadPersistedAnalysis()).toBeNull();
+    expect(await loadPersistedAnalysis(PROJECT_A)).toBeNull();
+  });
+
+  it("rejects tagged analysis from another project root", async () => {
+    localStorage.setItem(
+      scopedKey("meta", PROJECT_B),
+      JSON.stringify({
+        graph: { nodes: [], edges: [] },
+        validation: [],
+        suggestions: [],
+        summary: "from-b",
+        dsm: null,
+        projectRoot: PROJECT_A,
+      }),
+    );
+    const { loadPersistedAnalysisMeta } = await import("./store");
+    expect(await loadPersistedAnalysisMeta(PROJECT_B)).toBeNull();
   });
 });
