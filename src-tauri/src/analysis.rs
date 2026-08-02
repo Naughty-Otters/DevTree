@@ -305,6 +305,12 @@ pub struct AiValidationStream {
     pub thinking: String,
     pub text: String,
     pub activity: Option<String>,
+    /// Live tool stdout/stderr and other tool result previews.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tool_log: String,
+    /// Token budget / usage line (e.g. `Tokens 12.4k / 50k`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<String>,
     pub status: String,
 }
 

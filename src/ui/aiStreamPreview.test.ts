@@ -23,4 +23,33 @@ describe("ui/aiStreamPreview", () => {
     expect(host.querySelector(".ai-stream-preview")).toBe(first);
     expect(host.querySelector(".ai-stream-text")?.textContent).toBe("hello world");
   });
+
+  it("renders live tool output in a dedicated section", () => {
+    const host = document.createElement("div");
+    renderAiStreamPreview(host, {
+      ruleId: "ai",
+      ruleName: "AI review",
+      status: "running",
+      thinking: "",
+      text: "",
+      activity: "Running shell: pytest -q",
+      toolLog: "$ pytest -q\nFAILED tests/foo.py\n",
+    });
+    expect(host.querySelector(".ai-stream-tools")?.textContent).toContain("FAILED tests/foo.py");
+    expect(host.querySelector(".ai-stream-waiting")).toBeNull();
+  });
+
+  it("renders token budget status", () => {
+    const host = document.createElement("div");
+    renderAiStreamPreview(host, {
+      ruleId: "ai",
+      ruleName: "AI review",
+      status: "running",
+      thinking: "",
+      text: "",
+      budget: "Tokens 12.4k / 50k",
+    });
+    expect(host.querySelector(".ai-stream-budget")?.textContent).toBe("Tokens 12.4k / 50k");
+    expect(host.querySelector(".ai-stream-waiting")).toBeNull();
+  });
 });

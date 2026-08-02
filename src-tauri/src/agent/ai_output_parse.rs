@@ -2,6 +2,8 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct AiValidationFinding {
+    #[serde(default)]
+    pub rule_id: String,
     pub status: String,
     pub message: String,
     #[serde(default)]
@@ -99,6 +101,7 @@ fn normalize_findings(findings: Vec<AiValidationFinding>) -> Vec<AiValidationFin
     findings
         .into_iter()
         .map(|mut finding| {
+            finding.rule_id = finding.rule_id.trim().to_string();
             finding.status = finding.status.trim().to_lowercase();
             finding.message = finding.message.trim().to_string();
             finding.affected = finding
@@ -302,10 +305,11 @@ mod tests {
     #[test]
     fn parses_json_inside_markdown_fence() {
         let raw = r#"```json
-{"items":[{"status":"pass","message":"ok","affected":["src/a.ts — detail"]}]}
+{"items":[{"rule_id":"ai_code_review","status":"pass","message":"ok","affected":["src/a.ts — detail"]}]}
 ```"#;
         let findings = parse_ai_findings(raw).expect("parse");
         assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "ai_code_review");
         assert_eq!(findings[0].status, "pass");
         assert_eq!(findings[0].affected[0], "src/a.ts — detail");
     }
@@ -316,6 +320,7 @@ mod tests {
         let findings = parse_ai_findings(raw).expect("parse");
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].status, "warn");
+        assert!(findings[0].rule_id.is_empty());
     }
 
     #[test]
@@ -341,5 +346,18 @@ mod tests {
         let raw = r#"{"items":[{"status":"warn","message":"bad","affected":["```json\n{\"x\":1}"]}]}"#;
         let findings = parse_ai_findings(raw).expect("parse");
         assert!(findings[0].affected.is_empty());
+    }
+
+    #[test]
+    fn parses_multi_rule_session_items() {
+        let raw = r#"{"items":[
+          {"rule_id":"ai_architecture","status":"pass","message":"ok","affected":[]},
+          {"rule_id":"ai_code_review","status":"warn","message":"n+1","affected":["src/db.ts — loop query"]}
+        ]}"#;
+        let findings = parse_ai_findings(raw).expect("parse");
+        assert_eq!(findings.len(), 2);
+        assert_eq!(findings[0].rule_id, "ai_architecture");
+        assert_eq!(findings[1].rule_id, "ai_code_review");
+        assert_eq!(findings[1].status, "warn");
     }
 }

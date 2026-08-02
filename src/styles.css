@@ -3259,7 +3259,8 @@ body.is-resizing-v {
 }
 
 .ai-stream-thinking,
-.ai-stream-text {
+.ai-stream-text,
+.ai-stream-tools {
   margin: 0 0 4px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -3274,10 +3275,25 @@ body.is-resizing-v {
   color: var(--text-primary);
 }
 
+.ai-stream-tools {
+  color: rgba(167, 243, 208, 0.9);
+  max-height: 220px;
+  overflow: auto;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .ai-stream-activity {
   font-size: 9px;
   color: rgba(251, 191, 36, 0.9);
   margin-bottom: 4px;
+}
+
+.ai-stream-budget {
+  font-size: 9px;
+  color: rgba(196, 181, 253, 0.95);
+  margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .ai-stream-waiting {

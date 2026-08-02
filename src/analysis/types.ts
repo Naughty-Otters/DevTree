@@ -236,6 +236,10 @@ export interface AiValidationStream {
   thinking: string;
   text: string;
   activity?: string;
+  /** Live / completed tool output (shell stdout, grep/read previews). */
+  toolLog?: string;
+  /** Token budget / usage line (e.g. `Tokens 12.4k / 50k`). */
+  budget?: string;
   status: "running" | "done" | "failed";
 }
 

@@ -2,6 +2,7 @@ import type { AiValidationRuntimeSettings } from "../validation/aiValidation";
 import {
   clampRuntimeSettings,
   defaultAiValidationRuntimeSettings,
+  RUNTIME_TOKEN_LIMITS,
   RUNTIME_TURNS_LIMITS,
 } from "../validation/aiValidation";
 
@@ -20,11 +21,11 @@ export function createLlmRuntimeSettingsPanel(
   const hint = document.createElement("p");
   hint.className = "settings-hint";
   hint.textContent =
-    "Each turn is one model round (often one or more tool calls like grep or read_files). Large projects may need 128+ turns. Increase if you hit MaxTurnsError.";
+    "Budgets stop AI validation when either the turn or token limit is reached (whichever comes first). Each turn is one model round (often with tool calls like grep or read_files).";
 
   const maxTurnsInput = numberField(
-    "AI validation max turns",
-    `Tool-call rounds per AI validation rule (4–${RUNTIME_TURNS_LIMITS.validationMax}). Batch file reads when possible.`,
+    "AI validation turn budget",
+    `Tool-call rounds for the AI validation session base (4–${RUNTIME_TURNS_LIMITS.validationMax}). Scaled up when multiple AI phases run together.`,
     RUNTIME_TURNS_LIMITS.min,
     RUNTIME_TURNS_LIMITS.validationMax,
     () => settings.maxTurns,
@@ -34,8 +35,20 @@ export function createLlmRuntimeSettingsPanel(
     },
   );
 
+  const maxTokensInput = numberField(
+    "AI validation token budget (0 = unlimited)",
+    `Caps billed total tokens for the AI validation session (0, or ${RUNTIME_TOKEN_LIMITS.minWhenSet.toLocaleString()}–${RUNTIME_TOKEN_LIMITS.max.toLocaleString()}).`,
+    0,
+    RUNTIME_TOKEN_LIMITS.max,
+    () => settings.maxTokens,
+    (value) => {
+      settings = clampRuntimeSettings({ ...settings, maxTokens: value });
+      handlers.onChange(settings);
+    },
+  );
+
   const agentMaxTurnsInput = numberField(
-    "Agent max turns",
+    "Agent turn budget",
     `Tool-call rounds for interactive agent skills (4–${RUNTIME_TURNS_LIMITS.agentMax})`,
     RUNTIME_TURNS_LIMITS.min,
     RUNTIME_TURNS_LIMITS.agentMax,
@@ -46,12 +59,13 @@ export function createLlmRuntimeSettingsPanel(
     },
   );
 
-  root.append(hint, maxTurnsInput.wrap, agentMaxTurnsInput.wrap);
+  root.append(hint, maxTurnsInput.wrap, maxTokensInput.wrap, agentMaxTurnsInput.wrap);
 
   return {
     setSettings(next) {
       settings = clampRuntimeSettings(next);
       maxTurnsInput.setValue(settings.maxTurns);
+      maxTokensInput.setValue(settings.maxTokens);
       agentMaxTurnsInput.setValue(settings.agentMaxTurns);
     },
   };
@@ -96,7 +110,7 @@ function numberField(
 
   return {
     wrap,
-    setValue(value: number) {
+    setValue(value) {
       input.value = String(value);
     },
   };

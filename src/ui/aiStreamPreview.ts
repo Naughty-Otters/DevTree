@@ -38,6 +38,15 @@ export function renderAiStreamPreview(
 
   body.querySelector(".ai-stream-waiting")?.remove();
 
+  if (stream.budget) {
+    const budget = ensureChild(body, ".ai-stream-budget", "div", "ai-stream-budget");
+    if (budget.textContent !== stream.budget) {
+      budget.textContent = stream.budget;
+    }
+  } else {
+    body.querySelector(".ai-stream-budget")?.remove();
+  }
+
   if (stream.activity) {
     const activity = ensureChild(body, ".ai-stream-activity", "div", "ai-stream-activity");
     if (activity.textContent !== stream.activity) {
@@ -45,6 +54,19 @@ export function renderAiStreamPreview(
     }
   } else {
     body.querySelector(".ai-stream-activity")?.remove();
+  }
+
+  const toolLog = stream.toolLog?.trim() ? stream.toolLog : "";
+  if (toolLog) {
+    ensureChild(body, ".ai-stream-tools-label", "div", "ai-stream-section-label ai-stream-tools-label")
+      .textContent = "Tool output";
+    const tools = ensureChild(body, ".ai-stream-tools", "pre", "ai-stream-tools");
+    if (tools.textContent !== toolLog) {
+      tools.textContent = toolLog;
+    }
+  } else {
+    body.querySelector(".ai-stream-tools-label")?.remove();
+    body.querySelector(".ai-stream-tools")?.remove();
   }
 
   if (stream.thinking.trim()) {
@@ -71,7 +93,7 @@ export function renderAiStreamPreview(
     body.querySelector(".ai-stream-text")?.remove();
   }
 
-  if (!stream.thinking.trim() && !stream.text.trim()) {
+  if (!stream.thinking.trim() && !stream.text.trim() && !stream.activity && !toolLog && !stream.budget) {
     const waiting = ensureChild(body, ".ai-stream-waiting", "div", "ai-stream-waiting");
     waiting.textContent = "Waiting for model response…";
   }

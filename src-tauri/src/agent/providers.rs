@@ -121,8 +121,10 @@ macro_rules! run_validation_stream_with_client {
                 prompt: $prompt,
                 workspace: $workspace,
                 max_turns: $max_turns,
+                max_tokens: $config.max_tokens,
                 cancel: $config.cancel,
                 on_event: $config.on_event,
+                tool_output: $config.tool_output.clone(),
             },
         )
         .await
@@ -137,8 +139,11 @@ pub struct ValidationProviderStreamConfig<'a> {
     pub prompt: &'a str,
     pub workspace: super::workspace::ProjectWorkspace,
     pub max_turns: u32,
+    /// Session token budget; `0` = unlimited.
+    pub max_tokens: u64,
     pub cancel: &'a std::sync::atomic::AtomicBool,
     pub on_event: &'a (dyn Fn(super::run::ValidationStreamEvent) + Send + Sync),
+    pub tool_output: Option<super::tools::ToolOutputReporter>,
 }
 
 pub async fn run_validation_provider_stream(

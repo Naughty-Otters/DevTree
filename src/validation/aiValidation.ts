@@ -2,12 +2,14 @@ import type { LlmProviderId, LlmProviderInfo } from "../agent/types";
 import { DEFAULT_LLM_PROVIDER } from "../agent/types";
 import type { RuleSettingDef, RuleSettingsMap } from "../analysis/types";
 
-/** Runtime limits for LLM agent loops (tool-call rounds). */
+/** Runtime limits for LLM agent loops (tool-call rounds + token budget). */
 export interface AiValidationRuntimeSettings {
-  /** Max tool-call turns per AI validation rule. */
+  /** Max tool-call turns per AI validation rule / session scale base. */
   maxTurns: number;
   /** Max tool-call turns for interactive agent skills. */
   agentMaxTurns: number;
+  /** Session token budget for AI validation. `0` = unlimited. */
+  maxTokens: number;
 }
 
 export const RUNTIME_TURNS_LIMITS = {
@@ -21,10 +23,19 @@ export const RUNTIME_TURNS_LIMITS = {
   legacyDefaultAgent: 32,
 } as const;
 
+export const RUNTIME_TOKEN_LIMITS = {
+  /** 0 means unlimited. */
+  unlimited: 0,
+  minWhenSet: 1_000,
+  max: 2_000_000,
+  defaultValidation: 0,
+} as const;
+
 export function defaultAiValidationRuntimeSettings(): AiValidationRuntimeSettings {
   return {
     maxTurns: RUNTIME_TURNS_LIMITS.defaultValidation,
     agentMaxTurns: RUNTIME_TURNS_LIMITS.defaultAgent,
+    maxTokens: RUNTIME_TOKEN_LIMITS.defaultValidation,
   };
 }
 
@@ -44,6 +55,7 @@ export function clampRuntimeSettings(
       RUNTIME_TURNS_LIMITS.agentMax,
       RUNTIME_TURNS_LIMITS.defaultAgent,
     ),
+    maxTokens: clampTokenBudget(settings.maxTokens ?? RUNTIME_TOKEN_LIMITS.unlimited),
   };
 }
 
@@ -62,7 +74,16 @@ export function migrateRuntimeSettings(
       settings.agentMaxTurns === RUNTIME_TURNS_LIMITS.legacyDefaultAgent
         ? RUNTIME_TURNS_LIMITS.defaultAgent
         : clamped.agentMaxTurns,
+    maxTokens: clamped.maxTokens,
   };
+}
+
+function clampTokenBudget(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return RUNTIME_TOKEN_LIMITS.unlimited;
+  return Math.min(
+    RUNTIME_TOKEN_LIMITS.max,
+    Math.max(RUNTIME_TOKEN_LIMITS.minWhenSet, Math.round(value)),
+  );
 }
 
 function clampInt(value: number, min: number, max: number, fallback: number): number {
