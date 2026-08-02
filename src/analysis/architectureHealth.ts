@@ -397,6 +397,45 @@ function peerScore(
   return Math.round((favorable / sample.length) * 100);
 }
 
+/** First index i with sorted[i] >= value (sorted ascending). */
+function lowerBoundAsc(sorted: number[], value: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid]! < value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** First index i with sorted[i] > value (sorted ascending). */
+function upperBoundAsc(sorted: number[], value: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid]! <= value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Same as peerScore but O(log n) against a pre-sorted ascending sample. */
+function peerScoreSorted(
+  sortedAsc: number[],
+  value: number,
+  direction: Direction,
+): number {
+  const n = sortedAsc.length;
+  if (n === 0) return 100;
+  const favorable =
+    direction === "lower-better"
+      ? n - lowerBoundAsc(sortedAsc, value) // count v >= value
+      : upperBoundAsc(sortedAsc, value); // count v <= value
+  return Math.round((favorable / n) * 100);
+}
+
 function weightedScore(
   parts: Array<{ score: number; weight: number }>,
 ): number {
@@ -419,24 +458,26 @@ function numericFileValue(file: FileQualityMetrics, key: keyof FileQualityMetric
 function rateFiles(files: FileQualityMetrics[]): RatedEntity[] {
   if (files.length === 0) return [];
 
-  const samples = new Map<string, number[]>();
+  // Sort once per metric → O(n log n); rank each file in O(log n) instead of O(n²).
+  const sortedSamples = new Map<string, number[]>();
   for (const def of FILE_METRIC_DEFS) {
     const vals: number[] = [];
     for (const f of files) {
       const v = numericFileValue(f, def.key);
       if (v != null) vals.push(v);
     }
-    samples.set(def.id, vals);
+    vals.sort((a, b) => a - b);
+    sortedSamples.set(def.id, vals);
   }
 
   return files.map((file) => {
     const parts: Array<{ score: number; weight: number }> = [];
     for (const def of FILE_METRIC_DEFS) {
       const v = numericFileValue(file, def.key);
-      const sample = samples.get(def.id) ?? [];
+      const sample = sortedSamples.get(def.id) ?? [];
       if (v == null || sample.length === 0) continue;
       parts.push({
-        score: peerScore(sample, v, def.direction),
+        score: peerScoreSorted(sample, v, def.direction),
         weight: def.weight,
       });
     }
@@ -474,7 +515,7 @@ function ratePackages(
 ): RatedEntity[] {
   if (packages.length === 0) return [];
 
-  const samples = new Map<string, number[]>();
+  const sortedSamples = new Map<string, number[]>();
   for (const def of PACKAGE_METRIC_DEFS) {
     const vals: number[] = [];
     for (const pkg of packages) {
@@ -483,19 +524,20 @@ function ratePackages(
       const v = rollupStat(rollup, mode);
       if (v != null) vals.push(v);
     }
-    samples.set(def.id, vals);
+    vals.sort((a, b) => a - b);
+    sortedSamples.set(def.id, vals);
   }
 
   return packages.map((pkg) => {
     const parts: Array<{ score: number; weight: number }> = [];
     for (const def of PACKAGE_METRIC_DEFS) {
       const rollup = def.pick(pkg);
-      const sample = samples.get(def.id) ?? [];
+      const sample = sortedSamples.get(def.id) ?? [];
       if (!rollup || sample.length === 0) continue;
       const v = rollupStat(rollup, mode);
       if (v == null) continue;
       parts.push({
-        score: peerScore(sample, v, def.direction),
+        score: peerScoreSorted(sample, v, def.direction),
         weight: def.weight,
       });
     }
@@ -658,6 +700,11 @@ export function buildArchitectureHealth(
      * Lists/ratingByPath are filled when true (default) or when a detail view needs them.
      */
     includeEntityLists?: boolean;
+    /**
+     * When entity lists are enabled, also rate every file (expensive on large projects).
+     * Default true. Package-only lists stay cheap for the Package ratings tab.
+     */
+    includeFileLists?: boolean;
   },
 ): ArchitectureHealthReport | null {
   if (!quality) return null;
@@ -666,12 +713,14 @@ export function buildArchitectureHealth(
   if (files.length === 0 && packages.length === 0) return null;
 
   const percentileView = parsePercentileViewMode(opts?.percentileView ?? "all");
-  // Prefer file metrics; fall back to package rollups (slim IPC / first paint).
+  // Prefer package rollups for the scorecard — scanning every file on paint freezes large repos.
+  // Per-file lists still use quality.files when includeFileLists is on.
   const metrics =
-    files.length > 0
-      ? projectMetricsFromFiles(files)
-      : projectMetricsFromPackages(packages, percentileView);
+    packages.length > 0
+      ? projectMetricsFromPackages(packages, percentileView)
+      : projectMetricsFromFiles(files);
   const includeEntityLists = opts?.includeEntityLists !== false;
+  const includeFileLists = opts?.includeFileLists !== false;
 
   // Headline rating tracks the selected percentile/avg against absolute thresholds.
   let rating =
@@ -699,7 +748,7 @@ export function buildArchitectureHealth(
   let ratedPackages: RatedEntity[] = [];
   const ratingByPath: Record<string, number> = {};
   if (includeEntityLists) {
-    if (files.length > 0) {
+    if (includeFileLists && files.length > 0) {
       ratedFiles = rateFiles(files).sort((a, b) => b.rating - a.rating);
     }
     ratedPackages = ratePackages(packages, percentileView).sort(

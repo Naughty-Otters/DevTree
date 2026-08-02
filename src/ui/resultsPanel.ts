@@ -1,4 +1,9 @@
-import type { AnalysisResult, HierarchyIndex, RuleTaskProgress } from "../analysis/types";
+import type {
+  AnalysisResult,
+  HierarchyIndex,
+  QualityIndex,
+  RuleTaskProgress,
+} from "../analysis/types";
 import type { AnalysisRun } from "../analysis/manager";
 import {
   buildArchitectureHealth,
@@ -14,6 +19,10 @@ import {
   PERCENTILE_VIEW_MODES,
   type PercentileViewMode,
 } from "../analysis/percentileView";
+import {
+  analysisStatusCounts,
+  formatAnalysisStatusSummary,
+} from "../analysis/statusSummary";
 import { renderAiStreamPreview } from "./aiStreamPreview";
 import {
   effectiveRuleStatus,
@@ -35,9 +44,10 @@ import {
   type AnalysisDetailHandlers,
   type AnalysisStatKind,
 } from "./analysisDetailPopup";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { renderPagedGrid } from "./pagedList";
 
-type TabId = "analysis" | "validation" | "health" | "progress";
+type TabId = "analysis" | "validation" | "progress";
 
 export interface ResultsPanelHandlers {
   onOpenValidationTarget?: ValidationDetailHandlers["onOpenFile"];
@@ -52,28 +62,66 @@ export interface ResultsPanelHandlers {
   onCancelRun?: (id: string) => void;
   onCancelAllRuns?: () => void;
   onApplyRun?: (id: string) => void;
+  /**
+   * Slim analysis leaves `quality.files` empty. Load them when the Analysis tab
+   * needs File ratings. Caller should update the result (e.g. setResult) when done.
+   */
+  onRequestQualityFiles?: () => Promise<QualityIndex | null>;
+  /** Switch the main center view to the overall analysis report. */
+  onRequestShowReport?: () => void;
+}
+
+export interface ResultsPanelOptions {
+  /**
+   * When set, the Analysis overview renders in the main center view instead of
+   * the bottom panel tabs.
+   */
+  reportHost?: HTMLElement;
 }
 
 export function createResultsPanel(
   container: HTMLElement,
   handlers: ResultsPanelHandlers = {},
+  options: ResultsPanelOptions = {},
 ): {
   setResult: (result: AnalysisResult | null) => void;
   setRuns: (runs: AnalysisRun[]) => void;
   showTab: (tab: TabId) => void;
+  refreshReport: () => void;
 } {
-  let activeTab: TabId = "analysis";
+  const reportHost = options.reportHost ?? null;
+  const reportInMainView = reportHost != null;
+  let activeTab: TabId = reportInMainView ? "validation" : "analysis";
   let currentResult: AnalysisResult | null = null;
   let activeRuns: AnalysisRun[] = [];
+  /** Tracks lazy quality.files fetch for Analysis → File ratings. */
+  let qualityFilesLoad: "idle" | "loading" | "done" = "idle";
+  let qualityFilesRequestId = 0;
 
   const tabs = document.createElement("div");
   tabs.className = "results-tabs";
 
-  const tabDefs: { id: TabId; label: string }[] = [
-    { id: "analysis", label: "Analysis" },
-    { id: "health", label: "Health" },
-    { id: "validation", label: "Validation" },
-    { id: "progress", label: "Progress" },
+  const tabDefs: { id: TabId; label: string; title: string }[] = [
+    ...(reportInMainView
+      ? []
+      : [
+          {
+            id: "analysis" as const,
+            label: "Analysis",
+            title:
+              "Overview — architecture & modularity health, ratings, and key findings",
+          },
+        ]),
+    {
+      id: "validation",
+      label: "Validation",
+      title: "Rule findings, design violations, and AI review results",
+    },
+    {
+      id: "progress",
+      label: "Progress",
+      title: "Live run progress and AI stream output",
+    },
   ];
 
   const tabButtons: Record<TabId, HTMLButtonElement> = {} as Record<
@@ -82,6 +130,11 @@ export function createResultsPanel(
   >;
 
   function setActiveTab(tab: TabId): void {
+    if (reportInMainView && tab === "analysis") {
+      renderReport();
+      handlers.onRequestShowReport?.();
+      return;
+    }
     activeTab = tab;
     for (const [id, btn] of Object.entries(tabButtons)) {
       btn.classList.toggle("active", id === tab);
@@ -93,6 +146,7 @@ export function createResultsPanel(
     const btn = document.createElement("button");
     btn.className = "results-tab";
     btn.textContent = def.label;
+    btn.title = def.title;
     btn.dataset.tab = def.id;
     if (def.id === activeTab) btn.classList.add("active");
     btn.addEventListener("click", () => {
@@ -114,7 +168,8 @@ export function createResultsPanel(
 
   const emptyHost = document.createElement("div");
   emptyHost.className = "panel-empty";
-  emptyHost.textContent = "Run analysis to see results";
+  emptyHost.textContent =
+    "Run analysis to see an overview, health scores, and validation findings";
   emptyHost.hidden = true;
 
   content.append(progressHost, resultsHost, emptyHost);
@@ -387,7 +442,9 @@ export function createResultsPanel(
       const applyBtn = document.createElement("button");
       applyBtn.type = "button";
       applyBtn.className = "btn btn-ghost analysis-run-apply";
-      applyBtn.textContent = "Apply";
+      applyBtn.textContent = "Show in workspace";
+      applyBtn.title =
+        "Load this run into the graph, Analysis / Health / Validation tabs, and module list";
       applyBtn.addEventListener("click", () => handlers.onApplyRun?.(run.id));
       refs.actions.appendChild(applyBtn);
     }
@@ -665,6 +722,34 @@ export function createResultsPanel(
     }
   }
 
+  function analysisFileRatingsState() {
+    return {
+      filesHydrated: Object.keys(currentResult?.quality?.files ?? {}).length > 0,
+      filesLoading: qualityFilesLoad === "loading",
+      onNeedQualityFiles: () => {
+        requestQualityFilesForRatings();
+      },
+    };
+  }
+
+  function renderReport(): void {
+    if (!reportHost) return;
+    reportHost.replaceChildren();
+    if (!currentResult) {
+      const empty = document.createElement("div");
+      empty.className = "analysis-report-empty";
+      empty.innerHTML = `
+        <h2 class="analysis-report-title">Analysis report</h2>
+        <p class="panel-empty">Run analysis to generate an overall project report — packages, rules, architecture health, and modularity.</p>
+      `;
+      reportHost.appendChild(empty);
+      return;
+    }
+    renderAnalysisTab(reportHost, currentResult, handlers, analysisFileRatingsState(), {
+      asReport: true,
+    });
+  }
+
   function renderResults(): void {
     resultsHost.replaceChildren();
 
@@ -676,10 +761,9 @@ export function createResultsPanel(
     resultsHost.hidden = false;
     switch (activeTab) {
       case "analysis":
-        renderAnalysisTab(resultsHost, currentResult, handlers);
-        break;
-      case "health":
-        renderHealthTab(resultsHost, currentResult, handlers);
+        if (!reportInMainView) {
+          renderAnalysisTab(resultsHost, currentResult, handlers, analysisFileRatingsState());
+        }
         break;
       case "validation":
         renderValidationTab(resultsHost, currentResult, handlers);
@@ -687,7 +771,38 @@ export function createResultsPanel(
     }
   }
 
+  /** Only when the user opens File ratings — never on Analysis first paint. */
+  function requestQualityFilesForRatings(): void {
+    if (!handlers.onRequestQualityFiles || !currentResult) return;
+    if (qualityFilesLoad === "loading") return;
+    if (Object.keys(currentResult.quality?.files ?? {}).length > 0) {
+      qualityFilesLoad = "done";
+      return;
+    }
+    qualityFilesLoad = "loading";
+    const requestId = qualityFilesRequestId;
+    // Fetch on the next macrotask so the File tab can paint "Loading…" first.
+    window.setTimeout(() => {
+      void handlers
+        .onRequestQualityFiles?.()
+        .catch(() => null)
+        .then(() => {
+          if (requestId !== qualityFilesRequestId) return;
+          qualityFilesLoad = "done";
+          // Boot's setResult usually re-renders; fall back if quality was empty.
+          if (Object.keys(currentResult?.quality?.files ?? {}).length === 0) {
+            if (reportInMainView) renderReport();
+            else if (activeTab === "analysis") renderContent();
+          }
+        });
+    }, 0);
+  }
+
   function renderContent(): void {
+    if (reportInMainView) {
+      renderReport();
+    }
+
     const showProgress = activeTab === "progress";
     progressHost.hidden = !showProgress;
     resultsHost.hidden = showProgress;
@@ -698,7 +813,7 @@ export function createResultsPanel(
       return;
     }
 
-    // Analysis / Health / Validation — never show progress bars or AI text channel.
+    // Validation (and legacy Analysis) — never show progress bars or AI text channel.
     const hasRuns = activeRuns.length > 0;
     const hasRunning = activeRuns.some((run) => run.status === "running");
     emptyHost.hidden = hasRunning || hasRuns || currentResult !== null;
@@ -707,7 +822,18 @@ export function createResultsPanel(
 
   return {
     setResult(result: AnalysisResult | null) {
+      const prev = currentResult;
       currentResult = result;
+      if (!result) {
+        qualityFilesLoad = "idle";
+        qualityFilesRequestId += 1;
+      } else if (Object.keys(result.quality?.files ?? {}).length > 0) {
+        qualityFilesLoad = "done";
+      } else if (result !== prev) {
+        // New analysis result without files — allow another lazy fetch.
+        qualityFilesLoad = "idle";
+        qualityFilesRequestId += 1;
+      }
       renderContent();
     },
     setRuns(runs: AnalysisRun[]) {
@@ -730,6 +856,12 @@ export function createResultsPanel(
         return;
       }
       if (latestJustFinished && latest.status === "completed") {
+        if (reportInMainView) {
+          renderReport();
+          handlers.onRequestShowReport?.();
+          setActiveTab("validation");
+          return;
+        }
         setActiveTab("analysis");
         return;
       }
@@ -738,6 +870,9 @@ export function createResultsPanel(
     showTab(tab: TabId) {
       setActiveTab(tab);
     },
+    refreshReport() {
+      renderReport();
+    },
   };
 }
 
@@ -745,50 +880,91 @@ function renderAnalysisTab(
   container: HTMLElement,
   result: AnalysisResult,
   handlers: ResultsPanelHandlers,
+  fileRatingsState: {
+    filesHydrated: boolean;
+    filesLoading: boolean;
+    onNeedQualityFiles?: () => void;
+  } = {
+    filesHydrated: true,
+    filesLoading: false,
+  },
+  opts: { asReport?: boolean } = {},
 ): void {
+  const root = document.createElement("div");
+  root.className = opts.asReport ? "analysis-report" : "analysis-panel";
+
+  if (opts.asReport) {
+    const title = document.createElement("h2");
+    title.className = "analysis-report-title";
+    title.textContent = "Analysis report";
+    root.appendChild(title);
+  }
+
   const summary = document.createElement("div");
   summary.className = "result-summary";
-  summary.textContent = result.summary;
-  container.appendChild(summary);
+  summary.textContent = formatAnalysisStatusSummary(result);
+  root.appendChild(summary);
 
   const stats = document.createElement("div");
   stats.className = "result-stats";
 
-  const statDefs: {
-    kind: AnalysisStatKind;
+  const counts = analysisStatusCounts(result);
+  type StatDef = {
     value: number;
     label: string;
     className: string;
-  }[] = [
+    kind?: AnalysisStatKind;
+    onClick?: () => void;
+    title?: string;
+  };
+  const statDefs: StatDef[] = [
     {
+      value: counts.packages,
+      label: "Packages",
+      className: "stat",
       kind: "modules",
-      value: result.graph.nodes.length,
-      label: "Modules",
-      className: "stat",
+      title: "View packages / modules in the dependency graph",
     },
     {
-      kind: "dependencies",
-      value: result.graph.edges.length,
-      label: "Dependencies",
+      value: counts.files,
+      label: "Source files",
       className: "stat",
+      title: "Source files included in the last analysis",
     },
     {
-      kind: "pass",
-      value: result.validation.filter((v) => v.status === "pass").length,
+      value: counts.rules,
+      label: "Rules",
+      className: "stat",
+      title: "Validation rules in the last analysis",
+    },
+    {
+      value: counts.passed,
       label: "Passed",
       className: "stat stat-pass",
+      kind: "pass",
     },
     {
-      kind: "warn",
-      value: result.validation.filter((v) => v.status === "warn").length,
+      value: counts.warnings,
       label: "Warnings",
       className: "stat stat-warn",
+      kind: "warn",
     },
     {
-      kind: "fail",
-      value: result.validation.filter((v) => v.status === "fail").length,
+      value: counts.failures,
       label: "Failures",
       className: "stat stat-fail",
+      kind: "fail",
+    },
+    {
+      value: counts.modularityHealth,
+      label: "Modularity health",
+      className: "stat",
+      onClick: () => {
+        root
+          .querySelector("#modularity-health-section")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      },
+      title: "Jump to Modularity health section",
     },
   ];
 
@@ -804,10 +980,13 @@ function renderAnalysisTab(
   };
 
   for (const def of statDefs) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = `${def.className} stat-clickable`;
-    card.title = `View ${def.label.toLowerCase()} details`;
+    const clickable = Boolean(def.kind || def.onClick);
+    const card = document.createElement(clickable ? "button" : "div");
+    if (clickable) (card as HTMLButtonElement).type = "button";
+    card.className = clickable ? `${def.className} stat-clickable` : def.className;
+    card.title =
+      def.title ??
+      (def.kind ? `View ${def.label.toLowerCase()} details` : def.label);
 
     const value = document.createElement("span");
     value.className = "stat-value";
@@ -818,18 +997,22 @@ function renderAnalysisTab(
     label.textContent = def.label;
 
     card.append(value, label);
-    card.addEventListener("click", () => {
-      showAnalysisStatDetail(def.kind, result, {
-        onShowModuleOnGraph: handlers.onShowModuleOnGraph,
-        onShowDependencyOnGraph: handlers.onShowDependencyOnGraph,
-        validation: validationHandlers,
+    if (def.kind) {
+      card.addEventListener("click", () => {
+        showAnalysisStatDetail(def.kind!, result, {
+          onShowModuleOnGraph: handlers.onShowModuleOnGraph,
+          onShowDependencyOnGraph: handlers.onShowDependencyOnGraph,
+          validation: validationHandlers,
+        });
       });
-    });
+    } else if (def.onClick) {
+      card.addEventListener("click", def.onClick);
+    }
 
     stats.appendChild(card);
   }
 
-  container.appendChild(stats);
+  root.appendChild(stats);
 
   const percentileView = parsePercentileViewMode(
     handlers.getPercentileView?.() ?? "all",
@@ -844,21 +1027,30 @@ function renderAnalysisTab(
     includeEntityLists: false,
   });
   if (arch) {
-    container.appendChild(
+    root.appendChild(
       renderArchitectureHealthSection(
         arch,
-        () =>
+        (kind) =>
           buildArchitectureHealth(result.quality, {
             ...archOpts,
             includeEntityLists: true,
+            // Rating every file is deferred until the File ratings tab needs it.
+            includeFileLists: kind === "files",
           }),
         handlers,
         percentileView,
         () => {
-          // Re-render Analysis tab in place when percentile view changes.
+          // Re-render Analysis report in place when percentile view changes.
           container.replaceChildren();
-          renderAnalysisTab(container, result, handlers);
+          renderAnalysisTab(
+            container,
+            result,
+            handlers,
+            fileRatingsState,
+            opts,
+          );
         },
+        fileRatingsState,
       ),
     );
   } else {
@@ -866,9 +1058,13 @@ function renderAnalysisTab(
     empty.className = "panel-empty arch-health-empty";
     empty.textContent =
       "Architecture quality metrics unavailable — re-run analysis to precompute them.";
-    container.appendChild(empty);
+    root.appendChild(empty);
   }
+
+  root.appendChild(renderModularityHealthSection(result, handlers));
+  container.appendChild(root);
 }
+
 
 function renderPercentileViewSwitch(
   mode: PercentileViewMode,
@@ -899,17 +1095,33 @@ function renderPercentileViewSwitch(
   return wrap;
 }
 
+type RatingsSubtab = "packages" | "files";
+
 function renderArchitectureHealthSection(
   arch: ArchitectureHealthReport,
-  loadFullArch: () => ArchitectureHealthReport | null,
+  loadEntityLists: (
+    kind: RatingsSubtab,
+  ) => ArchitectureHealthReport | null,
   handlers: ResultsPanelHandlers,
   percentileView: PercentileViewMode,
   onRerender: () => void,
+  fileRatingsState: {
+    filesHydrated: boolean;
+    filesLoading: boolean;
+    onNeedQualityFiles?: () => void;
+  } = {
+    filesHydrated: true,
+    filesLoading: false,
+  },
 ): HTMLElement {
-  let cachedFull: ArchitectureHealthReport | null | undefined;
-  const fullArch = (): ArchitectureHealthReport | null => {
-    if (cachedFull === undefined) cachedFull = loadFullArch();
-    return cachedFull;
+  const cachedLists: Partial<
+    Record<RatingsSubtab, ArchitectureHealthReport | null>
+  > = {};
+  const entityReport = (kind: RatingsSubtab): ArchitectureHealthReport | null => {
+    if (cachedLists[kind] === undefined) {
+      cachedLists[kind] = loadEntityLists(kind);
+    }
+    return cachedLists[kind] ?? null;
   };
 
   const section = document.createElement("section");
@@ -997,13 +1209,12 @@ function renderArchitectureHealthSection(
   }
   section.appendChild(metrics);
   section.appendChild(
-    renderRatingsSubtabs(arch, fullArch, handlers),
+    renderRatingsSubtabs(arch, entityReport, handlers, fileRatingsState),
   );
 
   return section;
 }
 
-type RatingsSubtab = "packages" | "files";
 /** good→worse = high rating first; worse→good = low rating first. */
 type RatingsSort = "best-first" | "worst-first";
 
@@ -1020,8 +1231,13 @@ function sortRatedEntities(
 
 function renderRatingsSubtabs(
   arch: ArchitectureHealthReport,
-  fullArch: () => ArchitectureHealthReport | null,
+  entityReport: (kind: RatingsSubtab) => ArchitectureHealthReport | null,
   handlers: ResultsPanelHandlers,
+  fileRatingsState: {
+    filesHydrated: boolean;
+    filesLoading: boolean;
+    onNeedQualityFiles?: () => void;
+  },
 ): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "arch-ratings";
@@ -1048,7 +1264,7 @@ function renderRatingsSubtabs(
   const sortBtns = new Map<RatingsSort, HTMLButtonElement>();
 
   const loadSorted = (id: RatingsSubtab): RatedEntity[] => {
-    const report = fullArch();
+    const report = entityReport(id);
     const raw =
       id === "packages" ? (report?.packages ?? []) : (report?.files ?? []);
     return sortRatedEntities(raw, sort);
@@ -1069,8 +1285,50 @@ function renderRatingsSubtabs(
       btn.setAttribute("aria-selected", on ? "true" : "false");
     }
     panel.replaceChildren();
+
+    if (id === "files" && !fileRatingsState.filesHydrated) {
+      if (!fileRatingsState.filesLoading) {
+        fileRatingsState.filesLoading = true;
+        fileRatingsState.onNeedQualityFiles?.();
+      }
+      const loading = createLoadingPlaceholder({
+        title: "Loading file ratings…",
+        detail: "Fetching per-file quality from the analysis cache.",
+        size: "fill",
+      });
+      loading.classList.add("arch-ratings-loading");
+      panel.appendChild(loading);
+      return;
+    }
+
     const host = document.createElement("div");
     panel.appendChild(host);
+
+    // Defer heavy file rating work so the tab chrome paints first.
+    if (id === "files" && fileRatingsState.filesHydrated) {
+      host.appendChild(
+        createLoadingPlaceholder({
+          title: "Computing file ratings…",
+          detail: "Scoring files against project peers.",
+          size: "fill",
+        }),
+      );
+      requestAnimationFrame(() => {
+        if (active !== "files") return;
+        host.replaceChildren();
+        renderPagedGrid(
+          host,
+          () => loadSorted("files"),
+          (item) => renderRatingGridCard(item, handlers),
+          {
+            pageSize: 24,
+            emptyText: "No file ratings",
+            className: "arch-ratings-grid",
+          },
+        );
+      });
+      return;
+    }
 
     renderPagedGrid(
       host,
@@ -1174,26 +1432,40 @@ function renderRatingGridCard(
   return card;
 }
 
-function renderHealthTab(
-  container: HTMLElement,
+/** DSM modularity health — Analysis tab subsection (same chrome as Architecture health). */
+function renderModularityHealthSection(
   result: AnalysisResult,
   handlers: ResultsPanelHandlers,
-): void {
+): HTMLElement {
+  const section = document.createElement("section");
+  section.className = "arch-health modularity-health";
+  section.id = "modularity-health-section";
+
+  const headingRow = document.createElement("div");
+  headingRow.className = "arch-health-heading-row";
+
+  const heading = document.createElement("h3");
+  heading.className = "arch-health-heading";
+  heading.textContent = "Modularity health";
+  headingRow.appendChild(heading);
+  section.appendChild(headingRow);
+
   const dsm = result.dsm ?? null;
   if (!dsm || dsm.elements.length === 0) {
     const empty = document.createElement("div");
-    empty.className = "panel-empty";
+    empty.className = "panel-empty arch-health-empty";
     empty.textContent =
-      "No DSM health data yet. Run analysis, then open the DSM view.";
-    container.appendChild(empty);
+      "No modularity health yet. Run analysis to compute Design Structure Matrix scores.";
+    section.appendChild(empty);
 
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "btn btn-ghost";
-    openBtn.textContent = "Open DSM view";
+    openBtn.textContent = "Open DSM matrix";
+    openBtn.title = "Open the Design Structure Matrix dependency grid";
     openBtn.addEventListener("click", () => handlers.onShowDsm?.());
-    container.appendChild(openBtn);
-    return;
+    section.appendChild(openBtn);
+    return section;
   }
 
   const score = Math.round(dsm.metrics.healthScore);
@@ -1204,7 +1476,7 @@ function renderHealthTab(
 
   const scoreEl = document.createElement("div");
   scoreEl.className = "health-score";
-  scoreEl.innerHTML = `<span class="health-score-value">${score}</span><span class="health-score-label">Modularity health</span>`;
+  scoreEl.innerHTML = `<span class="health-score-value">${score}</span><span class="health-score-label">/ 100 · DSM modularity</span>`;
 
   const statusEl = document.createElement("div");
   statusEl.className = "health-status-label";
@@ -1216,10 +1488,15 @@ function renderHealthTab(
         : "Poor — cycles or dense upward dependencies";
 
   scorecard.append(scoreEl, statusEl);
-  container.appendChild(scorecard);
+  section.appendChild(scorecard);
+
+  const meta = document.createElement("div");
+  meta.className = "arch-health-meta";
+  meta.textContent = `${dsm.elements.length} × ${dsm.elements.length} ${dsm.level}-level matrix · ${dsm.ordering} order`;
+  section.appendChild(meta);
 
   const metrics = document.createElement("div");
-  metrics.className = "health-metrics";
+  metrics.className = "health-metrics arch-health-metrics";
 
   const metricRows: { label: string; value: string; hint: string }[] = [
     {
@@ -1252,11 +1529,6 @@ function renderHealthTab(
       value: String(dsm.metrics.busCount ?? dsm.busIds?.length ?? 0),
       hint: "High fan-in shared modules (≥10% callers)",
     },
-    {
-      label: "DSM size",
-      value: `${dsm.elements.length} × ${dsm.elements.length}`,
-      hint: `${dsm.level} level · ${dsm.ordering} order`,
-    },
   ];
 
   for (const row of metricRows) {
@@ -1269,7 +1541,22 @@ function renderHealthTab(
     `;
     metrics.appendChild(item);
   }
-  container.appendChild(metrics);
+  section.appendChild(metrics);
+
+  const violations = dsm.violations ?? [];
+  if (violations.length > 0) {
+    const conf = document.createElement("div");
+    conf.className = "health-conformance";
+    conf.innerHTML = `<strong>LDM conformance:</strong> ${violations.length} violation(s)`;
+    section.appendChild(conf);
+  } else if (
+    result.validation.some((v) => v.rule_id === "architecture_conformance")
+  ) {
+    const conf = document.createElement("div");
+    conf.className = "health-conformance health-conformance-ok";
+    conf.textContent = "LDM conformance: no design-rule violations";
+    section.appendChild(conf);
+  }
 
   const actions = document.createElement("div");
   actions.className = "health-actions";
@@ -1283,13 +1570,7 @@ function renderHealthTab(
   );
   actions.appendChild(showDsmBtn);
 
-  const violations = dsm.violations ?? [];
   if (violations.length > 0) {
-    const conf = document.createElement("div");
-    conf.className = "health-conformance";
-    conf.innerHTML = `<strong>LDM conformance:</strong> ${violations.length} violation(s)`;
-    container.appendChild(conf);
-
     const showViol = document.createElement("button");
     showViol.type = "button";
     showViol.className = "btn btn-ghost";
@@ -1297,13 +1578,6 @@ function renderHealthTab(
     const ids = [...new Set(violations.flatMap((v) => [v.from, v.to]))];
     showViol.addEventListener("click", () => handlers.onShowDsm?.(ids));
     actions.appendChild(showViol);
-  } else if (
-    result.validation.some((v) => v.rule_id === "architecture_conformance")
-  ) {
-    const conf = document.createElement("div");
-    conf.className = "health-conformance health-conformance-ok";
-    conf.textContent = "LDM conformance: no design-rule violations";
-    container.appendChild(conf);
   }
 
   const circular = result.validation.find(
@@ -1331,7 +1605,8 @@ function renderHealthTab(
     actions.appendChild(showCycleBtn);
   }
 
-  container.appendChild(actions);
+  section.appendChild(actions);
+  return section;
 }
 
 function renderValidationTab(

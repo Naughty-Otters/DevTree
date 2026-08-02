@@ -20,10 +20,23 @@ export const CRON_PRESETS: { label: string; value: string }[] = [
   { label: "Weekdays at 9:00", value: "0 9 * * 1-5" },
 ];
 
+export interface AnalysisDialogOptions {
+  defaults?: Partial<AnalysisRunChoice>;
+  /** Open Settings → Analysis Rules (closes the dialog first). */
+  onConfigureRules?: () => void;
+}
+
 export function showAnalysisDialog(
   ruleCount: number,
-  defaults?: Partial<AnalysisRunChoice>,
+  defaultsOrOptions?: Partial<AnalysisRunChoice> | AnalysisDialogOptions,
 ): Promise<AnalysisRunChoice | null> {
+  const options: AnalysisDialogOptions =
+    defaultsOrOptions &&
+    ("defaults" in defaultsOrOptions || "onConfigureRules" in defaultsOrOptions)
+      ? (defaultsOrOptions as AnalysisDialogOptions)
+      : { defaults: defaultsOrOptions as Partial<AnalysisRunChoice> | undefined };
+  const defaults = options.defaults;
+
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -40,7 +53,26 @@ export function showAnalysisDialog(
 
     const subtitle = document.createElement("p");
     subtitle.className = "modal-subtitle";
-    subtitle.textContent = `${ruleCount} rule(s) selected. Choose how this analysis should run.`;
+    subtitle.textContent =
+      ruleCount === 0
+        ? "No rules selected yet. Configure the rule board, then choose how analysis should run."
+        : `${ruleCount} rule${ruleCount === 1 ? "" : "s"} selected. Choose how this analysis should run.`;
+
+    const rulesRow = document.createElement("p");
+    rulesRow.className = "run-dialog-rules-row";
+    if (options.onConfigureRules) {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "btn-text run-dialog-configure-rules";
+      link.textContent = "Configure rules in Settings";
+      link.addEventListener("click", () => {
+        close(null);
+        options.onConfigureRules?.();
+      });
+      rulesRow.appendChild(link);
+    } else {
+      rulesRow.hidden = true;
+    }
 
     const body = document.createElement("div");
     body.className = "modal-body run-mode-body";
@@ -204,15 +236,15 @@ export function showAnalysisDialog(
     startBtn.textContent = "Start";
 
     actions.append(cancelBtn, startBtn);
-    dialog.append(title, subtitle, body, actions);
+    dialog.append(title, subtitle, rulesRow, body, actions);
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
 
-    const close = (result: AnalysisRunChoice | null) => {
+    function close(result: AnalysisRunChoice | null): void {
       backdrop.remove();
       document.removeEventListener("keydown", onKey);
       resolve(result);
-    };
+    }
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close(null);

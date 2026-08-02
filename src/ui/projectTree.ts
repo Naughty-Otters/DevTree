@@ -1,5 +1,6 @@
 import type { TreeEntry } from "../project/types";
 import { createChevron, createFileIcon, createFolderIcon } from "./icons";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 
 export interface TreeCallbacks {
   onFileOpen: (path: string) => void;
@@ -94,9 +95,14 @@ function renderNode(
     let childrenBuilt = false;
     let loading = false;
 
+    const clearChildLists = () => {
+      for (const child of [...li.children]) {
+        if (child.classList.contains("tree-children")) child.remove();
+      }
+    };
+
     const mountChildren = (kids: TreeEntry[]) => {
-      const existing = li.querySelector(":scope > .tree-children");
-      existing?.remove();
+      clearChildLists();
       if (kids.length === 0) {
         entry.has_children = false;
         entry.children = [];
@@ -129,6 +135,21 @@ function renderNode(
       if (!callbacks.loadChildren || loading) return false;
       loading = true;
       label.classList.add("tree-loading");
+      clearChildLists();
+      const loadingRow = document.createElement("ul");
+      loadingRow.className = "tree-children";
+      const loadingItem = document.createElement("li");
+      loadingItem.className = "tree-loading-row";
+      loadingItem.appendChild(
+        createLoadingPlaceholder({
+          title: "Loading folder…",
+          size: "inline",
+        }),
+      );
+      loadingRow.appendChild(loadingItem);
+      li.appendChild(loadingRow);
+      li.classList.add("expanded");
+      setExpanded(true);
       try {
         const kids = await callbacks.loadChildren(entry.path);
         childrenBuilt = true;
@@ -137,6 +158,7 @@ function renderNode(
       } catch (err) {
         console.error("Failed to list folder", entry.path, err);
         childrenBuilt = false;
+        loadingRow.remove();
         return false;
       } finally {
         loading = false;

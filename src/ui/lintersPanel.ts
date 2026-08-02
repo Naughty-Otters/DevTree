@@ -4,6 +4,7 @@ import type {
 } from "../linter/types";
 import { selectedLinterForGroup } from "../linter/types";
 import { lucideIcon } from "./icons";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { ChevronDown } from "lucide";
 
 export interface LintersPanelState {
@@ -53,10 +54,12 @@ export function createLintersPanel(
   list.className = "linter-list";
 
   if (state.loading && state.groups.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "linter-empty";
-    empty.textContent = "Checking linters…";
-    list.appendChild(empty);
+    list.appendChild(
+      createLoadingPlaceholder({
+        title: "Checking linters…",
+        size: "panel",
+      }),
+    );
   } else if (state.groups.length === 0) {
     const empty = document.createElement("div");
     empty.className = "linter-empty";

@@ -39,4 +39,29 @@ describe("settingsPanel", () => {
 
     container.remove();
   });
+
+  it("opens a named settings accordion section", () => {
+    const container = document.createElement("aside");
+    container.id = "right-panel";
+    container.className = "hidden";
+    container.innerHTML = `
+      <button id="btn-close-settings"></button>
+      <div class="settings-accordion">
+        <section class="settings-accordion-item is-open" data-settings-section="rules">
+          <button class="settings-accordion-expand" aria-expanded="true"></button>
+        </section>
+        <section class="settings-accordion-item" data-settings-section="linters">
+          <button class="settings-accordion-expand" aria-expanded="false"></button>
+        </section>
+      </div>
+    `;
+    document.body.appendChild(container);
+    const api = createSettingsPanel(container);
+    api.open("linters");
+    const rules = container.querySelector('[data-settings-section="rules"]');
+    const linters = container.querySelector('[data-settings-section="linters"]');
+    expect(rules?.classList.contains("is-open")).toBe(false);
+    expect(linters?.classList.contains("is-open")).toBe(true);
+    container.remove();
+  });
 });

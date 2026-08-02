@@ -1,6 +1,7 @@
 import type { GraphNode } from "../graph/types";
 import { createNodeKindShapeWrap, nodeKindLabel } from "../canvas/nodeIcons";
 import { nodeColor } from "../canvas/colors";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { appendPagedItems } from "./pagedList";
 import { attachTooltip } from "./tooltip";
 
@@ -8,6 +9,8 @@ export interface ModulesListState {
   graphNodes: GraphNode[];
   visibleIds: Set<string>;
   searchQuery: string;
+  /** True while graph/hierarchy is hydrating. */
+  loading?: boolean;
 }
 
 export interface ModulesListCallbacks {
@@ -77,10 +80,21 @@ export function renderModulesList(
   container.appendChild(toolbar);
 
   if (state.graphNodes.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "panel-empty";
-    empty.textContent = "Run analysis to list graph modules";
-    container.appendChild(empty);
+    if (state.loading) {
+      container.appendChild(
+        createLoadingPlaceholder({
+          title: "Loading modules…",
+          detail: "Waiting for the dependency graph layout.",
+          size: "panel",
+        }),
+      );
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "panel-empty";
+      empty.textContent =
+        "After you run analysis, modules from the current graph view appear here";
+      container.appendChild(empty);
+    }
     restoreSearchFocus(container, searchHadFocus, searchCursor);
     return;
   }

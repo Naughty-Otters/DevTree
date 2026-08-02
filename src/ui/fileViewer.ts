@@ -15,6 +15,7 @@ import sql from "highlight.js/lib/languages/sql";
 import ini from "highlight.js/lib/languages/ini";
 import "highlight.js/styles/github-dark.css";
 import { highlightLanguage } from "./icons";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import type { FileLineIssue } from "../validation/fileIssues";
 import { issuesByLine } from "../validation/fileIssues";
 
@@ -47,6 +48,10 @@ export interface FileViewerCallbacks {
 export interface FileViewerHandle {
   open: (path: string, content: string, opts?: FileViewerOpenOptions) => void;
   close: () => void;
+  /** Show the File tab guide when no file is open. */
+  showGuide: () => void;
+  /** Placeholder while a file is being read from disk. */
+  showLoading: (path?: string) => void;
   isOpen: () => boolean;
   getPath: () => string | null;
   getIssues: () => FileLineIssue[];
@@ -119,7 +124,20 @@ export function createFileViewer(
   textarea.autocapitalize = "off";
 
   editorWrap.append(backdrop, textarea);
-  container.append(header, editorWrap);
+
+  const empty = document.createElement("div");
+  empty.className = "file-viewer-empty";
+  empty.hidden = true;
+  const emptyTitle = document.createElement("p");
+  emptyTitle.className = "file-viewer-empty-title";
+  emptyTitle.textContent = "No file open";
+  const emptyDetail = document.createElement("p");
+  emptyDetail.className = "file-viewer-empty-detail";
+  emptyDetail.textContent =
+    "Open a file from the Project Tree, or double-click a file or symbol on the Graph.";
+  empty.append(emptyTitle, emptyDetail);
+
+  container.append(header, editorWrap, empty);
 
   function isDirty(): boolean {
     return currentPath != null && textarea.value !== savedContent;
@@ -146,7 +164,50 @@ export function createFileViewer(
     textarea.value = "";
     rowsEl.innerHTML = "";
     rowsEl.style.transform = "";
+    empty.hidden = true;
+    header.hidden = false;
+    editorWrap.hidden = false;
     if (highlightTimer) clearTimeout(highlightTimer);
+    setDirty(false);
+  }
+
+  function showGuide(): void {
+    currentPath = null;
+    savedContent = "";
+    currentIssues = [];
+    activeLine = null;
+    textarea.value = "";
+    rowsEl.innerHTML = "";
+    empty.replaceChildren();
+    emptyTitle.textContent = "No file open";
+    emptyDetail.textContent =
+      "Open a file from the Project Tree, or double-click a file or symbol on the Graph.";
+    empty.append(emptyTitle, emptyDetail);
+    empty.hidden = false;
+    header.hidden = true;
+    editorWrap.hidden = true;
+    container.classList.remove("hidden");
+    setDirty(false);
+  }
+
+  function showLoading(path?: string): void {
+    currentPath = null;
+    savedContent = "";
+    currentIssues = [];
+    activeLine = null;
+    textarea.value = "";
+    rowsEl.innerHTML = "";
+    empty.replaceChildren(
+      createLoadingPlaceholder({
+        title: path ? `Opening ${path}…` : "Opening file…",
+        detail: "Reading from the project folder.",
+        size: "fill",
+      }),
+    );
+    empty.hidden = false;
+    header.hidden = true;
+    editorWrap.hidden = true;
+    container.classList.remove("hidden");
     setDirty(false);
   }
 
@@ -272,6 +333,9 @@ export function createFileViewer(
       currentIssues = opts?.issues ?? [];
       activeLine = opts?.line && opts.line > 0 ? opts.line : null;
 
+      empty.hidden = true;
+      header.hidden = false;
+      editorWrap.hidden = false;
       title.textContent = path;
       textarea.value = content;
       renderEditor();
@@ -287,6 +351,8 @@ export function createFileViewer(
       }
     },
     close,
+    showGuide,
+    showLoading,
     isOpen: () => currentPath !== null,
     getPath: () => currentPath,
     getIssues: () => currentIssues,

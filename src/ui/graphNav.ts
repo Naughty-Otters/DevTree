@@ -51,6 +51,8 @@ export interface GraphNavCallbacks {
   onEdgeStyleChange?: (style: EdgeStyle) => void;
   onModuleFiltersChange?: (filters: ModuleFilterFlags) => void;
   onFocusView?: () => void;
+  /** Shown on the stale-imports warning banner. */
+  onRunAnalysis?: () => void;
 }
 
 const LAYOUT_ICONS: Record<LayoutFamily, IconNode> = {
@@ -363,7 +365,9 @@ export function renderGraphNav(
 
   const hint = document.createElement("span");
   hint.className = "graph-nav-hint";
-  hint.textContent = "click · details  ·  double-click · drill / open source";
+  hint.textContent = "Click = details · Double-click = drill / open source";
+  hint.title =
+    "Click a module for details. Double-click to drill into a package or open a file.";
   bar.append(
     controls,
     layoutControls,
@@ -376,10 +380,21 @@ export function renderGraphNav(
   container.appendChild(bar);
 
   if (options.staleImports) {
-    const warn = document.createElement("p");
+    const warn = document.createElement("div");
     warn.className = "graph-nav-warning";
-    warn.textContent =
-      "Import data looks outdated — run analysis again to see file and package dependencies.";
+    const text = document.createElement("p");
+    text.className = "graph-nav-warning-text";
+    text.textContent =
+      "Import data looks outdated — run analysis again to refresh file and package dependencies.";
+    warn.appendChild(text);
+    if (callbacks.onRunAnalysis) {
+      const runBtn = document.createElement("button");
+      runBtn.type = "button";
+      runBtn.className = "btn btn-ghost";
+      runBtn.textContent = "Run analysis";
+      runBtn.addEventListener("click", () => callbacks.onRunAnalysis?.());
+      warn.appendChild(runBtn);
+    }
     container.appendChild(warn);
   }
 }

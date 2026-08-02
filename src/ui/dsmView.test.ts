@@ -65,7 +65,17 @@ describe("createDsmView", () => {
     const container = document.createElement("div");
     expect(() => createDsmView(container)).not.toThrow();
     expect(container.classList.contains("dsm-view")).toBe(true);
-    expect(container.textContent).toContain("Run analysis to build a DSM");
+    expect(container.textContent).toContain("Design Structure Matrix");
+  });
+
+  it("shows a loading placeholder while hierarchy hydrates", () => {
+    const container = document.createElement("div");
+    const view = createDsmView(container);
+    view.setLoading("Loading Design Structure Matrix…");
+    expect(container.querySelector(".loading-placeholder")).toBeTruthy();
+    expect(container.textContent).toContain("Loading Design Structure Matrix");
+    view.setLoading(null);
+    expect(container.querySelector(".loading-placeholder")).toBeNull();
   });
 
   it("renders a matrix from hierarchy", () => {

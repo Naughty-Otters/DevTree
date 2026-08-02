@@ -133,18 +133,13 @@ describe("ui/projectTree", () => {
 
   it("lazy-loads folder children via loadChildren when has_children is set", async () => {
     const container = document.createElement("div");
-    const loadChildren = vi.fn(async (path: string) => {
-      expect(path).toBe("src");
-      return [
-        { name: "main.ts", path: "src/main.ts", kind: "file" as const },
-        {
-          name: "nested",
-          path: "src/nested",
-          kind: "directory" as const,
-          has_children: true,
-        },
-      ];
-    });
+    let resolveLoad!: (entries: TreeEntry[]) => void;
+    const loadChildren = vi.fn(
+      () =>
+        new Promise<TreeEntry[]>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
     const tree: TreeEntry = {
       name: "proj",
       path: ".",
@@ -162,10 +157,24 @@ describe("ui/projectTree", () => {
       new MouseEvent("click", { bubbles: true }),
     );
 
+    expect(container.querySelector(".loading-placeholder")).toBeTruthy();
+    expect(container.textContent).toContain("Loading folder");
+
+    resolveLoad([
+      { name: "main.ts", path: "src/main.ts", kind: "file" },
+      {
+        name: "nested",
+        path: "src/nested",
+        kind: "directory",
+        has_children: true,
+      },
+    ]);
+
     await vi.waitFor(() => {
       expect(loadChildren).toHaveBeenCalledWith("src");
       expect(container.querySelector('[data-path="src/main.ts"]')).toBeTruthy();
     });
+    expect(container.querySelector(".loading-placeholder")).toBeNull();
     expect(container.querySelector('[data-path="src/nested"]')).toBeTruthy();
     // Nested stub not expanded / deep contents not fetched.
     expect(loadChildren).toHaveBeenCalledTimes(1);

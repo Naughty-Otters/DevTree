@@ -143,4 +143,30 @@ describe("ui/graphNav", () => {
     focusBtn!.click();
     expect(focused).toBe(true);
   });
+
+  it("shows a Run analysis action on the stale-imports banner", () => {
+    const container = document.createElement("div");
+    let ran = false;
+    renderGraphNav(
+      container,
+      rootNavigation(),
+      false,
+      false,
+      {
+        onBack: () => {},
+        onForward: () => {},
+        onNavigate: () => {},
+        onRunAnalysis: () => {
+          ran = true;
+        },
+      },
+      { staleImports: true },
+    );
+    const btn = container.querySelector<HTMLButtonElement>(
+      ".graph-nav-warning button",
+    );
+    expect(btn?.textContent).toMatch(/Run analysis/i);
+    btn!.click();
+    expect(ran).toBe(true);
+  });
 });

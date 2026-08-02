@@ -2,7 +2,8 @@ import { lucideIcon } from "./icons";
 import { ChevronDown, X } from "lucide";
 
 export interface SettingsPanelApi {
-  open: () => void;
+  /** Open settings; optional accordion section id (e.g. `"rules"`). */
+  open: (section?: string) => void;
   close: () => void;
   toggle: () => void;
   isOpen: () => boolean;
@@ -58,7 +59,7 @@ export function createSettingsPanel(
     );
   }
 
-  initSettingsAccordion(accordion);
+  const accordionApi = initSettingsAccordion(accordion);
   applyOpen(open);
   if (open) {
     options.onOpen?.();
@@ -71,15 +72,20 @@ export function createSettingsPanel(
   });
 
   return {
-    open: () => setOpen(true),
+    open: (section?: string) => {
+      setOpen(true);
+      if (section) accordionApi?.openSection(section);
+    },
     close: () => setOpen(false),
     toggle: () => setOpen(!open),
     isOpen: () => open,
   };
 }
 
-function initSettingsAccordion(root: HTMLElement | null): void {
-  if (!root) return;
+function initSettingsAccordion(root: HTMLElement | null): {
+  openSection: (section: string) => void;
+} | null {
+  if (!root) return null;
 
   const items = [
     ...root.querySelectorAll<HTMLElement>(".settings-accordion-item"),
@@ -115,4 +121,17 @@ function initSettingsAccordion(root: HTMLElement | null): void {
       }
     });
   }
+
+  return {
+    openSection: (section: string) => {
+      const target = items.find(
+        (item) => item.dataset.settingsSection === section,
+      );
+      if (!target) return;
+      for (const item of items) {
+        setItemOpen(item, item === target);
+      }
+      target.scrollIntoView({ block: "nearest" });
+    },
+  };
 }

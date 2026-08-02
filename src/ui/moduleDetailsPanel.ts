@@ -31,6 +31,7 @@ import {
 import type { GraphEdge, GraphNode } from "../graph/types";
 import { lucideIcon } from "./icons";
 import { relatedModules } from "./graphPopup";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { appendPagedItems } from "./pagedList";
 import { X } from "lucide";
 
@@ -51,12 +52,17 @@ export interface ModuleDetailsData {
   navigation: GraphNavigation;
   analysis?: AnalysisResult | null;
   churn?: ChurnMap | null;
+  /** Per-file quality is still loading from cache. */
+  qualityLoading?: boolean;
 }
 
 export interface ModuleDetailsPanelApi {
   show: (data: ModuleDetailsData) => void;
-  /** Patch churn from the project-wide cache (no metric recalculation). */
-  updateQuality: (patch: { churn?: ChurnMap | null }) => void;
+  /** Patch churn / quality-loading from the project-wide cache. */
+  updateQuality: (patch: {
+    churn?: ChurnMap | null;
+    qualityLoading?: boolean;
+  }) => void;
   hide: () => void;
   isOpen: () => boolean;
   currentNodeId: () => string | null;
@@ -231,6 +237,7 @@ function renderQualitySection(
   report: QualityReport | null,
   percentileView: PercentileViewMode,
   onPercentileViewChange?: (mode: PercentileViewMode) => void,
+  qualityLoading = false,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "module-details-section module-details-quality";
@@ -242,7 +249,7 @@ function renderQualitySection(
   const title = document.createElement("h3");
   title.className = "module-details-section-title";
   title.innerHTML =
-    'Quality metrics <span class="module-details-count">Codacy-style</span>';
+    'Quality metrics <span class="module-details-count">Per-module scores</span>';
   titleRow.appendChild(title);
 
   if (report?.kind === "package" && onPercentileViewChange) {
@@ -251,6 +258,17 @@ function renderQualitySection(
     );
   }
   section.appendChild(titleRow);
+
+  if (qualityLoading && !report) {
+    const loading = createLoadingPlaceholder({
+      title: "Loading quality metrics…",
+      detail: "Fetching per-file scores from the analysis cache.",
+      size: "panel",
+    });
+    loading.classList.add("module-details-loading");
+    section.appendChild(loading);
+    return section;
+  }
 
   if (!report) {
     const empty = document.createElement("div");
@@ -475,11 +493,16 @@ export function createModuleDetailsPanel(
     }
     body.appendChild(meta);
     body.appendChild(
-      renderQualitySection(report, currentPercentileView(), (mode) => {
-        handlers.onPercentileViewChange?.(mode);
-        if (lastData) show({ ...lastData });
-        else replaceQualitySection(report);
-      }),
+      renderQualitySection(
+        report,
+        currentPercentileView(),
+        (mode) => {
+          handlers.onPercentileViewChange?.(mode);
+          if (lastData) show({ ...lastData });
+          else replaceQualitySection(report);
+        },
+        Boolean(data.qualityLoading),
+      ),
     );
 
     if (drillable) {
@@ -545,11 +568,18 @@ export function createModuleDetailsPanel(
     void root.offsetWidth;
   }
 
-  function updateQuality(patch: { churn?: ChurnMap | null }): void {
+  function updateQuality(patch: {
+    churn?: ChurnMap | null;
+    qualityLoading?: boolean;
+  }): void {
     if (!lastData || !open) return;
     lastData = {
       ...lastData,
       churn: patch.churn !== undefined ? patch.churn : lastData.churn,
+      qualityLoading:
+        patch.qualityLoading !== undefined
+          ? patch.qualityLoading
+          : lastData.qualityLoading,
     };
     // Full refresh so rating (percentile-aware) stays in sync with the view switcher.
     show(lastData);

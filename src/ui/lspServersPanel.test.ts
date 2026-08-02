@@ -24,4 +24,26 @@ describe("lspServersPanel", () => {
     ).not.toThrow();
     expect(container).toBeDefined();
   });
+
+  it("shows a loading placeholder while checking servers", () => {
+    const container = document.createElement("div");
+    createLspServersPanel(
+      container,
+      {
+        servers: [],
+        settings: {},
+        expandedServerId: null,
+        installingId: null,
+        errors: {},
+        loading: true,
+      },
+      {
+        onRefresh: () => {},
+        onInstall: async () => {},
+        onSettingsChange: () => {},
+      },
+    );
+    expect(container.querySelector(".loading-placeholder")).toBeTruthy();
+    expect(container.textContent).toContain("Checking language servers");
+  });
 });
