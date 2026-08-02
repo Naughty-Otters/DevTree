@@ -2,7 +2,7 @@
   "name": "devtree-ai",
   "version": "0.1.1",
   "description": "DevTree CLI — companion to the DevTree desktop codebase graph app",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "author": "Naughty-Otters",
   "repository": {
     "type": "git",

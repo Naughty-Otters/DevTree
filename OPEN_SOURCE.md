@@ -6,7 +6,7 @@ This document tracks DevTree's readiness for public open-source distribution.
 
 | Item | Status |
 |------|--------|
-| [MIT License](LICENSE) | Done |
+| [AGPL-3.0 License](LICENSE) | Done |
 | [Contributing guide](CONTRIBUTING.md) | Done |
 | [Security policy](SECURITY.md) | Done |
 | Code of Conduct | Optional — add if accepting external contributors at scale |

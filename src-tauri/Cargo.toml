@@ -3,7 +3,7 @@ name = "devtree"
 version = "0.1.1"
 description = "Desktop codebase dependency graph and architecture validation"
 authors = ["DevTree contributors"]
-license = "MIT"
+license = "AGPL-3.0-only"
 repository = "https://github.com/Naughty-Otters/DevTree"
 edition = "2021"
 
