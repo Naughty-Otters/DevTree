@@ -38,6 +38,12 @@ export function createLazyFileViewer(
     close() {
       viewer?.close();
     },
+    showGuide() {
+      void ensure().then((v) => v.showGuide());
+    },
+    showLoading(path?: string) {
+      void ensure().then((v) => v.showLoading(path));
+    },
     isOpen() {
       return viewer?.isOpen() ?? false;
     },

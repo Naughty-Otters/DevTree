@@ -29,8 +29,15 @@ describe("progressDisplay", () => {
     expect(pipelineStageFillPercent("scanning", "scanning", null)).toBeGreaterThan(0);
   });
 
+  it("keeps pipeline stages progressing during quality precompute", () => {
+    expect(pipelineStageStatus("quality", "validating")).toBe("done");
+    expect(pipelineStageStatus("quality", "quality")).toBe("running");
+    expect(pipelineStageStatus("quality", "scanning")).toBe("done");
+    expect(normalizeStage("metrics")).toBe("quality");
+  });
+
   it("counts active pipeline and rule tasks", () => {
-    expect(getPipelineStages().length).toBe(5);
+    expect(getPipelineStages().length).toBe(6);
     expect(
       countActiveTasks("scanning", [
         { ruleId: "r", ruleName: "Rule", status: "running" },

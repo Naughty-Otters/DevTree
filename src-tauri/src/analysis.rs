@@ -55,6 +55,9 @@ pub struct AnalysisResult {
     pub summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dsm: Option<DsmResult>,
+    /// Precomputed file/package quality metrics for O(1) UI lookups.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<devtree_core::QualityIndex>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +305,12 @@ pub struct AiValidationStream {
     pub thinking: String,
     pub text: String,
     pub activity: Option<String>,
+    /// Live tool stdout/stderr and other tool result previews.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tool_log: String,
+    /// Token budget / usage line (e.g. `Tokens 12.4k / 50k`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<String>,
     pub status: String,
 }
 
@@ -1214,6 +1223,156 @@ fn trim_analysis_result_for_transport(
     }
 }
 
+fn normalize_project_root(root: &str) -> String {
+    let trimmed = root.trim().replace('\\', "/");
+    if trimmed.len() <= 1 {
+        return trimmed;
+    }
+    trimmed.trim_end_matches('/').to_string()
+}
+
+fn empty_hierarchy_for_ipc() -> HierarchyIndex {
+    HierarchyIndex {
+        version: crate::hierarchy::HIERARCHY_VERSION,
+        files: vec![],
+        packages: vec![],
+        file_imports: std::collections::HashMap::new(),
+        package_edges: vec![],
+        symbols: std::collections::HashMap::new(),
+        symbol_edges: vec![],
+        scope_graphs: std::collections::HashMap::new(),
+    }
+}
+
+/// Hierarchy safe to persist/load for graph drill — never includes symbols.
+fn hierarchy_lite(mut hierarchy: HierarchyIndex) -> HierarchyIndex {
+    hierarchy.symbols.clear();
+    hierarchy.symbol_edges.clear();
+    hierarchy.scope_graphs.clear();
+    hierarchy
+}
+
+fn cap_validation_affected(mut validation: Vec<ValidationItem>, max: usize) -> Vec<ValidationItem> {
+    for item in validation.iter_mut() {
+        if item.affected.len() > max {
+            item.affected.truncate(max);
+        }
+    }
+    validation
+}
+
+/// Persist analysis for the UI:
+/// - SQLite: slim meta + package-level quality only (never multi-hundred-MB JSON)
+/// - Files: hierarchy-lite (~files+imports) and quality.files under ~/.devtree/cache/
+pub fn persist_analysis_result(
+    project_root: &str,
+    result: &AnalysisResult,
+) -> Result<(), String> {
+    let root = normalize_project_root(project_root);
+    let cache_dir = crate::analysis_cache::cache_dir_for_project(&root)?;
+
+    let lite = hierarchy_lite(result.hierarchy.clone());
+    let hierarchy_path = cache_dir.join("hierarchy-lite.json");
+    crate::analysis_cache::write_json_file(&hierarchy_path, &lite)?;
+
+    let mut quality_files_path: Option<String> = None;
+    if let Some(quality) = &result.quality {
+        if !quality.files.is_empty() {
+            let path = cache_dir.join("quality-files.json");
+            crate::analysis_cache::write_json_file(&path, &quality.files)?;
+            quality_files_path = Some(path.to_string_lossy().to_string());
+        }
+    }
+
+    let validation = cap_validation_affected(result.validation.clone(), 80);
+    let meta = serde_json::json!({
+        "graph": result.graph,
+        "validation": validation,
+        "suggestions": result.suggestions,
+        "summary": result.summary,
+        "dsm": result.dsm,
+        "projectRoot": root,
+        "cache": {
+            "hierarchyLite": hierarchy_path.to_string_lossy(),
+            "qualityFiles": quality_files_path,
+        },
+    });
+
+    // Package rollups only in SQLite (~hundreds of KB, not 14MB+).
+    let quality_packages = match &result.quality {
+        Some(q) => serde_json::json!({
+            "files": {},
+            "packages": q.packages,
+        }),
+        None => serde_json::Value::Null,
+    };
+
+    // File cache is the source of truth for large blobs. SQLite pointers are best-effort
+    // (tests / locked home dirs must not fail the analysis run).
+    let _ = crate::db::put_kv(
+        "analysis-project",
+        &serde_json::to_string(&root).map_err(|e| e.to_string())?,
+    );
+    let _ = crate::db::put_kv(&format!("analysis-meta::{root}"), &meta.to_string());
+    let _ = crate::db::put_kv(
+        &format!("analysis-hierarchy::{root}"),
+        &serde_json::json!({
+            "v": 2,
+            "path": hierarchy_path.to_string_lossy(),
+        })
+        .to_string(),
+    );
+    let _ = crate::db::put_kv(
+        &format!("analysis-quality::{root}"),
+        &quality_packages.to_string(),
+    );
+    Ok(())
+}
+
+/// IPC payload: report + package graph + package quality. Hierarchy loads on drill.
+pub fn slim_analysis_for_ipc(mut result: AnalysisResult) -> AnalysisResult {
+    let packages = result
+        .quality
+        .as_ref()
+        .map(|q| q.packages.clone())
+        .unwrap_or_default();
+    result.hierarchy = empty_hierarchy_for_ipc();
+    result.quality = Some(devtree_core::QualityIndex {
+        files: std::collections::HashMap::new(),
+        packages,
+    });
+    result.validation = cap_validation_affected(result.validation, 80);
+    result
+}
+
+/// Load hierarchy-lite from the analysis cache (no symbols).
+pub fn load_cached_hierarchy_lite(project_root: &str) -> Result<HierarchyIndex, String> {
+    let root = normalize_project_root(project_root);
+    let cache_dir = crate::analysis_cache::cache_dir_for_project(&root)?;
+    let path = cache_dir.join("hierarchy-lite.json");
+    if path.is_file() {
+        return crate::analysis_cache::read_json_file(&path);
+    }
+    // Legacy: pointer JSON in SQLite.
+    // Handled on the frontend via loadRaw; Rust path is the primary.
+    Err(format!(
+        "No cached hierarchy for {root}. Re-run analysis."
+    ))
+}
+
+/// Load per-file quality metrics from cache (optional, for module details / file lists).
+pub fn load_cached_quality_files(
+    project_root: &str,
+) -> Result<std::collections::HashMap<String, devtree_core::FileQualityMetrics>, String> {
+    let root = normalize_project_root(project_root);
+    let cache_dir = crate::analysis_cache::cache_dir_for_project(&root)?;
+    let path = cache_dir.join("quality-files.json");
+    if !path.is_file() {
+        return Ok(std::collections::HashMap::new());
+    }
+    crate::analysis_cache::read_json_file(&path)
+}
+
 #[cfg(test)]
 pub fn run_analysis(
     project_root: &str,
@@ -1491,7 +1650,45 @@ pub fn run_analysis_with_progress(
         health
     );
 
+    let emit_quality = emit.clone();
+    let analysis_id_quality = analysis_id.to_string();
+    let quality = crate::quality::build_quality_index(
+        &hierarchy,
+        &contents,
+        &validation,
+        cancel,
+        move |current, total| {
+            let pct = if total == 0 {
+                96
+            } else {
+                90 + ((current as f32 / total as f32) * 9.0) as u8
+            };
+            emit_progress(
+                &emit_quality,
+                &analysis_id_quality,
+                "quality",
+                &format!("Precomputing quality metrics ({current}/{total})"),
+                current,
+                total,
+                pct.min(99),
+                None,
+            );
+        },
+    )?;
+    // Quality is the last consumer of full file contents — free before transport trim.
+    drop(contents);
+
     trim_analysis_result_for_transport(&mut hierarchy, &mut validation);
+
+    let result = AnalysisResult {
+        graph,
+        hierarchy,
+        validation,
+        suggestions: vec![],
+        summary,
+        dsm,
+        quality: Some(quality),
+    };
 
     emit_progress(
         &emit,
@@ -1504,19 +1701,163 @@ pub fn run_analysis_with_progress(
         None,
     );
 
-    Ok(AnalysisResult {
-        graph,
-        hierarchy,
-        validation,
-        suggestions: vec![],
-        summary,
-        dsm,
-    })
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn slim_ipc_drops_hierarchy_and_caps_validation() {
+        let mut symbols = HashMap::new();
+        symbols.insert(
+            "a.ts".into(),
+            vec![crate::hierarchy::SymbolInfo {
+                id: "a.ts::f".into(),
+                label: "f".into(),
+                kind: "fn".into(),
+                file: "a.ts".into(),
+                line: 1,
+            }],
+        );
+        let quality: devtree_core::QualityIndex = serde_json::from_value(serde_json::json!({
+            "files": { "a.ts": { "path": "a.ts", "loc": 10, "cyclomatic": 1, "structural": 1,
+                "halsteadVolume": 1, "halsteadDifficulty": 1, "cognitive": 1, "maintainability": 90,
+                "dit": 0, "cbo": 0, "coverage": 0, "issueDensity": 0, "securityDensity": 0,
+                "aiDensity": 0, "duplicationHits": 0 } },
+            "packages": { ".": { "path": ".", "fileCount": 1, "totalLoc": 10,
+                "complexity": { "avg": 1, "percentiles": { "p50": 1, "p80": 1, "p90": 1 } },
+                "halstead": { "avg": 1, "percentiles": { "p50": 1, "p80": 1, "p90": 1 } },
+                "cognitive": { "avg": 1, "percentiles": { "p50": 1, "p80": 1, "p90": 1 } },
+                "maintainability": { "avg": 1, "percentiles": { "p50": 1, "p80": 1, "p90": 1 } },
+                "cbo": { "avg": 1, "percentiles": { "p50": 1, "p80": 1, "p90": 1 } },
+                "coverage": { "avg": 1, "percentiles": { "p50": 1, "p80": 1, "p90": 1 } },
+                "issues": { "avg": 0, "percentiles": { "p50": 0, "p80": 0, "p90": 0 } },
+                "security": { "avg": 0, "percentiles": { "p50": 0, "p80": 0, "p90": 0 } },
+                "aiQuality": { "avg": 0, "percentiles": { "p50": 0, "p80": 0, "p90": 0 } },
+                "duplication": { "avg": 0, "percentiles": { "p50": 0, "p80": 0, "p90": 0 } },
+                "size": { "avg": 10, "percentiles": { "p50": 10, "p80": 10, "p90": 10 } } } }
+        }))
+        .expect("quality json");
+        let full = AnalysisResult {
+            graph: Graph {
+                nodes: vec![],
+                edges: vec![],
+            },
+            hierarchy: HierarchyIndex {
+                version: crate::hierarchy::HIERARCHY_VERSION,
+                files: vec![crate::hierarchy::FileInfo {
+                    path: "a.ts".into(),
+                    label: "a.ts".into(),
+                    loc: 10,
+                    package: ".".into(),
+                }],
+                packages: vec![".".into()],
+                file_imports: HashMap::new(),
+                package_edges: vec![],
+                symbols,
+                symbol_edges: vec![crate::hierarchy::SymbolEdge {
+                    source: "a".into(),
+                    target: "b".into(),
+                    kind: "ref".into(),
+                }],
+                scope_graphs: HashMap::new(),
+            },
+            validation: vec![ValidationItem {
+                rule_id: "modularity".into(),
+                rule_name: "Modularity".into(),
+                status: "pass".into(),
+                message: "ok".into(),
+                affected: (0..200).map(|i| format!("f{i}.ts")).collect(),
+                cycle_groups: None,
+            }],
+            suggestions: vec![],
+            summary: "ok".into(),
+            dsm: None,
+            quality: Some(quality),
+        };
+
+        let slim = slim_analysis_for_ipc(full);
+        assert!(slim.hierarchy.files.is_empty());
+        assert!(slim.hierarchy.symbol_edges.is_empty());
+        assert!(slim.quality.as_ref().unwrap().files.is_empty());
+        assert_eq!(slim.quality.as_ref().unwrap().packages.len(), 1);
+        assert!(slim.validation[0].affected.len() <= 80);
+    }
+
+    #[test]
+    fn persist_writes_hierarchy_lite_without_symbols() {
+        let _guard = crate::analysis_cache::CACHE_ENV_LOCK.lock().unwrap();
+        let tmp = std::env::temp_dir().join(format!(
+            "devtree-cache-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // SAFETY: exclusive via CACHE_ENV_LOCK; restored before unlock.
+        unsafe {
+            std::env::set_var("DEVTREE_CACHE_DIR", &tmp);
+        }
+
+        let project = tmp.join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let root = project.to_str().unwrap();
+
+        let result = AnalysisResult {
+            graph: Graph {
+                nodes: vec![],
+                edges: vec![],
+            },
+            hierarchy: HierarchyIndex {
+                version: crate::hierarchy::HIERARCHY_VERSION,
+                files: vec![crate::hierarchy::FileInfo {
+                    path: "a.ts".into(),
+                    label: "a.ts".into(),
+                    loc: 3,
+                    package: ".".into(),
+                }],
+                packages: vec![".".into()],
+                file_imports: HashMap::new(),
+                package_edges: vec![],
+                symbols: HashMap::from([(
+                    "a.ts".into(),
+                    vec![crate::hierarchy::SymbolInfo {
+                        id: "a.ts::f".into(),
+                        label: "f".into(),
+                        kind: "fn".into(),
+                        file: "a.ts".into(),
+                        line: 1,
+                    }],
+                )]),
+                symbol_edges: vec![crate::hierarchy::SymbolEdge {
+                    source: "a".into(),
+                    target: "b".into(),
+                    kind: "ref".into(),
+                }],
+                scope_graphs: HashMap::new(),
+            },
+            validation: vec![],
+            suggestions: vec![],
+            summary: "ok".into(),
+            dsm: None,
+            quality: None,
+        };
+
+        persist_analysis_result(root, &result).expect("persist");
+        let lite = load_cached_hierarchy_lite(root).expect("load lite");
+        assert_eq!(lite.files.len(), 1);
+        assert!(lite.symbols.is_empty());
+        assert!(lite.symbol_edges.is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+        unsafe {
+            std::env::remove_var("DEVTREE_CACHE_DIR");
+        }
+    }
 
     #[test]
     fn devtree_resolves_file_imports() {

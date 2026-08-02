@@ -9,6 +9,9 @@ pub struct TreeEntry {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<TreeEntry>>,
+    /// True when this directory has listable children that were not loaded yet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_children: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,182 +47,221 @@ const SKIP_DIRS: &[&str] = &[
     "pkg",
 ];
 
-const SOURCE_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "py", "go", "java", "kt",
-    "swift", "c", "cpp", "h", "hpp", "cs", "rb", "php", "vue", "svelte",
-];
-
 fn should_skip(name: &str) -> bool {
     SKIP_DIRS.contains(&name) || name.starts_with('.')
 }
 
-fn is_source_file(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|ext| SOURCE_EXTENSIONS.contains(&ext))
-        .unwrap_or(false)
+fn sort_children(children: &mut [TreeEntry]) {
+    // Folders first, then files; alphabetical within each group.
+    children.sort_by(|a, b| {
+        let a_dir = a.kind == "directory";
+        let b_dir = b.kind == "directory";
+        match (a_dir, b_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()),
+        }
+    });
 }
 
-fn count_source_files(dir: &Path) -> usize {
-    let mut count = 0;
+fn rel_path_for(path: &Path, root: &Path, fallback: &str) -> String {
+    path.strip_prefix(root)
+        .map(|p| {
+            if p.as_os_str().is_empty() {
+                ".".to_string()
+            } else {
+                p.to_string_lossy().to_string()
+            }
+        })
+        .unwrap_or_else(|_| fallback.to_string())
+}
+
+fn dir_has_listable_children(dir: &Path) -> bool {
     let Ok(entries) = fs::read_dir(dir) else {
-        return 0;
+        return false;
     };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if entry.path().is_dir() {
+            if !should_skip(&name) {
+                return true;
+            }
+        } else if !name.starts_with('.') {
+            return true;
+        }
+    }
+    false
+}
+
+/// List immediate children of `dir` (one level only). Directories are stubs
+/// with `has_children` set when they contain further listable entries.
+fn list_dir_children(dir: &Path, root: &Path) -> Result<Vec<TreeEntry>, String> {
+    let mut children = Vec::new();
+    let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read {}: {e}", dir.display()))?;
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
         if path.is_dir() {
-            if !should_skip(&name) {
-                count += count_source_files(&path);
-            }
-        } else if is_source_file(&name) {
-            count += 1;
-        }
-    }
-    count
-}
-
-fn build_tree(dir: &Path, root: &Path) -> Option<TreeEntry> {
-    let name = dir
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
-
-    if dir != root && should_skip(&name) {
-        return None;
-    }
-
-    let rel_path = dir
-        .strip_prefix(root)
-        .map(|p| {
-            if p.as_os_str().is_empty() {
-                ".".to_string()
-            } else {
-                p.to_string_lossy().to_string()
-            }
-        })
-        .unwrap_or_else(|_| name.clone());
-
-    if dir.is_file() {
-        return Some(TreeEntry {
-            name,
-            path: rel_path,
-            kind: "file".into(),
-            children: None,
-        });
-    }
-
-    let mut children = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        let mut entries: Vec<_> = entries.flatten().collect();
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            let child_name = entry.file_name().to_string_lossy().to_string();
-            if entry.path().is_dir() && should_skip(&child_name) {
+            if should_skip(&name) {
                 continue;
             }
-            if let Some(child) = build_tree(&entry.path(), root) {
-                children.push(child);
-            }
-        }
-    }
-
-    Some(TreeEntry {
-        name,
-        path: rel_path,
-        kind: "directory".into(),
-        children: if children.is_empty() {
-            None
-        } else {
-            Some(children)
-        },
-    })
-}
-
-fn collect_modules(dir: &Path, root: &Path, modules: &mut Vec<ModuleEntry>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-
-    let rel_path = dir
-        .strip_prefix(root)
-        .map(|p| {
-            if p.as_os_str().is_empty() {
-                ".".to_string()
-            } else {
-                p.to_string_lossy().to_string()
-            }
-        })
-        .unwrap_or_else(|_| ".".to_string());
-
-    let name = dir
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
-
-    if dir != root {
-        let file_count = count_source_files(dir);
-        if file_count > 0 {
-            modules.push(ModuleEntry {
-                name: name.clone(),
-                path: rel_path,
-                kind: "folder".into(),
-                file_count,
+            let rel = rel_path_for(&path, root, &name);
+            let has_children = dir_has_listable_children(&path);
+            children.push(TreeEntry {
+                name,
+                path: rel,
+                kind: "directory".into(),
+                children: None,
+                has_children,
             });
-        }
-    }
-
-    for entry in entries.flatten() {
-        let child_name = entry.file_name().to_string_lossy().to_string();
-        if entry.path().is_dir() {
-            if !should_skip(&child_name) {
-                collect_modules(&entry.path(), root, modules);
-            }
-        } else if is_source_file(&child_name) {
-            let file_rel = entry
-                .path()
-                .strip_prefix(root)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or(child_name.clone());
-            modules.push(ModuleEntry {
-                name: child_name,
-                path: file_rel,
+        } else if !name.starts_with('.') {
+            let rel = rel_path_for(&path, root, &name);
+            children.push(TreeEntry {
+                name,
+                path: rel,
                 kind: "file".into(),
-                file_count: 1,
+                children: None,
+                has_children: false,
             });
         }
     }
+    sort_children(&mut children);
+    Ok(children)
 }
 
+/// Shallow project open: root folder + immediate children only.
+/// Nested folders and module indexes are not scanned (lazy-loaded later).
 pub fn scan_project(root_path: &str) -> Result<ProjectScan, String> {
     let root = PathBuf::from(root_path);
     if !root.is_dir() {
         return Err(format!("Not a directory: {root_path}"));
     }
 
-    let tree = build_tree(&root, &root).ok_or_else(|| "Failed to build tree".to_string())?;
+    let name = root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| root_path.to_string());
 
-    let mut modules = Vec::new();
-    collect_modules(&root, &root, &mut modules);
-    modules.sort_by(|a, b| a.path.cmp(&b.path));
+    let children = list_dir_children(&root, &root)?;
+    let has_children = !children.is_empty();
 
     Ok(ProjectScan {
         root: root_path.to_string(),
-        tree,
-        modules,
+        tree: TreeEntry {
+            name,
+            path: ".".into(),
+            kind: "directory".into(),
+            children: if has_children { Some(children) } else { None },
+            has_children,
+        },
+        // Modules come from analysis/graph — never preload via full-tree walk.
+        modules: vec![],
     })
+}
+
+/// Expand one folder: list immediate children under `relative_path`.
+pub fn list_project_children(
+    root_path: &str,
+    relative_path: &str,
+) -> Result<Vec<TreeEntry>, String> {
+    let root = PathBuf::from(root_path);
+    if !root.is_dir() {
+        return Err(format!("Not a directory: {root_path}"));
+    }
+
+    let dir = if relative_path.is_empty() || relative_path == "." {
+        root.clone()
+    } else {
+        let joined = root.join(relative_path);
+        let canon_root = root
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve project root: {e}"))?;
+        let canon_dir = joined
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve path {relative_path}: {e}"))?;
+        if !canon_dir.starts_with(&canon_root) {
+            return Err("Path escapes project root".into());
+        }
+        if !canon_dir.is_dir() {
+            return Err(format!("Not a directory: {relative_path}"));
+        }
+        joined
+    };
+
+    list_dir_children(&dir, &root)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn scans_current_crate_as_project() {
+    fn scans_current_crate_shallowly() {
         let root = env!("CARGO_MANIFEST_DIR");
         let scan = scan_project(root).expect("scan");
         assert_eq!(scan.root, root);
-        assert!(!scan.modules.is_empty());
+        assert!(scan.modules.is_empty());
+        let children = scan.tree.children.as_ref().expect("root children");
+        assert!(!children.is_empty());
+        // Nested trees are not preloaded — directories are stubs.
+        for child in children {
+            if child.kind == "directory" {
+                assert!(child.children.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn tree_lists_directories_before_files() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("devtree-tree-sort-{nanos}"));
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::write(dir.join("README.md"), "hi").unwrap();
+        fs::write(dir.join("LICENSE"), "mit").unwrap();
+
+        let scan = scan_project(dir.to_str().unwrap()).expect("scan");
+        let names: Vec<&str> = scan
+            .tree
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["docs", "src", "LICENSE", "README.md"]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_children_loads_one_level() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("devtree-tree-lazy-{nanos}"));
+        fs::create_dir_all(dir.join("src").join("nested")).unwrap();
+        fs::write(dir.join("src").join("main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.join("src").join("nested").join("deep.rs"), "").unwrap();
+
+        let root = dir.to_str().unwrap();
+        let kids = list_project_children(root, "src").expect("list");
+        let names: Vec<&str> = kids.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["nested", "main.rs"]);
+        let nested = kids.iter().find(|c| c.name == "nested").unwrap();
+        assert!(nested.has_children);
+        assert!(nested.children.is_none());
+
+        let nested_kids = list_project_children(root, "src/nested").expect("nested");
+        assert_eq!(nested_kids.len(), 1);
+        assert_eq!(nested_kids[0].name, "deep.rs");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

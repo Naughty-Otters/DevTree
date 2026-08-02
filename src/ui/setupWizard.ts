@@ -8,6 +8,7 @@ import {
   isLlmConfigurationReady,
 } from "../validation/aiValidation";
 import { createLlmConfigFields } from "./llmConfigFields";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 
 export type SetupWizardStep = 0 | 1 | 2 | 3;
 
@@ -371,10 +372,12 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       }
 
       if (lspLoading && servers.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "setup-wizard-empty";
-        empty.textContent = "Checking language servers…";
-        list.appendChild(empty);
+        list.appendChild(
+          createLoadingPlaceholder({
+            title: "Checking language servers…",
+            size: "panel",
+          }),
+        );
       } else if (servers.length === 0) {
         const empty = document.createElement("div");
         empty.className = "setup-wizard-empty";

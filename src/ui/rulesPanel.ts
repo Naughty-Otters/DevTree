@@ -15,6 +15,7 @@ import type { LlmProviderInfo } from "../agent/types";
 import { effectiveLlmModel } from "../validation/llmCatalog";
 import { createLlmConfigurationPicker } from "./llmConfigurationPicker";
 import { lucideIcon } from "./icons";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { ChevronDown } from "lucide";
 
 export interface RulesPanelState {
@@ -45,10 +46,12 @@ export function createRulesPanel(
   container.innerHTML = "";
 
   if (state.loading) {
-    const loading = document.createElement("div");
-    loading.className = "panel-empty panel-loading";
-    loading.textContent = "Loading analysis rules…";
-    container.appendChild(loading);
+    container.appendChild(
+      createLoadingPlaceholder({
+        title: "Loading analysis rules…",
+        size: "panel",
+      }),
+    );
     return;
   }
 

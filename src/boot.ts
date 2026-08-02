@@ -1,8 +1,26 @@
-import { computeLayout } from "./wasm-bridge";
+import { computeLayout, parseLayoutMode, type LayoutMode } from "./wasm-bridge";
 import { render, createRenderState, type RenderState } from "./canvas/renderer";
 import { attachInteraction } from "./canvas/interaction";
 import { fitCameraToContent, focusCameraOnNodeAnimated, focusCameraOnNodesAnimated } from "./canvas/camera";
-import type { Graph } from "./graph/types";
+import {
+  animateLayoutTransition,
+  animateVisibilityTransition,
+} from "./canvas/layoutTransition";
+import { parseEdgeStyle, type EdgeStyle } from "./canvas/edgeStyle";
+import type { Graph, GraphEdge, GraphNode } from "./graph/types";
+import {
+  parseModuleFilters,
+  visibleIdsForFilters,
+  type ModuleFilterFlags,
+} from "./graph/moduleFilters";
+import {
+  allLanguageFiltersEnabled,
+  buildLanguageIndex,
+  parseLanguageFilters,
+  presentLanguages,
+  visibleIdsForLanguageFilters,
+  type LanguageFilterFlags,
+} from "./graph/languages";
 import { hierarchyFromGraph } from "./graph/hierarchy";
 import type { AnalysisResult, CycleGroup } from "./analysis/types";
 import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
@@ -20,6 +38,7 @@ import {
   getLlmProviders,
   openProjectDialog,
   scanProject,
+  listProjectChildren,
   readProjectFile,
   writeProjectFile,
   listLspServers as fetchLspServers,
@@ -62,13 +81,15 @@ import { mountToolbarIcons } from "./ui/toolbar";
 import { createSettingsPanel } from "./ui/settingsPanel";
 import { initResizers } from "./ui/resizer";
 import { showAnalysisDialog } from "./ui/analysisDialog";
+import { hideFlowOverlay, renderFlowOverlay } from "./ui/flowOverlay";
 import { showSetupWizard } from "./ui/setupWizard";
 import {
   defaultAnalysisTriggerConfig,
   type AnalysisTriggerConfig,
 } from "./analysis/triggers";
 import { initTooltips } from "./ui/tooltip";
-import { hideGraphPopup, isGraphPopupOpen, toggleGraphPopup } from "./ui/graphPopup";
+import { hideGraphPopup, isGraphPopupOpen } from "./ui/graphPopup";
+import { createModuleDetailsPanel } from "./ui/moduleDetailsPanel";
 import { renderGraphNav } from "./ui/graphNav";
 import {
   autoAdvanceSingleFolder,
@@ -87,6 +108,7 @@ import {
 } from "./graph/navigation";
 import {
   findSymbolAtLine,
+  navigationShowingFile,
   navigationToFile,
   navigationToPackageFile,
   type ValidationNavTarget,
@@ -102,11 +124,25 @@ import {
 } from "./validation/cycles";
 import type { HierarchyIndex } from "./analysis/types";
 import type { PersistedAppState, PersistedUiState } from "./state/types";
-import { loadPersistedAnalysisMeta, loadPersistedUiState, scheduleSaveAnalysis, scheduleSaveUiState } from "./state/store";
+import {
+  loadPersistedAnalysisMeta,
+  loadPersistedAnalysisQuality,
+  loadPersistedUiState,
+  scheduleSaveAnalysis,
+  scheduleSaveUiState,
+} from "./state/store";
+import {
+  parsePercentileViewMode,
+  type PercentileViewMode,
+} from "./analysis/percentileView";
 import { applyPanelSizes, readPanelSizes } from "./state/panels";
 import { runWhenIdle, runWhenIdleAsync } from "./lazy/defer";
 import { loadAnalysisRules } from "./lazy/rules";
 import { clearHierarchyLoadCache, loadAnalysisHierarchy } from "./lazy/hierarchy";
+import {
+  clearQualityLoadCache,
+  loadAnalysisQualityWithFiles,
+} from "./lazy/quality";
 
 interface AppState {
   projectPath: string | null;
@@ -128,7 +164,7 @@ interface AppState {
   dsmLevel: "package" | "file";
   dsmOrdering: "partitioned" | "hierarchical";
   designRules: DesignRule[];
-  centerView: "graph" | "dsm" | "file";
+  centerView: "report" | "progress" | "graph" | "dsm" | "file";
 }
 
 function hierarchyIsHydrated(hierarchy: HierarchyIndex | null | undefined): boolean {
@@ -144,7 +180,6 @@ export async function startApp(): Promise<void> {
   const btnOpen = document.querySelector<HTMLButtonElement>("#btn-open-project")!;
   const btnRun = document.querySelector<HTMLButtonElement>("#btn-run-analysis")!;
   const btnStop = document.querySelector<HTMLButtonElement>("#btn-stop-analysis")!;
-  const btnFocus = document.querySelector<HTMLButtonElement>("#btn-focus-view")!;
   const btnSaveFile = document.querySelector<HTMLButtonElement>("#btn-save-file")!;
   const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings")!;
   const btnSetupWizard = document.querySelector<HTMLButtonElement>("#btn-setup-wizard");
@@ -167,16 +202,32 @@ export async function startApp(): Promise<void> {
     "#design-rules-panel",
   )!;
   const graphOverlay = document.querySelector<HTMLElement>("#graph-overlay")!;
-  const graphOverlayText = document.querySelector<HTMLElement>("#graph-overlay-text")!;
   const fileViewerEl = document.querySelector<HTMLElement>("#file-viewer")!;
   const dsmViewEl = document.querySelector<HTMLElement>("#dsm-view")!;
+  const analysisReportViewEl = document.querySelector<HTMLElement>(
+    "#analysis-report-view",
+  )!;
+  const analysisProgressViewEl = document.querySelector<HTMLElement>(
+    "#analysis-progress-view",
+  )!;
   const graphNavContainer = document.querySelector<HTMLElement>("#graph-nav")!;
   const viewTabs = document.querySelector<HTMLElement>("#view-tabs")!;
+  const moduleDetailsPanelEl =
+    document.querySelector<HTMLElement>("#module-details-panel")!;
 
   const persisted = await loadPersistedUiState();
   applyPanelSizes(persisted.panelSizes);
 
   const initialLinterSettings = ensureLinterSettings(persisted.linterSettings);
+  let layoutMode: LayoutMode = parseLayoutMode(persisted.layoutMode);
+  let moduleFilters: ModuleFilterFlags = parseModuleFilters(persisted.moduleFilters);
+  let languageFilters: LanguageFilterFlags = parseLanguageFilters(
+    persisted.languageFilters,
+  );
+  let edgeStyle: EdgeStyle = parseEdgeStyle(persisted.edgeStyle);
+  let percentileView: PercentileViewMode = parsePercentileViewMode(
+    persisted.percentileView,
+  );
 
   const rulesState: RulesPanelState = {
     rules: [],
@@ -237,6 +288,36 @@ export async function startApp(): Promise<void> {
     designRules: persisted.designRules ?? defaultDesignRules(),
     centerView: "graph",
   };
+
+  const moduleDetailsPanel = createModuleDetailsPanel(moduleDetailsPanelEl, {
+    getPercentileView: () => percentileView,
+    onPercentileViewChange: (mode) => {
+      percentileView = mode;
+      persist();
+      resultsPanel?.setResult(app.analysisResult);
+    },
+    onSelectRelated: (nodeId) => {
+      void showModuleOnGraph(nodeId);
+    },
+    onOpenContent: (nodeId) => {
+      if (app.renderState?.nodes.some((node) => node.id === nodeId)) {
+        void showModuleOnGraph(nodeId);
+        return;
+      }
+      // Contents live one level deeper — open that level on the graph.
+      const parentId = moduleDetailsPanel.currentNodeId();
+      if (parentId) drillIntoNode(parentId);
+    },
+    onOpenSource: (path, line) => {
+      void handleFileOpen(path, line);
+    },
+    onDrillInto: (nodeId) => {
+      drillIntoNode(nodeId);
+    },
+    onClose: () => {
+      if (!isGraphPopupOpen()) setHighlight(null);
+    },
+  });
 
   async function initRulesPanel(): Promise<void> {
     if (!rulesState.loading && rulesState.rules.length > 0) return;
@@ -340,68 +421,112 @@ export async function startApp(): Promise<void> {
     },
   });
 
-  resultsPanel = createResultsPanel(resultsContainer, {
-    getHierarchy: () => app.hierarchy,
-    onOpenValidationTarget: (target) => {
-      void openValidationTarget(target);
+  resultsPanel = createResultsPanel(
+    resultsContainer,
+    {
+      getHierarchy: () => app.hierarchy,
+      getPercentileView: () => percentileView,
+      onPercentileViewChange: (mode) => {
+        percentileView = mode;
+        persist();
+        if (moduleDetailsPanel.isOpen()) {
+          moduleDetailsPanel.updateQuality({});
+        }
+      },
+      onOpenValidationTarget: (target) => {
+        void openValidationTarget(target);
+      },
+      onShowValidationOnGraph: (target) => {
+        void showValidationTargetOnGraph(target);
+      },
+      onShowCycleOnGraph: (cycle) => {
+        void showCycleOnGraph(cycle);
+      },
+      onShowModuleOnGraph: (nodeId) => {
+        void showModuleOnGraph(nodeId);
+      },
+      onOpenModuleFile: (path, line) => {
+        void handleFileOpen(path, line);
+      },
+      onShowDependencyOnGraph: (source, target) => {
+        void showDependencyOnGraph(source, target);
+      },
+      onShowDsm: (highlightIds) => {
+        showDsmView();
+        if (highlightIds && highlightIds.length > 0) {
+          dsmView.highlight(highlightIds);
+        }
+      },
+      onCancelRun: (id) => analysisManager.cancel(id),
+      onCancelAllRuns: () => analysisManager.cancelAll(),
+      onApplyRun: (id) => {
+        const run = analysisManager.getRuns().find((r) => r.id === id);
+        if (run?.result) {
+          void applyAnalysisResult(run.result);
+        }
+      },
+      onRequestShowReport: () => {
+        showReportView();
+      },
+      onRequestShowProgress: () => {
+        showProgressView();
+      },
+      onRequestQualityFiles: async () => {
+        if (!app.analysisResult) return null;
+        const quality = await loadAnalysisQualityWithFiles(
+          app.analysisResult,
+          app.projectPath,
+        );
+        if (!quality || !app.analysisResult) return null;
+        app.analysisResult = { ...app.analysisResult, quality };
+        resultsPanel.setResult(app.analysisResult);
+        if (moduleDetailsPanel.isOpen()) {
+          moduleDetailsPanel.updateQuality({});
+        }
+        return quality;
+      },
     },
-    onShowValidationOnGraph: (target) => {
-      void showValidationTargetOnGraph(target);
-    },
-    onShowCycleOnGraph: (cycle) => {
-      void showCycleOnGraph(cycle);
-    },
-    onShowModuleOnGraph: (nodeId) => {
-      void showModuleOnGraph(nodeId);
-    },
-    onShowDependencyOnGraph: (source, target) => {
-      void showDependencyOnGraph(source, target);
-    },
-    onShowDsm: (highlightIds) => {
-      showDsmView();
-      if (highlightIds && highlightIds.length > 0) {
-        dsmView.highlight(highlightIds);
-      }
-    },
-    onCancelRun: (id) => analysisManager.cancel(id),
-    onCancelAllRuns: () => analysisManager.cancelAll(),
-    onApplyRun: (id) => {
-      const run = analysisManager.getRuns().find((r) => r.id === id);
-      if (run?.result) {
-        void applyAnalysisResult(run.result);
-      }
-    },
-  });
+    { reportHost: analysisReportViewEl, progressHost: analysisProgressViewEl },
+  );
+
+  /** Camera / visibility to apply on the first graph hydrate after session restore. */
+  let pendingGraphRestore: {
+    visibleIds?: string[];
+    camera?: PersistedAppState["camera"];
+    selectedId?: string | null;
+  } | null = null;
+  let hierarchyLoadGeneration = 0;
 
   async function applyAnalysisResult(result: AnalysisResult): Promise<void> {
     clearHierarchyLoadCache();
-    if (!result.dsm && result.hierarchy) {
-      result = { ...result, dsm: computeDsm(result.hierarchy) };
-    }
-    if (result.hierarchy && app.designRules.length > 0) {
-      const violations = checkDesignRules(result.hierarchy, app.designRules);
-      if (result.dsm) {
-        result = {
-          ...result,
-          dsm: { ...result.dsm, violations },
-        };
-      }
-      const item = designRulesValidationItem(violations);
-      const without = result.validation.filter(
-        (v) => v.rule_id !== "architecture_conformance",
-      );
-      result = { ...result, validation: [...without, item] };
-    }
+    clearQualityLoadCache();
+    hierarchyLoadGeneration += 1;
+    app.renderState = null;
+    pendingGraphRestore = null;
+
+    // Slim IPC already has: summary, validation, package graph, package quality, dsm.
+    // Do NOT load hierarchy-lite / quality.files here — that freezes large projects.
     app.analysisResult = result;
-    app.hierarchy = result.hierarchy;
+    app.hierarchy = null;
     app.graphNavigation = rootNavigation();
     resultsPanel.setResult(result);
+    showReportView();
     persist();
     persistAnalysis();
-    refreshDsmView();
+
+    // Hydrate the package graph in the background; Report stays front-and-center.
+    try {
+      if (result.graph?.nodes?.length) {
+        await loadGraph(result.graph);
+      }
+    } catch (err) {
+      console.error("Failed to layout package graph", err);
+    }
+
+    // DSM refresh uses package-level data already on the result.
     runWhenIdle(() => {
-      void navigateGraph();
-    }, 1500);
+      refreshDsmView();
+    }, 300);
   }
 
   const fileViewer = createLazyFileViewer(
@@ -416,7 +541,10 @@ export async function startApp(): Promise<void> {
     },
   );
 
-  async function ensureAnalysisHierarchy(): Promise<HierarchyIndex | null> {
+  async function ensureAnalysisHierarchy(opts?: {
+    /** Skip center overlay (caller shows its own placeholder). */
+    silent?: boolean;
+  }): Promise<HierarchyIndex | null> {
     if (hierarchyIsHydrated(app.hierarchy)) {
       return app.hierarchy;
     }
@@ -428,20 +556,52 @@ export async function startApp(): Promise<void> {
     }
 
     if (app.hierarchyLoading) {
-      return app.hierarchy;
+      // Wait briefly for the in-flight load instead of returning empty.
+      for (let i = 0; i < 200 && app.hierarchyLoading; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        if (hierarchyIsHydrated(app.hierarchy)) return app.hierarchy;
+        if (hierarchyIsHydrated(app.analysisResult?.hierarchy)) {
+          app.hierarchy = app.analysisResult!.hierarchy;
+          return app.hierarchy;
+        }
+      }
+      return hierarchyIsHydrated(app.hierarchy) ? app.hierarchy : null;
     }
 
+    const generation = ++hierarchyLoadGeneration;
     app.hierarchyLoading = true;
-    showOverlay("Loading dependency graph…");
+    if (!opts?.silent) {
+      showOverlay(
+        "Loading dependency graph…",
+        "Reading hierarchy from the analysis cache.",
+      );
+    }
+    refreshModulesList({ loading: true });
     try {
-      const hierarchy = await loadAnalysisHierarchy(app.analysisResult);
+      const hierarchy = await loadAnalysisHierarchy(
+        app.analysisResult,
+        app.projectPath,
+      );
+
+      // A fresher analysis may have landed while we were loading from disk.
+      if (hierarchyIsHydrated(app.hierarchy)) {
+        return app.hierarchy;
+      }
+      if (hierarchyIsHydrated(app.analysisResult?.hierarchy)) {
+        app.hierarchy = app.analysisResult!.hierarchy;
+        return app.hierarchy;
+      }
+      if (generation !== hierarchyLoadGeneration) {
+        return hierarchyIsHydrated(app.hierarchy) ? app.hierarchy : null;
+      }
+
       if (hierarchy && hierarchyIsHydrated(hierarchy)) {
         app.hierarchy = hierarchy;
-        app.analysisResult = { ...app.analysisResult, hierarchy };
+        app.analysisResult = { ...app.analysisResult!, hierarchy };
         return hierarchy;
       }
 
-      if (app.analysisResult.graph?.nodes?.length) {
+      if (app.analysisResult?.graph?.nodes?.length) {
         const rebuilt = hierarchyFromGraph(app.analysisResult.graph);
         app.hierarchy = rebuilt;
         app.analysisResult = { ...app.analysisResult, hierarchy: rebuilt };
@@ -451,8 +611,11 @@ export async function startApp(): Promise<void> {
       return null;
     } finally {
       app.hierarchyLoading = false;
-      if (app.hierarchy) {
-        hideOverlay();
+      refreshModulesList({ loading: false });
+      if (hierarchyIsHydrated(app.hierarchy)) {
+        // loadGraph / caller will hide overlay after layout.
+      } else if (!app.renderState) {
+        showOverlay("Dependency graph unavailable — re-run analysis");
       }
     }
   }
@@ -487,7 +650,12 @@ export async function startApp(): Promise<void> {
       graphNavigation: serializeNavigation(app.graphNavigation),
       dsmLevel: app.dsmLevel,
       dsmOrdering: app.dsmOrdering,
+      percentileView,
       designRules: app.designRules,
+      layoutMode,
+      edgeStyle,
+      moduleFilters: { ...moduleFilters },
+      languageFilters: { ...languageFilters },
       setupWizardCompleted,
     };
   }
@@ -497,13 +665,48 @@ export async function startApp(): Promise<void> {
   }
 
   function persistAnalysis(): void {
-    scheduleSaveAnalysis(app.analysisResult);
+    scheduleSaveAnalysis(app.analysisResult, app.projectPath);
   }
 
-  function setActiveViewTab(view: "graph" | "dsm" | "file"): void {
+  function setActiveViewTab(
+    view: "report" | "progress" | "graph" | "dsm" | "file",
+  ): void {
     viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((t) => {
       t.classList.toggle("active", t.dataset.view === view);
     });
+  }
+
+  function hideCenterViews(): void {
+    analysisReportViewEl.classList.add("hidden");
+    analysisProgressViewEl.classList.add("hidden");
+    fileViewerEl.classList.add("hidden");
+    dsmViewEl.classList.add("hidden");
+    canvas.classList.add("hidden");
+  }
+
+  function dismissRunDialogs(): void {
+    document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
+  }
+
+  function showReportView(): void {
+    app.centerView = "report";
+    hideCenterViews();
+    hideOverlay();
+    analysisReportViewEl.classList.remove("hidden");
+    setActiveViewTab("report");
+    graphNavContainer.innerHTML = "";
+    resultsPanel.refreshReport();
+  }
+
+  function showProgressView(): void {
+    app.centerView = "progress";
+    hideCenterViews();
+    hideOverlay();
+    dismissRunDialogs();
+    analysisProgressViewEl.classList.remove("hidden");
+    setActiveViewTab("progress");
+    graphNavContainer.innerHTML = "";
+    resultsPanel.refreshProgress();
   }
 
   function refreshDsmView(): void {
@@ -596,40 +799,82 @@ export async function startApp(): Promise<void> {
 
   function showGraphView() {
     app.centerView = "graph";
-    fileViewerEl.classList.add("hidden");
-    dsmViewEl.classList.add("hidden");
+    hideCenterViews();
     canvas.classList.remove("hidden");
     setActiveViewTab("graph");
-    void ensureAnalysisHierarchy().then((hierarchy) => {
-      if (!hierarchy) return;
-      const graph = graphForNavigation(hierarchy, app.graphNavigation);
-      refreshGraphNav(graph);
-    });
+    if (app.analysisResult && !app.renderState) {
+      const opts = pendingGraphRestore;
+      pendingGraphRestore = null;
+      void navigateGraph(opts ?? undefined);
+      return;
+    }
+    if (app.renderState) {
+      // Layout often finished while Report hid the canvas (0×0). Remeasure + redraw.
+      requestAnimationFrame(() => {
+        resize();
+        if (app.renderState) {
+          fitCameraToContent(app.renderState, canvas);
+          draw();
+        }
+        refreshGraphNav(app.analysisResult?.graph);
+      });
+      return;
+    }
+    if (app.analysisResult?.graph) {
+      refreshGraphNav(app.analysisResult.graph);
+      return;
+    }
+    if (!app.renderState) {
+      showGuidedOverlay();
+    }
   }
 
   function showDsmView() {
     app.centerView = "dsm";
-    fileViewerEl.classList.add("hidden");
-    canvas.classList.add("hidden");
+    hideCenterViews();
+    hideOverlay();
     dsmViewEl.classList.remove("hidden");
     setActiveViewTab("dsm");
-    void ensureAnalysisHierarchy().then((hierarchy) => {
-      if (hierarchy) {
-        app.hierarchy = hierarchy;
+    // Package DSM is already on the slim result — no hierarchy load required.
+    void (async () => {
+      if (app.analysisResult?.dsm) {
+        dsmView.setLoading(null);
+        refreshDsmView();
+        refreshGraphNav(app.analysisResult.graph);
+        return;
       }
+      dsmView.setLoading("Loading Design Structure Matrix…");
+      const hierarchy = await ensureAnalysisHierarchy({ silent: true });
+      if (!hierarchy) {
+        dsmView.setLoading(null);
+        refreshDsmView();
+        return;
+      }
+      app.hierarchy = hierarchy;
+      if (app.analysisResult && !app.analysisResult.dsm) {
+        const dsm = computeDsm(hierarchy);
+        app.analysisResult = { ...app.analysisResult, dsm };
+        resultsPanel.setResult(app.analysisResult);
+      }
+      dsmView.setLoading(null);
       refreshDsmView();
       refreshGraphNav();
-    });
+    })();
   }
 
   function showFileView() {
     app.centerView = "file";
-    fileViewerEl.classList.remove("hidden");
-    canvas.classList.add("hidden");
-    dsmViewEl.classList.add("hidden");
+    hideCenterViews();
+    hideOverlay();
     setActiveViewTab("file");
-    const path = fileViewer.getPath();
-    if (path) refreshFileNav(path);
+    if (fileViewer.isOpen()) {
+      fileViewerEl.classList.remove("hidden");
+      const path = fileViewer.getPath();
+      if (path) refreshFileNav(path);
+      return;
+    }
+    fileViewer.showGuide();
+    graphNavContainer.innerHTML = "";
   }
 
   const dsmView = createDsmView(dsmViewEl, {
@@ -654,9 +899,11 @@ export async function startApp(): Promise<void> {
 
   viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      if (tab.dataset.view === "graph") showGraphView();
+      if (tab.dataset.view === "report") showReportView();
+      else if (tab.dataset.view === "progress") showProgressView();
+      else if (tab.dataset.view === "graph") showGraphView();
       else if (tab.dataset.view === "dsm") showDsmView();
-      else if (fileViewer.isOpen()) showFileView();
+      else if (tab.dataset.view === "file") showFileView();
     });
   });
 
@@ -836,29 +1083,134 @@ export async function startApp(): Promise<void> {
     () => persist(),
   );
 
-  function syncHiddenFromVisible() {
+  async function reorganizeVisibleLayout(): Promise<void> {
     if (!app.renderState) return;
-    const allIds = new Set(app.renderState.nodes.map((n) => n.id));
-    app.renderState.hiddenIds = new Set(
-      [...allIds].filter((id) => !app.modulesListState.visibleIds.has(id)),
+    const visibleIds = app.modulesListState.visibleIds;
+    const visibleGraph: Graph = {
+      nodes: app.renderState.nodes.filter((node) => visibleIds.has(node.id)),
+      edges: app.renderState.edges.filter(
+        (edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target),
+      ),
+    };
+    const positionsList = await computeLayout(visibleGraph, layoutMode);
+    await animateLayoutTransition(
+      app.renderState,
+      new Map(positionsList.map((position) => [position.id, position])),
+      draw,
+      { fitCamera: true, canvas },
     );
-    draw();
     persist();
+  }
+
+  function languageIndexForFilters() {
+    return buildLanguageIndex(app.hierarchy ?? app.analysisResult?.hierarchy);
+  }
+
+  function visibleIdsForCurrentFilters(
+    nodes: GraphNode[],
+    edges: GraphEdge[],
+  ): Set<string> {
+    const roleVisible = visibleIdsForFilters(nodes, edges, moduleFilters);
+    const langVisible = visibleIdsForLanguageFilters(
+      nodes,
+      languageFilters,
+      languageIndexForFilters(),
+    );
+    const visible = new Set<string>();
+    for (const id of roleVisible) {
+      if (langVisible.has(id)) visible.add(id);
+    }
+    return visible;
+  }
+
+  function applyGraphFilters(): void {
+    if (app.renderState) {
+      void applyVisibilityThenReorganize(
+        visibleIdsForCurrentFilters(
+          app.renderState.nodes,
+          app.renderState.edges,
+        ),
+      );
+    } else {
+      persist();
+    }
+  }
+
+  async function applyVisibilityThenReorganize(
+    nextVisible: Set<string>,
+  ): Promise<void> {
+    if (!app.renderState) return;
+    await animateVisibilityTransition(app.renderState, nextVisible, draw);
+    app.modulesListState.visibleIds = nextVisible;
+    await reorganizeVisibleLayout();
+    refreshModulesList();
+    persist();
+  }
+
+  function syncHiddenFromVisible() {
+    void applyVisibilityThenReorganize(app.modulesListState.visibleIds);
+  }
+
+  let activeModuleRow: HTMLElement | null = null;
+  let highlightDrawScheduled = false;
+
+  function setModuleRowActive(nodeId: string | null): void {
+    if (activeModuleRow?.dataset.nodeId === nodeId) return;
+    activeModuleRow?.classList.remove("module-row-active");
+    activeModuleRow = null;
+    if (nodeId == null) return;
+    const escaped =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? CSS.escape(nodeId)
+        : nodeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const next = modulesContainer.querySelector<HTMLElement>(
+      `.module-row[data-node-id="${escaped}"]`,
+    );
+    if (next) {
+      next.classList.add("module-row-active");
+      activeModuleRow = next;
+    }
   }
 
   function setHighlight(nodeId: string | null) {
     if (!app.renderState) return;
-    if (nodeId === null && isGraphPopupOpen()) return;
+    if (nodeId === null && (isGraphPopupOpen() || moduleDetailsPanel.isOpen())) {
+      return;
+    }
+    if (
+      app.renderState.highlightId === nodeId &&
+      !app.renderState.highlightCycle
+    ) {
+      setModuleRowActive(nodeId);
+      return;
+    }
     app.renderState.highlightCycle = undefined;
     app.renderState.highlightId = nodeId;
-    modulesContainer.querySelectorAll<HTMLElement>(".module-row").forEach((row) => {
-      row.classList.toggle("module-row-active", row.dataset.nodeId === nodeId);
-    });
-    draw();
+    setModuleRowActive(nodeId);
+    // Coalesce paints — hovering many module rows used to redraw the full graph each time.
+    if (!highlightDrawScheduled) {
+      highlightDrawScheduled = true;
+      requestAnimationFrame(() => {
+        highlightDrawScheduled = false;
+        draw();
+      });
+    }
   }
 
   function refreshGraphNav(graph?: Graph) {
-    if (!app.hierarchy) {
+    if (
+      app.centerView === "report" ||
+      app.centerView === "progress" ||
+      app.centerView === "file"
+    ) {
+      // Report / Progress / File use their own chrome; keep the graph toolbar unmounted.
+      if (app.centerView === "report" || app.centerView === "progress") {
+        graphNavContainer.innerHTML = "";
+      }
+      return;
+    }
+    const g = graph ?? app.analysisResult?.graph ?? null;
+    if (!app.hierarchy && !g) {
       graphNavContainer.innerHTML = "";
       return;
     }
@@ -870,23 +1222,78 @@ export async function startApp(): Promise<void> {
       canGoForward(app.graphNavigation),
       {
         onBack: () => {
+          hideModuleOverlays();
           app.graphNavigation = goBack(app.graphNavigation);
           void navigateGraph();
         },
         onForward: () => {
+          hideModuleOverlays();
           app.graphNavigation = goForward(app.graphNavigation);
           void navigateGraph();
         },
         onNavigate: (crumb) => {
+          hideModuleOverlays();
           app.graphNavigation = navigateTo(app.graphNavigation, crumb);
           void navigateGraph({ skipAutoAdvance: true });
         },
+        onLayoutModeChange: (mode) => {
+          layoutMode = mode;
+          void reorganizeVisibleLayout();
+        },
+        onEdgeStyleChange: (style) => {
+          edgeStyle = style;
+          if (app.renderState) {
+            app.renderState.edgeStyle = style;
+            draw();
+          }
+          persist();
+        },
+        onModuleFiltersChange: (filters) => {
+          moduleFilters = filters;
+          applyGraphFilters();
+        },
+        onLanguageFiltersChange: (filters) => {
+          languageFilters = filters;
+          applyGraphFilters();
+          // Package-level language membership needs hierarchy file lists.
+          if (
+            !allLanguageFiltersEnabled(filters) &&
+            !hierarchyIsHydrated(app.hierarchy)
+          ) {
+            void ensureAnalysisHierarchy({ silent: true }).then(() => {
+              applyGraphFilters();
+              if (app.centerView === "graph") refreshGraphNav();
+            });
+          }
+        },
+        onFocusView: () => {
+          void reorganizeVisibleLayout();
+        },
+        onRunAnalysis: () => {
+          void handleRunAnalysis();
+        },
       },
       {
-        stats: graph
-          ? { nodes: graph.nodes.length, edges: graph.edges.length }
-          : undefined,
-        staleImports: hasStaleImportIndex(app.hierarchy),
+        stats: g
+          ? { nodes: g.nodes.length, edges: g.edges.length }
+          : app.renderState
+            ? {
+                nodes: app.renderState.nodes.length,
+                edges: app.renderState.edges.length,
+              }
+            : undefined,
+        staleImports: app.hierarchy
+          ? hasStaleImportIndex(app.hierarchy)
+          : false,
+        layoutMode,
+        edgeStyle,
+        moduleFilters,
+        languageFilters,
+        presentLanguages: presentLanguages(
+          g?.nodes ?? app.renderState?.nodes ?? [],
+          languageIndexForFilters(),
+        ),
+        focusEnabled: Boolean(app.renderState),
       },
     );
   }
@@ -897,14 +1304,40 @@ export async function startApp(): Promise<void> {
     selectedId?: string | null;
     skipAutoAdvance?: boolean;
   }) {
-    const hierarchy = await ensureAnalysisHierarchy();
-    if (!hierarchy) {
-      if (!app.analysisResult) {
-        showOverlay("Run analysis to build the dependency graph");
+    const crumb =
+      app.graphNavigation.crumbs[app.graphNavigation.crumbs.length - 1];
+    const atPackageRoot = !crumb || crumb.level === "packages";
+
+    // First level: use the slim package graph from analysis — no hierarchy load.
+    if (
+      atPackageRoot &&
+      app.analysisResult?.graph?.nodes?.length &&
+      !hierarchyIsHydrated(app.hierarchy)
+    ) {
+      hideModuleOverlays();
+      await loadGraph(app.analysisResult.graph, opts);
+      if (app.centerView === "dsm") {
+        refreshDsmView();
       }
       return;
     }
-    hideGraphPopup();
+
+    // Drill / DSM file level: load hierarchy-lite (~files+imports, no symbols).
+    const hierarchy = await ensureAnalysisHierarchy();
+    if (!hierarchy) {
+      if (!app.analysisResult) {
+        showGuidedOverlay();
+      } else if (app.analysisResult.graph?.nodes?.length) {
+        await loadGraph(app.analysisResult.graph, opts);
+      } else if (!app.renderState) {
+        showOverlay(
+          "Dependency graph unavailable",
+          "Re-run analysis to rebuild package and file dependencies.",
+        );
+      }
+      return;
+    }
+    hideModuleOverlays();
     if (!opts?.skipAutoAdvance) {
       const advanced = autoAdvanceSingleFolder(hierarchy, app.graphNavigation);
       if (advanced !== app.graphNavigation) {
@@ -913,18 +1346,33 @@ export async function startApp(): Promise<void> {
     }
     const graph = graphForNavigation(hierarchy, app.graphNavigation);
     await loadGraph(graph, opts);
-    refreshGraphNav(graph);
     if (app.centerView === "dsm") {
       refreshDsmView();
     }
   }
 
   function drillIntoNode(nodeId: string) {
-    if (!app.renderState || !app.hierarchy) return;
+    // Lazy-load hierarchy-lite the first time the user drills below packages.
+    if (!app.hierarchy) {
+      void (async () => {
+        const hierarchy = await ensureAnalysisHierarchy();
+        if (!hierarchy || !app.renderState) return;
+        const node = app.renderState.nodes.find((n) => n.id === nodeId);
+        if (!node || !isDrillableNode(node, app.graphNavigation)) return;
+        const next = drillTargetForNode(node, app.graphNavigation);
+        if (!next) return;
+        hideModuleOverlays();
+        app.graphNavigation = next;
+        void navigateGraph();
+      })();
+      return;
+    }
+    if (!app.renderState) return;
     const node = app.renderState.nodes.find((n) => n.id === nodeId);
     if (!node || !isDrillableNode(node, app.graphNavigation)) return;
     const next = drillTargetForNode(node, app.graphNavigation);
     if (!next) return;
+    hideModuleOverlays();
     app.graphNavigation = next;
     void navigateGraph();
   }
@@ -943,6 +1391,8 @@ export async function startApp(): Promise<void> {
         (node.line ?? 0) > 0);
     if (!isSymbol) return;
 
+    showFileView();
+    fileViewer.showLoading(node.path);
     try {
       const content = await readProjectFile(app.projectPath, node.path);
       fileViewer.open(node.path, content, {
@@ -950,57 +1400,243 @@ export async function startApp(): Promise<void> {
         issues: collectFileIssues(app.analysisResult, node.path),
       });
       refreshFileNav(node.path);
-      showFileView();
     } catch (err) {
       console.error(err);
+      fileViewer.showGuide();
       alert(`Could not open file: ${err}`);
     }
   }
 
-  function openModulePopup(nodeId: string, clientX: number, clientY: number) {
-    if (!app.renderState) return;
-    const node = app.renderState.nodes.find((n) => n.id === nodeId);
-    if (!node) return;
+  function hideModuleOverlays(): void {
+    hideGraphPopup();
+    moduleDetailsPanel.hide();
+  }
+
+  /** Project-wide git churn (loaded once; never re-run per module click). */
+  let projectChurnCache: import("./analysis/codeQualityMetrics").ChurnMap | null =
+    null;
+  let projectChurnPromise: Promise<void> | null = null;
+
+  async function ensureProjectChurnLoaded(): Promise<void> {
+    if (!app.projectPath) return;
+    if (projectChurnCache?.available) return;
+    if (projectChurnPromise) return projectChurnPromise;
+    const root = app.projectPath;
+    projectChurnPromise = (async () => {
+      try {
+        const { gitCodeChurn } = await import("./project/api");
+        const { churnMapFromResult } = await import("./analysis/codeQualityMetrics");
+        // One repo-wide numstat; UI slices by file/package.
+        const result = await gitCodeChurn(root, ".", 90);
+        if (app.projectPath !== root) return;
+        projectChurnCache = churnMapFromResult(result);
+        if (moduleDetailsPanel.isOpen() && projectChurnCache) {
+          moduleDetailsPanel.updateQuality({ churn: projectChurnCache });
+        }
+      } catch (err) {
+        console.warn("Project churn prefetch failed", err);
+        projectChurnCache = {
+          available: false,
+          days: 90,
+          byPath: new Map(),
+          message: "Git churn unavailable",
+        };
+      } finally {
+        projectChurnPromise = null;
+      }
+    })();
+    return projectChurnPromise;
+  }
+
+  function focusModuleOnGraph(nodeId: string): void {
+    if (!app.renderState || !app.renderState.nodes.some((node) => node.id === nodeId)) {
+      return;
+    }
     app.renderState.selectedId = nodeId;
+    focusCameraOnNodeAnimated(app.renderState, canvas, nodeId, draw);
     setHighlight(nodeId);
-    toggleGraphPopup(
-      node,
-      app.renderState.nodes,
-      app.renderState.edges,
-      clientX,
-      clientY,
-      () => setHighlight(null),
-    );
     persist();
   }
 
-  function refreshModulesList() {
+  function graphNodeFromHierarchy(nodeId: string): import("./graph/types").GraphNode | null {
+    const hierarchy = app.hierarchy;
+    if (!hierarchy) return null;
+    const file = hierarchy.files.find((f) => f.path === nodeId);
+    if (file) {
+      return {
+        id: file.path,
+        label: file.label,
+        path: file.path,
+        loc: file.loc,
+        kind: "file",
+      };
+    }
+    if (hierarchy.packages.includes(nodeId) || nodeId === ".") {
+      const loc = hierarchy.files
+        .filter(
+          (f) =>
+            f.package === nodeId ||
+            f.path === nodeId ||
+            f.path.startsWith(`${nodeId}/`),
+        )
+        .reduce((sum, f) => sum + f.loc, 0);
+      return {
+        id: nodeId,
+        label: nodeId === "." ? "(root)" : nodeId.split("/").pop() ?? nodeId,
+        path: nodeId,
+        loc,
+        kind: "package",
+      };
+    }
+    return null;
+  }
+
+  function showModuleDetailsFor(nodeId: string): void {
+    if (!app.renderState) return;
+    const node =
+      app.renderState.nodes.find((n) => n.id === nodeId) ??
+      graphNodeFromHierarchy(nodeId);
+    if (!node) return;
+    app.renderState.selectedId = nodeId;
+    setHighlight(nodeId);
+    hideGraphPopup();
+    // Package metrics are already in memory; file metrics load lazily below.
+    const needsFileQuality =
+      Boolean(app.analysisResult) &&
+      Object.keys(app.analysisResult?.quality?.files ?? {}).length === 0 &&
+      Object.keys(app.analysisResult?.quality?.packages ?? {}).length > 0;
+    moduleDetailsPanel.show({
+      node,
+      nodes: app.renderState.nodes,
+      edges: app.renderState.edges,
+      hierarchy: app.hierarchy,
+      navigation: app.graphNavigation,
+      analysis: app.analysisResult,
+      churn: projectChurnCache,
+      qualityLoading: needsFileQuality,
+    });
+    persist();
+    if (!projectChurnCache) {
+      void ensureProjectChurnLoaded();
+    }
+    // Lazy: pull per-file quality only when opening details (not on analysis apply).
+    if (needsFileQuality && app.analysisResult) {
+      void loadAnalysisQualityWithFiles(app.analysisResult, app.projectPath).then(
+        (quality) => {
+          if (!quality || !app.analysisResult) return;
+          app.analysisResult = { ...app.analysisResult, quality };
+          if (moduleDetailsPanel.isOpen()) {
+            moduleDetailsPanel.updateQuality({ qualityLoading: false });
+          }
+        },
+      );
+    }
+  }
+
+  function openModuleDetails(nodeId: string): void {
+    if (!app.renderState) return;
+    if (
+      moduleDetailsPanel.isOpen() &&
+      moduleDetailsPanel.currentNodeId() === nodeId
+    ) {
+      moduleDetailsPanel.hide();
+      return;
+    }
+    showModuleDetailsFor(nodeId);
+  }
+
+  function refreshModulesList(opts?: { loading?: boolean }) {
+    activeModuleRow = null;
+    if (opts?.loading !== undefined) {
+      app.modulesListState.loading = opts.loading;
+    }
     renderModulesList(modulesContainer, app.modulesListState, {
       onFocus: (nodeId) => {
         if (!app.renderState) return;
+        app.renderState.selectedId = nodeId;
+        setHighlight(nodeId);
         focusCameraOnNodeAnimated(app.renderState, canvas, nodeId, draw);
-        draw();
         persist();
       },
       onVisibilityChange: (visibleIds) => {
         app.modulesListState.visibleIds = visibleIds;
         syncHiddenFromVisible();
       },
-      onHighlight: setHighlight,
-      onShowDetails: (nodeId, clientX, clientY) => {
+      // List hover stays local — canvas highlight only on click (avoids hangs on large graphs).
+      onHighlight: (nodeId) => {
+        setModuleRowActive(nodeId);
+      },
+      onShowDetails: (nodeId) => {
         showGraphView();
-        openModulePopup(nodeId, clientX, clientY);
+        focusModuleOnGraph(nodeId);
+        openModuleDetails(nodeId);
+      },
+      onOpenFile: (path) => {
+        void showModuleOnGraph(path);
       },
     });
   }
 
-  function showOverlay(text: string) {
-    graphOverlayText.textContent = text;
-    graphOverlay.classList.remove("hidden");
+  function showOverlay(text: string, detail?: string) {
+    renderFlowOverlay(graphOverlay, { title: text, detail });
   }
 
   function hideOverlay() {
-    graphOverlay.classList.add("hidden");
+    hideFlowOverlay(graphOverlay);
+  }
+
+  /** Empty-state overlay with next-step actions for the open → configure → run flow. */
+  function showGuidedOverlay(): void {
+    if (!app.projectPath) {
+      renderFlowOverlay(graphOverlay, {
+        title: "Open a project to get started",
+        detail:
+          "Browse a folder to explore dependencies, run quality rules, and review architecture health.",
+        actions: [
+          {
+            label: "Open project",
+            primary: true,
+            onClick: () => {
+              void handleOpenProject();
+            },
+          },
+          {
+            label: "Setup guide",
+            onClick: () => {
+              void launchSetupWizard();
+            },
+          },
+        ],
+      });
+      return;
+    }
+
+    renderFlowOverlay(graphOverlay, {
+      title: "Run analysis to map this project",
+      detail:
+        "1) Review rules in Settings · 2) Run analysis · 3) Explore Graph, DSM, and findings below.",
+      actions: [
+        {
+          label: "Run analysis",
+          primary: true,
+          onClick: () => {
+            void handleRunAnalysis();
+          },
+        },
+        {
+          label: "Configure rules",
+          onClick: () => {
+            settingsApi.open("rules");
+          },
+        },
+        {
+          label: "Setup guide",
+          onClick: () => {
+            void launchSetupWizard();
+          },
+        },
+      ],
+    });
   }
 
   function draw() {
@@ -1008,10 +1644,26 @@ export async function startApp(): Promise<void> {
     render(ctx, canvas, app.renderState);
   }
 
+  function canvasCssSize(): { width: number; height: number } {
+    // Hidden canvases report 0×0 — fall back to the center content box so layout
+    // can finish while Report is showing, then Graph remounts cleanly.
+    const width =
+      canvas.clientWidth ||
+      canvas.parentElement?.clientWidth ||
+      0;
+    const height =
+      canvas.clientHeight ||
+      canvas.parentElement?.clientHeight ||
+      0;
+    return { width, height };
+  }
+
   function resize() {
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = canvas.clientHeight * dpr;
+    const { width, height } = canvasCssSize();
+    if (width <= 0 || height <= 0) return;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
     draw();
   }
 
@@ -1019,17 +1671,26 @@ export async function startApp(): Promise<void> {
     graph: Graph,
     opts?: { visibleIds?: string[]; camera?: PersistedAppState["camera"]; selectedId?: string | null },
   ) {
-    hideGraphPopup();
-    showOverlay("Computing layout…");
-    const positionsList = await computeLayout(graph);
+    hideModuleOverlays();
+    const showLayoutOverlay = app.centerView === "graph";
+    if (showLayoutOverlay) {
+      showOverlay(
+        "Computing layout…",
+        "Arranging modules for the current graph view.",
+      );
+    }
+    refreshModulesList({ loading: true });
+    const positionsList = await computeLayout(graph, layoutMode);
     const positions = new Map(positionsList.map((p) => [p.id, p]));
 
     app.renderState = createRenderState(graph.nodes, graph.edges, positions);
+    app.renderState.edgeStyle = edgeStyle;
 
+    const filterVisible = visibleIdsForCurrentFilters(graph.nodes, graph.edges);
     const visible =
       opts?.visibleIds && opts.visibleIds.length > 0
-        ? new Set(opts.visibleIds)
-        : new Set(graph.nodes.map((n) => n.id));
+        ? new Set(opts.visibleIds.filter((id) => filterVisible.has(id)))
+        : filterVisible;
     app.modulesListState.graphNodes = graph.nodes;
     app.modulesListState.visibleIds = visible;
 
@@ -1049,18 +1710,29 @@ export async function startApp(): Promise<void> {
       fitCameraToContent(app.renderState, canvas);
     }
 
-    hideOverlay();
+    if (showLayoutOverlay) {
+      hideOverlay();
+    }
     draw();
-    refreshModulesList();
-    btnFocus.disabled = false;
+    refreshModulesList({ loading: false });
+    // Always rebuild the graph toolbar (layout / filter / focus) after layout.
+    refreshGraphNav(graph);
     persist();
   }
 
   function clearMainPanel(): void {
-    hideGraphPopup();
+    hideModuleOverlays();
     fileViewer.close();
-    showGraphView();
+    // Switch to graph chrome without hydrating hierarchy for the outgoing project.
+    app.centerView = "graph";
+    hideCenterViews();
+    canvas.classList.remove("hidden");
+    setActiveViewTab("graph");
     clearHierarchyLoadCache();
+    clearQualityLoadCache();
+    projectChurnCache = null;
+    projectChurnPromise = null;
+    pendingGraphRestore = null;
 
     app.analysisResult = null;
     app.hierarchy = null;
@@ -1070,12 +1742,12 @@ export async function startApp(): Promise<void> {
       graphNodes: [],
       visibleIds: new Set(),
       searchQuery: app.modulesListState.searchQuery,
+      loading: false,
     };
 
     resultsPanel.setResult(null);
     refreshModulesList();
     graphNavContainer.innerHTML = "";
-    btnFocus.disabled = true;
 
     const ctx2d = canvas.getContext("2d");
     if (ctx2d) {
@@ -1083,7 +1755,7 @@ export async function startApp(): Promise<void> {
       ctx2d.fillStyle = "#0f1115";
       ctx2d.fillRect(0, 0, canvas.width, canvas.height);
     }
-    showOverlay("Run analysis to build the dependency graph");
+    showGuidedOverlay();
   }
 
   async function openProjectAt(path: string): Promise<boolean> {
@@ -1097,6 +1769,8 @@ export async function startApp(): Promise<void> {
 
       app.projectPath = scan.root;
       app.projectScan = scan;
+      projectChurnCache = null;
+      projectChurnPromise = null;
 
       const displayPath = scan.root.split("/").pop() ?? scan.root;
       projectPathEl.textContent = displayPath;
@@ -1104,6 +1778,8 @@ export async function startApp(): Promise<void> {
 
       renderProjectTree(treeContainer, scan.tree, {
         onFileOpen: handleFileOpen,
+        loadChildren: (relativePath) =>
+          listProjectChildren(scan.root, relativePath),
       });
       refreshModulesList();
       btnRun.disabled = false;
@@ -1119,6 +1795,8 @@ export async function startApp(): Promise<void> {
 
   async function handleFileOpen(relativePath: string, line?: number) {
     if (!app.projectPath) return;
+    showFileView();
+    fileViewer.showLoading(relativePath);
     try {
       const content = await readProjectFile(app.projectPath, relativePath);
       const issues = collectFileIssues(app.analysisResult, relativePath);
@@ -1127,9 +1805,9 @@ export async function startApp(): Promise<void> {
         issues,
       });
       refreshFileNav(relativePath);
-      showFileView();
     } catch (err) {
       console.error(err);
+      fileViewer.showGuide();
       alert(`Could not open file: ${err}`);
     }
   }
@@ -1147,10 +1825,18 @@ export async function startApp(): Promise<void> {
     if (!hierarchy) return;
     hideAnalysisStatDetail();
     hideValidationDetail();
-    hideGraphPopup();
+    hideModuleOverlays();
     showGraphView();
 
-    app.graphNavigation = rootNavigation();
+    const isFile = hierarchy.files.some((f) => f.path === nodeId);
+    if (isFile) {
+      // Drill nested folders until the file node itself is on the graph.
+      app.graphNavigation = navigationShowingFile(hierarchy, nodeId);
+    } else {
+      // Packages (and package-like paths) live on the root packages graph.
+      app.graphNavigation = rootNavigation();
+    }
+
     const graph = graphForNavigation(hierarchy, app.graphNavigation);
     await loadGraph(graph, { selectedId: nodeId });
     refreshGraphNav(graph);
@@ -1163,6 +1849,8 @@ export async function startApp(): Promise<void> {
     } else {
       draw();
     }
+    // Always open details (synthesize node if nested view still lacks it).
+    showModuleDetailsFor(nodeId);
     persist();
   }
 
@@ -1171,7 +1859,7 @@ export async function startApp(): Promise<void> {
     if (!hierarchy) return;
     hideAnalysisStatDetail();
     hideValidationDetail();
-    hideGraphPopup();
+    hideModuleOverlays();
     showGraphView();
 
     app.graphNavigation = rootNavigation();
@@ -1202,7 +1890,7 @@ export async function startApp(): Promise<void> {
     if (!hierarchy) return;
     hideAnalysisStatDetail();
     hideValidationDetail();
-    hideGraphPopup();
+    hideModuleOverlays();
     showGraphView();
 
     const plan = planCycleGraphView(hierarchy, cycle);
@@ -1232,7 +1920,7 @@ export async function startApp(): Promise<void> {
     if (!hierarchy) return;
     hideAnalysisStatDetail();
     hideValidationDetail();
-    hideGraphPopup();
+    hideModuleOverlays();
     showGraphView();
 
     const wantsSymbol =
@@ -1304,10 +1992,10 @@ export async function startApp(): Promise<void> {
       if (!app.renderState) return;
       setHighlight(id);
     },
-    onNodeClick: (id, clientX, clientY) => {
+    onNodeClick: (id) => {
       clearPendingPopup();
       if (!id) {
-        hideGraphPopup();
+        hideModuleOverlays();
         setHighlight(null);
         persist();
         return;
@@ -1315,12 +2003,12 @@ export async function startApp(): Promise<void> {
       // Delay so a double-click can cancel and drill instead of flashing the popup.
       pendingPopupTimer = setTimeout(() => {
         pendingPopupTimer = null;
-        openModulePopup(id, clientX, clientY);
+        openModuleDetails(id);
       }, 220);
     },
     onNodeDoubleClick: (id) => {
       clearPendingPopup();
-      hideGraphPopup();
+      hideModuleOverlays();
       const level =
         app.graphNavigation.crumbs[app.graphNavigation.crumbs.length - 1]
           ?.level;
@@ -1337,6 +2025,10 @@ export async function startApp(): Promise<void> {
         (node.line ?? 0) > 0
       ) {
         void openSymbolSource(id);
+        return;
+      }
+      if (node?.kind === "file") {
+        void handleFileOpen(node.path || node.id);
         return;
       }
       drillIntoNode(id);
@@ -1390,7 +2082,8 @@ export async function startApp(): Promise<void> {
     app.linterSettings = linterSettings;
     lintersState.settings = linterSettings;
 
-    showGraphView();
+    dismissRunDialogs();
+    showProgressView();
 
     analysisManager.start({
       projectPath: app.projectPath,
@@ -1456,7 +2149,11 @@ export async function startApp(): Promise<void> {
       await initRulesPanel();
     }
     if (app.selectedRules.size === 0) {
-      alert("Select at least one analysis rule.");
+      settingsApi.open("rules");
+      showOverlay(
+        "Select at least one analysis rule",
+        "Turn on rules in Settings → Analysis Rules, then run analysis again.",
+      );
       return;
     }
 
@@ -1466,12 +2163,18 @@ export async function startApp(): Promise<void> {
     }
 
     const choice = await showAnalysisDialog(app.selectedRules.size, {
-      mode: "now",
-      debounceMs: app.analysisTriggers.watchDebounceMs,
-      cron: app.analysisTriggers.cron,
-      runImmediately: true,
+      defaults: {
+        mode: "now",
+        debounceMs: app.analysisTriggers.watchDebounceMs,
+        cron: app.analysisTriggers.cron,
+        runImmediately: true,
+      },
+      onConfigureRules: () => {
+        settingsApi.open("rules");
+      },
     });
     if (!choice) return;
+    dismissRunDialogs();
 
     try {
       await applyRunChoice(choice);
@@ -1514,13 +2217,6 @@ export async function startApp(): Promise<void> {
   btnRun.addEventListener("click", handleRunAnalysis);
   btnStop.addEventListener("click", () => {
     analysisManager.cancelAll();
-  });
-  btnFocus.addEventListener("click", () => {
-    if (app.renderState) {
-      fitCameraToContent(app.renderState, canvas);
-      draw();
-      persist();
-    }
   });
 
   document.addEventListener("keydown", (e) => {
@@ -1625,7 +2321,7 @@ export async function startApp(): Promise<void> {
       persist();
 
       if (!app.projectPath) {
-        showOverlay("Open a project to get started");
+        showGuidedOverlay();
       }
 
       if (result.action === "runAnalysis" && app.projectPath) {
@@ -1637,7 +2333,7 @@ export async function startApp(): Promise<void> {
   }
 
   if (!persisted.projectPath) {
-    showOverlay("Open a project to get started");
+    showGuidedOverlay();
     if (!setupWizardCompleted) {
       void launchSetupWizard();
     }
@@ -1647,8 +2343,20 @@ export async function startApp(): Promise<void> {
       const ok = await openProjectAt(persisted.projectPath!);
       if (!ok) return;
 
-      const meta = await loadPersistedAnalysisMeta();
+      // Only restore analysis that belongs to this project (never another folder).
+      const projectRoot = app.projectPath ?? persisted.projectPath!;
+      const [meta, quality] = await Promise.all([
+        loadPersistedAnalysisMeta(projectRoot),
+        loadPersistedAnalysisQuality(projectRoot),
+      ]);
       if (!meta) return;
+      if (
+        meta.projectRoot &&
+        meta.projectRoot.replace(/\\/g, "/").replace(/\/+$/, "") !==
+          projectRoot.replace(/\\/g, "/").replace(/\/+$/, "")
+      ) {
+        return;
+      }
 
       const emptyHierarchy: HierarchyIndex = {
         files: [],
@@ -1659,25 +2367,27 @@ export async function startApp(): Promise<void> {
         symbol_edges: [],
       };
 
-      app.analysisResult = { ...meta, hierarchy: emptyHierarchy };
-      app.graphNavigation = persisted.graphNavigation ?? rootNavigation();
+      app.analysisResult = {
+        ...meta,
+        hierarchy: emptyHierarchy,
+        quality: quality ?? null,
+      };
+      // Restore to package root so we can paint the slim graph without hierarchy.
+      app.graphNavigation = rootNavigation();
       resultsPanel.setResult(app.analysisResult);
+      showReportView();
 
-      runWhenIdle(() => {
-        void navigateGraph({
-          visibleIds: persisted.visibleModuleIds,
-          camera: persisted.camera,
-          selectedId: persisted.selectedNodeId,
-        }).then(() => {
-          if (app.hierarchy && !app.analysisResult?.dsm) {
-            const dsm = computeDsm(app.hierarchy);
-            app.analysisResult = { ...app.analysisResult!, dsm };
-            resultsPanel.setResult(app.analysisResult);
-            persistAnalysis();
-          }
-          refreshDsmView();
-        });
-      }, 3000);
+      if (meta.graph?.nodes?.length) {
+        try {
+          await loadGraph(meta.graph, {
+            visibleIds: persisted.visibleModuleIds,
+            camera: persisted.camera,
+            selectedId: persisted.selectedNodeId,
+          });
+        } catch (err) {
+          console.warn("Restore package graph layout failed", err);
+        }
+      }
     });
   }
 }

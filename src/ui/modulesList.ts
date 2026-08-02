@@ -1,12 +1,17 @@
 import type { GraphNode } from "../graph/types";
+import { openableSourceForNode } from "../graph/openSource";
 import { createNodeKindShapeWrap, nodeKindLabel } from "../canvas/nodeIcons";
 import { nodeColor } from "../canvas/colors";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
+import { appendPagedItems } from "./pagedList";
 import { attachTooltip } from "./tooltip";
 
 export interface ModulesListState {
   graphNodes: GraphNode[];
   visibleIds: Set<string>;
   searchQuery: string;
+  /** True while graph/hierarchy is hydrating. */
+  loading?: boolean;
 }
 
 export interface ModulesListCallbacks {
@@ -14,6 +19,8 @@ export interface ModulesListCallbacks {
   onVisibilityChange: (visibleIds: Set<string>) => void;
   onHighlight: (nodeId: string | null) => void;
   onShowDetails?: (nodeId: string, clientX: number, clientY: number) => void;
+  /** Navigate to this module on the Graph (e.g. double-click a file). */
+  onOpenFile?: (path: string) => void;
 }
 
 export function renderModulesList(
@@ -76,10 +83,21 @@ export function renderModulesList(
   container.appendChild(toolbar);
 
   if (state.graphNodes.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "panel-empty";
-    empty.textContent = "Run analysis to list graph modules";
-    container.appendChild(empty);
+    if (state.loading) {
+      container.appendChild(
+        createLoadingPlaceholder({
+          title: "Loading modules…",
+          detail: "Waiting for the dependency graph layout.",
+          size: "panel",
+        }),
+      );
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "panel-empty";
+      empty.textContent =
+        "After you run analysis, modules from the current graph view appear here";
+      container.appendChild(empty);
+    }
     restoreSearchFocus(container, searchHadFocus, searchCursor);
     return;
   }
@@ -114,9 +132,15 @@ export function renderModulesList(
     return;
   }
 
-  for (const node of filtered) {
-    container.appendChild(moduleRow(node, state, callbacks, query));
-  }
+  const pageHost = document.createElement("div");
+  pageHost.className = "modules-paged-list";
+  container.appendChild(pageHost);
+  appendPagedItems(
+    pageHost,
+    filtered,
+    (node) => moduleRow(node, state, callbacks, query),
+    100,
+  );
 
   restoreSearchFocus(container, searchHadFocus, searchCursor);
 }
@@ -217,25 +241,30 @@ function moduleRow(
   row.append(checkbox, colorDot, icon, name);
 
   row.addEventListener("mouseenter", () => {
+    row.classList.add("module-row-hover");
     callbacks.onHighlight(node.id);
   });
   row.addEventListener("mouseleave", () => {
+    row.classList.remove("module-row-hover");
     callbacks.onHighlight(null);
   });
 
   row.addEventListener("click", () => {
-    containerSelect(row);
+    // O(1) selection — avoid querySelectorAll over thousands of rows.
+    const prev = row
+      .closest("#modules-list, .modules-paged-list")
+      ?.querySelector(".module-row.selected");
+    if (prev && prev !== row) prev.classList.remove("selected");
+    row.classList.add("selected");
     callbacks.onFocus(node.id);
   });
 
-  return row;
-}
-
-function containerSelect(row: HTMLElement): void {
-  const parent = row.closest("#modules-list");
-  if (!parent) return;
-  parent.querySelectorAll(".module-row.selected").forEach((el) => {
-    el.classList.remove("selected");
+  row.addEventListener("dblclick", () => {
+    const openable = openableSourceForNode(node);
+    if (openable && callbacks.onOpenFile) {
+      callbacks.onOpenFile(openable.path);
+    }
   });
-  row.classList.add("selected");
+
+  return row;
 }

@@ -15,7 +15,6 @@
           <button id="btn-open-project" class="btn btn-icon btn-ghost" title="Open project folder"></button>
           <button id="btn-run-analysis" class="btn btn-icon btn-ghost" disabled title="Run analysis"></button>
           <button id="btn-stop-analysis" class="btn btn-icon btn-ghost" disabled title="Stop analysis"></button>
-          <button id="btn-focus-view" class="btn btn-icon btn-ghost" disabled title="Focus view"></button>
           <button id="btn-save-file" class="btn btn-icon btn-ghost" disabled title="Save file"></button>
           <button id="btn-setup-wizard" class="btn btn-icon btn-ghost" title="Setup guide"></button>
           <button id="btn-settings" class="btn btn-icon btn-ghost" title="Settings"></button>
@@ -33,7 +32,7 @@
             </section>
             <div class="resize-handle resize-handle-split" data-resize="left-split" data-tooltip="Resize tree / modules split"></div>
             <section id="left-modules-section" class="panel-section">
-              <h3 class="panel-title">Modules <span class="panel-hint">click details · double-click drill in</span></h3>
+              <h3 class="panel-title">Modules <span class="panel-hint">Click = details · Double-click = drill in</span></h3>
               <div id="modules-list" class="panel-body scrollable"></div>
             </section>
           </aside>
@@ -42,18 +41,25 @@
 
           <main id="center-panel">
             <div id="view-tabs">
-              <button class="view-tab active" data-view="graph">Graph</button>
-              <button class="view-tab" data-view="dsm">DSM</button>
-              <button class="view-tab" data-view="file">File</button>
+              <button class="view-tab" data-view="report" title="Overall analysis report — health, ratings, and key findings">Report</button>
+              <button class="view-tab" data-view="progress" title="Live analysis progress and AI stream output">Progress</button>
+              <button class="view-tab active" data-view="graph" title="Dependency graph — packages and modules">Graph</button>
+              <button class="view-tab" data-view="dsm" title="Design Structure Matrix — dependency grid and modularity health">DSM</button>
+              <button class="view-tab" data-view="file" title="Source file viewer — open from the Project Tree or double-click a graph node">File</button>
             </div>
             <div id="graph-nav" class="graph-nav"></div>
             <div id="center-content">
+              <div id="analysis-report-view" class="analysis-report-view hidden" aria-label="Analysis report"></div>
+              <div id="analysis-progress-view" class="analysis-progress-view hidden" aria-label="Analysis progress"></div>
               <canvas id="graph-canvas"></canvas>
               <div id="dsm-view" class="hidden"></div>
               <div id="file-viewer" class="hidden"></div>
-              <div id="graph-overlay" class="graph-overlay hidden">
-                <span id="graph-overlay-text"></span>
-              </div>
+              <div id="graph-overlay" class="graph-overlay hidden" aria-live="polite"></div>
+              <aside
+                id="module-details-panel"
+                class="module-details-panel"
+                aria-hidden="true"
+              ></aside>
             </div>
           </main>
 

@@ -12,6 +12,31 @@ export interface AnalysisRunChoice {
 
 export const DEFAULT_WATCH_DEBOUNCE_MS = 3000;
 
+/** Debounce presets for file-watch mode (milliseconds). */
+export const WATCH_DEBOUNCE_OPTIONS_MS = [
+  1_000,
+  2_000,
+  3_000,
+  5_000,
+  10_000,
+  60_000,
+  2 * 60_000,
+  5 * 60_000,
+  10 * 60_000,
+  15 * 60_000,
+] as const;
+
+export function formatWatchDebounceMs(ms: number): string {
+  if (ms >= 60_000 && ms % 60_000 === 0) {
+    const mins = ms / 60_000;
+    return mins === 1 ? "1 min" : `${mins} mins`;
+  }
+  if (ms >= 1_000 && ms % 1_000 === 0) {
+    return `${ms / 1_000}s`;
+  }
+  return `${ms}ms`;
+}
+
 export const CRON_PRESETS: { label: string; value: string }[] = [
   { label: "Every 15 minutes", value: "*/15 * * * *" },
   { label: "Every 30 minutes", value: "*/30 * * * *" },
@@ -20,10 +45,23 @@ export const CRON_PRESETS: { label: string; value: string }[] = [
   { label: "Weekdays at 9:00", value: "0 9 * * 1-5" },
 ];
 
+export interface AnalysisDialogOptions {
+  defaults?: Partial<AnalysisRunChoice>;
+  /** Open Settings → Analysis Rules (closes the dialog first). */
+  onConfigureRules?: () => void;
+}
+
 export function showAnalysisDialog(
   ruleCount: number,
-  defaults?: Partial<AnalysisRunChoice>,
+  defaultsOrOptions?: Partial<AnalysisRunChoice> | AnalysisDialogOptions,
 ): Promise<AnalysisRunChoice | null> {
+  const options: AnalysisDialogOptions =
+    defaultsOrOptions &&
+    ("defaults" in defaultsOrOptions || "onConfigureRules" in defaultsOrOptions)
+      ? (defaultsOrOptions as AnalysisDialogOptions)
+      : { defaults: defaultsOrOptions as Partial<AnalysisRunChoice> | undefined };
+  const defaults = options.defaults;
+
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");
     backdrop.className = "modal-backdrop";
@@ -40,7 +78,26 @@ export function showAnalysisDialog(
 
     const subtitle = document.createElement("p");
     subtitle.className = "modal-subtitle";
-    subtitle.textContent = `${ruleCount} rule(s) selected. Choose how this analysis should run.`;
+    subtitle.textContent =
+      ruleCount === 0
+        ? "No rules selected yet. Configure the rule board, then choose how analysis should run."
+        : `${ruleCount} rule${ruleCount === 1 ? "" : "s"} selected. Choose how this analysis should run.`;
+
+    const rulesRow = document.createElement("p");
+    rulesRow.className = "run-dialog-rules-row";
+    if (options.onConfigureRules) {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "btn-text run-dialog-configure-rules";
+      link.textContent = "Configure rules in Settings";
+      link.addEventListener("click", () => {
+        close(null);
+        options.onConfigureRules?.();
+      });
+      rulesRow.appendChild(link);
+    } else {
+      rulesRow.hidden = true;
+    }
 
     const body = document.createElement("div");
     body.className = "modal-body run-mode-body";
@@ -112,10 +169,15 @@ export function showAnalysisDialog(
     debounceLabel.innerHTML = `<span>Debounce after changes</span>`;
     const debounceSelect = document.createElement("select");
     debounceSelect.className = "run-mode-select";
-    for (const ms of [1000, 2000, 3000, 5000, 10000]) {
+    const debounceOptions: number[] = [...WATCH_DEBOUNCE_OPTIONS_MS];
+    if (!debounceOptions.includes(debounceMs)) {
+      debounceOptions.push(debounceMs);
+      debounceOptions.sort((a, b) => a - b);
+    }
+    for (const ms of debounceOptions) {
       const opt = document.createElement("option");
       opt.value = String(ms);
-      opt.textContent = ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`;
+      opt.textContent = formatWatchDebounceMs(ms);
       if (ms === debounceMs) opt.selected = true;
       debounceSelect.appendChild(opt);
     }
@@ -204,15 +266,15 @@ export function showAnalysisDialog(
     startBtn.textContent = "Start";
 
     actions.append(cancelBtn, startBtn);
-    dialog.append(title, subtitle, body, actions);
+    dialog.append(title, subtitle, rulesRow, body, actions);
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
 
-    const close = (result: AnalysisRunChoice | null) => {
+    function close(result: AnalysisRunChoice | null): void {
       backdrop.remove();
       document.removeEventListener("keydown", onKey);
       resolve(result);
-    };
+    }
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close(null);
@@ -234,12 +296,14 @@ export function showAnalysisDialog(
         }
         cron = expr;
       }
-      close({
+      // Remove the dialog immediately so it never sits over Progress.
+      const choice: AnalysisRunChoice = {
         mode,
         debounceMs,
         cron,
         runImmediately: mode === "now" ? true : runImmediately,
-      });
+      };
+      close(choice);
     });
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) close(null);

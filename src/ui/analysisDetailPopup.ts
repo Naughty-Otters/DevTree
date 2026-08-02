@@ -1,6 +1,8 @@
 import type { AnalysisResult, ValidationItem } from "../analysis/types";
+import { openableSourceForNode } from "../graph/openSource";
 import type { GraphEdge, GraphNode } from "../graph/types";
 import { cycleGroupsFromValidation } from "../validation/cycles";
+import { appendPagedItems } from "./pagedList";
 import {
   showValidationDetail,
   type ValidationDetailHandlers,
@@ -15,6 +17,7 @@ export type AnalysisStatKind =
 
 export interface AnalysisDetailHandlers {
   onShowModuleOnGraph?: (nodeId: string) => void;
+  onOpenModuleFile?: (path: string, line?: number) => void;
   onShowDependencyOnGraph?: (source: string, target: string) => void;
   validation?: ValidationDetailHandlers;
 }
@@ -90,41 +93,58 @@ function renderModuleList(
 
   const list = document.createElement("ul");
   list.className = "validation-detail-entries analysis-detail-entries";
-
-  for (const node of sortNodes(nodes)) {
-    const li = document.createElement("li");
-    li.className = "validation-detail-entry";
-
-    const main = document.createElement("div");
-    main.className = "validation-detail-entry-main";
-
-    const name = document.createElement("span");
-    name.className = "validation-detail-entry-label";
-    name.textContent = node.label;
-
-    const detail = document.createElement("span");
-    detail.className = "validation-detail-entry-detail";
-    detail.textContent = `${node.path} · ${node.loc} LOC · ${node.kind}`;
-
-    main.append(name, detail);
-
-    const actions = document.createElement("div");
-    actions.className = "validation-detail-entry-actions";
-
-    const graphBtn = document.createElement("button");
-    graphBtn.type = "button";
-    graphBtn.className = "btn-text validation-detail-action";
-    graphBtn.textContent = "Show on graph";
-    graphBtn.addEventListener("click", () => {
-      handlers.onShowModuleOnGraph?.(node.id);
-    });
-    actions.appendChild(graphBtn);
-
-    li.append(main, actions);
-    list.appendChild(li);
-  }
-
   body.appendChild(list);
+
+  appendPagedItems(
+    list,
+    sortNodes(nodes),
+    (node) => {
+      const li = document.createElement("li");
+      li.className = "validation-detail-entry";
+
+      const main = document.createElement("div");
+      main.className = "validation-detail-entry-main";
+
+      const name = document.createElement("span");
+      name.className = "validation-detail-entry-label";
+      name.textContent = node.label;
+
+      const detail = document.createElement("span");
+      detail.className = "validation-detail-entry-detail";
+      detail.textContent = `${node.path} · ${node.loc} LOC · ${node.kind}`;
+
+      main.append(name, detail);
+
+      const actions = document.createElement("div");
+      actions.className = "validation-detail-entry-actions";
+
+      const graphBtn = document.createElement("button");
+      graphBtn.type = "button";
+      graphBtn.className = "btn-text validation-detail-action";
+      graphBtn.textContent = "Show on graph";
+      graphBtn.addEventListener("click", () => {
+        handlers.onShowModuleOnGraph?.(node.id);
+      });
+      actions.appendChild(graphBtn);
+
+      const openable = openableSourceForNode(node);
+      if (openable && handlers.onOpenModuleFile) {
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "btn-text validation-detail-action";
+        openBtn.textContent = "Open file";
+        openBtn.addEventListener("click", () => {
+          handlers.onOpenModuleFile?.(openable.path, openable.line);
+        });
+        actions.appendChild(openBtn);
+      }
+
+      li.append(main, actions);
+      return li;
+    },
+    80,
+    body,
+  );
 }
 
 function renderDependencyList(
@@ -142,41 +162,46 @@ function renderDependencyList(
 
   const list = document.createElement("ul");
   list.className = "validation-detail-entries analysis-detail-entries";
-
-  for (const edge of sortEdges(edges)) {
-    const li = document.createElement("li");
-    li.className = "validation-detail-entry";
-
-    const main = document.createElement("div");
-    main.className = "validation-detail-entry-main";
-
-    const name = document.createElement("span");
-    name.className = "validation-detail-entry-label";
-    name.textContent = `${edge.source} → ${edge.target}`;
-
-    const detail = document.createElement("span");
-    detail.className = "validation-detail-entry-detail";
-    detail.textContent = edge.kind;
-
-    main.append(name, detail);
-
-    const actions = document.createElement("div");
-    actions.className = "validation-detail-entry-actions";
-
-    const graphBtn = document.createElement("button");
-    graphBtn.type = "button";
-    graphBtn.className = "btn-text validation-detail-action";
-    graphBtn.textContent = "Show on graph";
-    graphBtn.addEventListener("click", () => {
-      handlers.onShowDependencyOnGraph?.(edge.source, edge.target);
-    });
-    actions.appendChild(graphBtn);
-
-    li.append(main, actions);
-    list.appendChild(li);
-  }
-
   body.appendChild(list);
+
+  appendPagedItems(
+    list,
+    sortEdges(edges),
+    (edge) => {
+      const li = document.createElement("li");
+      li.className = "validation-detail-entry";
+
+      const main = document.createElement("div");
+      main.className = "validation-detail-entry-main";
+
+      const name = document.createElement("span");
+      name.className = "validation-detail-entry-label";
+      name.textContent = `${edge.source} → ${edge.target}`;
+
+      const detail = document.createElement("span");
+      detail.className = "validation-detail-entry-detail";
+      detail.textContent = edge.kind;
+
+      main.append(name, detail);
+
+      const actions = document.createElement("div");
+      actions.className = "validation-detail-entry-actions";
+
+      const graphBtn = document.createElement("button");
+      graphBtn.type = "button";
+      graphBtn.className = "btn-text validation-detail-action";
+      graphBtn.textContent = "Show on graph";
+      graphBtn.addEventListener("click", () => {
+        handlers.onShowDependencyOnGraph?.(edge.source, edge.target);
+      });
+      actions.appendChild(graphBtn);
+
+      li.append(main, actions);
+      return li;
+    },
+    80,
+    body,
+  );
 }
 
 function renderValidationRuleList(

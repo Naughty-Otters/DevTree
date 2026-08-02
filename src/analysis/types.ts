@@ -131,6 +131,86 @@ export interface SuggestionItem {
   targets: string[];
 }
 
+/** Precomputed percentiles for a package metric. */
+export interface QualityPercentiles {
+  p50: number;
+  p80: number;
+  p90: number;
+}
+
+export interface PackageMetricRollup {
+  avg: number;
+  percentiles: QualityPercentiles;
+}
+
+/** Per-file quality blob produced during analysis (native/WASM). */
+export interface FileQualityMetrics {
+  path: string;
+  package?: string;
+  loc: number;
+  /** Non-comment lines of code. */
+  nloc?: number;
+  /** Comment lines of code. */
+  cloc?: number;
+  /** NLOC / LOC × 100. */
+  codeDensity?: number;
+  /** CLOC / (NLOC + CLOC) × 100. */
+  commentDensity?: number;
+  cyclomatic: number;
+  structural: number;
+  halsteadVolume: number;
+  halsteadDifficulty: number;
+  cognitive: number;
+  maintainability: number;
+  dit: number;
+  cbo: number;
+  coverage: number;
+  issueDensity: number;
+  securityDensity: number;
+  aiDensity: number;
+  duplicationHits: number;
+  /** % of NLOC matching project-wide clone fingerprints. */
+  duplicatedPct?: number;
+  /** % of symbols with no inbound references. */
+  deadCodePct?: number;
+  /** TODO/FIXME/HACK-style markers per kLOC. */
+  staleDecisionDensity?: number;
+  documentationScore?: number | null;
+}
+
+export interface PackageQualityMetrics {
+  path: string;
+  fileCount: number;
+  totalLoc: number;
+  totalNloc?: number;
+  totalCloc?: number;
+  complexity: PackageMetricRollup;
+  halstead: PackageMetricRollup;
+  cognitive: PackageMetricRollup;
+  maintainability: PackageMetricRollup;
+  cbo: PackageMetricRollup;
+  coverage: PackageMetricRollup;
+  issues: PackageMetricRollup;
+  security: PackageMetricRollup;
+  aiQuality: PackageMetricRollup;
+  duplication: PackageMetricRollup;
+  duplicatedCode?: PackageMetricRollup;
+  nloc?: PackageMetricRollup;
+  cloc?: PackageMetricRollup;
+  codeDensity?: PackageMetricRollup;
+  commentDensity?: PackageMetricRollup;
+  deadCode?: PackageMetricRollup;
+  staleDecisions?: PackageMetricRollup;
+  size: PackageMetricRollup;
+  documentation?: PackageMetricRollup | null;
+}
+
+/** Precomputed quality index — UI must treat this as read-only O(1) lookup. */
+export interface QualityIndex {
+  files: Record<string, FileQualityMetrics>;
+  packages: Record<string, PackageQualityMetrics>;
+}
+
 export interface AnalysisResult {
   graph: Graph;
   hierarchy: HierarchyIndex;
@@ -139,6 +219,8 @@ export interface AnalysisResult {
   summary: string;
   /** Package-level DSM from last analysis; may be recomputed in the UI for scope/level. */
   dsm?: DsmResult | null;
+  /** Precomputed metrics; prefer over on-the-fly calculation. */
+  quality?: QualityIndex | null;
 }
 
 export interface RuleTaskProgress {
@@ -154,6 +236,10 @@ export interface AiValidationStream {
   thinking: string;
   text: string;
   activity?: string;
+  /** Live / completed tool output (shell stdout, grep/read previews). */
+  toolLog?: string;
+  /** Token budget / usage line (e.g. `Tokens 12.4k / 50k`). */
+  budget?: string;
   status: "running" | "done" | "failed";
 }
 

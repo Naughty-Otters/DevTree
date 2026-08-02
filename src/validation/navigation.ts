@@ -2,6 +2,7 @@ import type { HierarchyIndex, SymbolInfo } from "../analysis/types";
 import {
   drillIntoFile,
   drillIntoPackage,
+  graphForNavigation,
   rootNavigation,
   type GraphNavigation,
 } from "../graph/navigation";
@@ -55,6 +56,31 @@ export function navigationToPackageFile(
   const pkg = file?.package ?? inferPackageForFile(hierarchy, filePath);
   let nav = rootNavigation();
   nav = drillIntoPackage(nav, pkg, packageLabel(pkg));
+  return nav;
+}
+
+/**
+ * Drill into nested folders until `filePath` is a visible graph node
+ * (package views only show immediate children).
+ */
+export function navigationShowingFile(
+  hierarchy: HierarchyIndex,
+  filePath: string,
+): GraphNavigation {
+  let nav = navigationToPackageFile(hierarchy, filePath);
+  for (let depth = 0; depth < 32; depth += 1) {
+    const graph = graphForNavigation(hierarchy, nav);
+    if (graph.nodes.some((n) => n.id === filePath)) return nav;
+    const next = graph.nodes
+      .filter(
+        (n) =>
+          (n.kind === "package" || n.kind === "folder") &&
+          filePath.startsWith(`${n.id}/`),
+      )
+      .sort((a, b) => b.id.length - a.id.length)[0];
+    if (!next) return nav;
+    nav = drillIntoPackage(nav, next.id, next.label);
+  }
   return nav;
 }
 

@@ -187,10 +187,12 @@ export function showValidationDetail(
       filePath.type = "button";
       filePath.className = "validation-detail-file-path";
       filePath.textContent = file;
-      filePath.title = isOpenableValidationPath(file) ? "Open file" : file;
+      filePath.title = isOpenableValidationPath(file)
+        ? "Show file on graph"
+        : file;
       if (isOpenableValidationPath(file)) {
         filePath.addEventListener("click", () => {
-          handlers.onOpenFile({ file });
+          handlers.onShowOnGraph({ file });
         });
       } else {
         filePath.disabled = true;

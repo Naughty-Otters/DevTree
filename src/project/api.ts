@@ -31,7 +31,7 @@ import {
   cleanCodePrincipleSettingDefs,
   codeReviewLensSettingDefs,
 } from "../validation/aiValidation";
-import type { ProjectScan } from "./types";
+import type { ProjectScan, TreeEntry } from "./types";
 import { mockHierarchyForFixture } from "../graph/hierarchy";
 import { graphForNavigation, rootNavigation } from "../graph/navigation";
 import type {
@@ -63,6 +63,50 @@ export async function scanProject(path: string): Promise<ProjectScan> {
     return invoke<ProjectScan>("scan_project_dir", { path });
   }
   return mockProjectScan(path);
+}
+
+/** Lazy-expand: immediate children of one folder under the project root. */
+export async function listProjectChildren(
+  path: string,
+  relativePath: string,
+): Promise<TreeEntry[]> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<TreeEntry[]>("list_project_children_cmd", {
+      path,
+      relativePath,
+    });
+  }
+  return mockListProjectChildren(path, relativePath);
+}
+
+/** Hierarchy without symbols — for graph drill / DSM (not first paint). */
+export async function loadAnalysisHierarchyLite(
+  path: string,
+): Promise<import("../analysis/types").HierarchyIndex> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke("load_analysis_hierarchy_lite", { path });
+  }
+  return {
+    files: [],
+    packages: [],
+    file_imports: {},
+    package_edges: [],
+    symbols: {},
+    symbol_edges: [],
+  };
+}
+
+/** Per-file quality metrics (lazy — module details / file ratings). */
+export async function loadAnalysisQualityFiles(
+  path: string,
+): Promise<Record<string, import("../analysis/types").FileQualityMetrics>> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke("load_analysis_quality_files", { path });
+  }
+  return {};
 }
 
 export async function getAnalysisRules(): Promise<AnalysisRule[]> {
@@ -262,6 +306,42 @@ export async function listLlmModels(
     return invoke<string[]>("list_llm_models", { provider, apiKey });
   }
   return [];
+}
+
+export interface GitFileChurn {
+  path: string;
+  linesAdded: number;
+  linesDeleted: number;
+  commits: number;
+}
+
+export interface GitChurnResult {
+  available: boolean;
+  days: number;
+  files: GitFileChurn[];
+  message?: string | null;
+}
+
+/** Git lines added/deleted/commits under a path for the last `days` (default 90). */
+export async function gitCodeChurn(
+  projectPath: string,
+  path: string,
+  days = 90,
+): Promise<GitChurnResult> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<GitChurnResult>("git_code_churn", {
+      projectPath,
+      path,
+      days,
+    });
+  }
+  return {
+    available: false,
+    days,
+    files: [],
+    message: "Git churn requires the desktop app",
+  };
 }
 
 export async function readProjectFile(
@@ -743,31 +823,44 @@ function mockRules(): AnalysisRule[] {
   ];
 }
 
+const mockTreeByPath: Record<string, TreeEntry[]> = {
+  ".": [
+    { name: "src", path: "src", kind: "directory", has_children: true },
+    { name: "fixtures", path: "fixtures", kind: "directory", has_children: true },
+  ],
+  src: [
+    { name: "canvas", path: "src/canvas", kind: "directory", has_children: true },
+    { name: "main.ts", path: "src/main.ts", kind: "file" },
+  ],
+  "src/canvas": [
+    { name: "renderer.ts", path: "src/canvas/renderer.ts", kind: "file" },
+  ],
+  fixtures: [
+    { name: "sample-graph.json", path: "fixtures/sample-graph.json", kind: "file" },
+  ],
+};
+
 function mockProjectScan(path: string): ProjectScan {
+  const children = mockTreeByPath["."] ?? [];
   return {
     root: path,
     tree: {
       name: "DevTree",
       path: ".",
       kind: "directory",
-      children: [
-        { name: "src", path: "src", kind: "directory", children: [
-          { name: "main.ts", path: "src/main.ts", kind: "file" },
-          { name: "canvas", path: "src/canvas", kind: "directory", children: [
-            { name: "renderer.ts", path: "src/canvas/renderer.ts", kind: "file" },
-          ]},
-        ]},
-        { name: "fixtures", path: "fixtures", kind: "directory", children: [
-          { name: "sample-graph.json", path: "fixtures/sample-graph.json", kind: "file" },
-        ]},
-      ],
+      has_children: children.length > 0,
+      children: children.map((c) => ({ ...c })),
     },
-    modules: [
-      { name: "src", path: "src", kind: "folder", file_count: 8 },
-      { name: "main.ts", path: "src/main.ts", kind: "file", file_count: 1 },
-      { name: "renderer.ts", path: "src/canvas/renderer.ts", kind: "file", file_count: 1 },
-    ],
+    modules: [],
   };
+}
+
+function mockListProjectChildren(
+  _path: string,
+  relativePath: string,
+): TreeEntry[] {
+  const key = relativePath === "" ? "." : relativePath;
+  return (mockTreeByPath[key] ?? []).map((c) => ({ ...c }));
 }
 
 const mockCancelledAnalyses = new Set<string>();

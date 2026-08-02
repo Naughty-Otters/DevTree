@@ -1,11 +1,13 @@
 import type { HierarchyIndex } from "../analysis/types";
 import {
   computeDsm,
+  DSM_MAX_ELEMENTS,
   healthStatus,
   type DsmOptions,
   type DsmResult,
 } from "../analysis/dsm";
 import type { GraphNavigation } from "../graph/navigation";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 
 export interface DsmViewHandlers {
   onOptionsChange?: (opts: DsmOptions) => void;
@@ -43,10 +45,12 @@ export function createDsmView(
     state: DsmViewState,
     preferred?: DsmResult | null,
   ) => void;
+  setLoading: (message: string | null) => void;
   getOptions: () => DsmOptions;
   highlight: (ids: string[]) => void;
 } {
   let current: DsmResult | null = null;
+  let loadingMessage: string | null = null;
   let viewState: DsmViewState = {
     level: "package",
     ordering: "partitioned",
@@ -100,7 +104,8 @@ export function createDsmView(
 
   const empty = document.createElement("div");
   empty.className = "panel-empty dsm-empty";
-  empty.textContent = "Run analysis to build a DSM";
+  empty.textContent =
+    "Run analysis to build the Design Structure Matrix (dependency grid)";
 
   container.append(toolbar, scroll, empty);
 
@@ -133,12 +138,31 @@ export function createDsmView(
     levelSelect.value = viewState.level;
     orderSelect.value = viewState.ordering;
 
+    if (loadingMessage) {
+      scroll.hidden = true;
+      empty.hidden = false;
+      empty.replaceChildren(
+        createLoadingPlaceholder({
+          title: loadingMessage,
+          detail: "Building the dependency matrix from hierarchy…",
+          size: "fill",
+        }),
+      );
+      empty.classList.add("dsm-loading");
+      healthBadge.textContent = "";
+      healthBadge.className = "dsm-health-badge";
+      scopeHint.textContent = "";
+      return;
+    }
+    empty.classList.remove("dsm-loading");
+
     if (!current || current.elements.length === 0) {
       scroll.hidden = true;
       empty.hidden = false;
+      empty.replaceChildren();
       empty.textContent = lastHierarchy
-        ? "No modules in this scope"
-        : "Run analysis to build a DSM";
+        ? "No modules in this scope — drill out or change Level"
+        : "Run analysis to build the Design Structure Matrix (dependency grid)";
       healthBadge.textContent = "";
       healthBadge.className = "dsm-health-badge";
       scopeHint.textContent = "";
@@ -146,6 +170,7 @@ export function createDsmView(
     }
 
     empty.hidden = true;
+    empty.replaceChildren();
     scroll.hidden = false;
 
     const scope = current.scope;
@@ -158,7 +183,11 @@ export function createDsmView(
       scopeHint.textContent = "Scope: workspace packages";
     }
     if (current.capped) {
-      scopeHint.textContent += " (capped)";
+      scopeHint.textContent += ` · showing top ${DSM_MAX_ELEMENTS} by connectivity`;
+      scopeHint.title =
+        `Matrix capped at ${DSM_MAX_ELEMENTS} elements for readability. Narrow the graph scope or stay on Packages.`;
+    } else {
+      scopeHint.title = "";
     }
 
     const score = Math.round(current.metrics.healthScore);
@@ -274,7 +303,12 @@ export function createDsmView(
   });
 
   return {
+    setLoading(message: string | null) {
+      loadingMessage = message;
+      render();
+    },
     setData(hierarchy, navigation, state, preferred) {
+      loadingMessage = null;
       lastHierarchy = hierarchy;
       lastNav = navigation;
       viewState = { ...state };

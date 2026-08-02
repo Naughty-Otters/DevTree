@@ -16,7 +16,9 @@ Use only these workspace tools: `read_files`, `edit_files`, `grep`, and `shell`.
 All file paths must be project-relative and all shell commands run with the project root as the working directory. \
 Prefer small, verifiable steps. Use `grep` to narrow scope before `read_files`, and pass multiple paths in a single `read_files` call when possible to conserve tool rounds. When you reason, separate internal analysis from the final user-facing answer.\n\n";
 
-use super::runtime_limits::turns_as_usize;
+use super::runtime_limits::{
+    format_token_budget, token_budget_exceeded, turns_as_usize, usage_total_tokens,
+};
 
 pub async fn run_streaming_agent<M>(
     agent: Agent<M>,
@@ -229,14 +231,22 @@ pub enum ValidationStreamEvent {
     ThinkingDelta(String),
     TextDelta(String),
     ToolActivity(String),
+    /// Live or completed tool stdout/stderr (and short summaries for other tools).
+    ToolOutputDelta(String),
+    /// Cumulative token usage for the validation session.
+    BudgetStatus(String),
 }
 
 pub struct ValidationStreamConfig<'a> {
     pub prompt: &'a str,
     pub workspace: ProjectWorkspace,
     pub max_turns: u32,
+    /// Session token budget; `0` = unlimited.
+    pub max_tokens: u64,
     pub cancel: &'a std::sync::atomic::AtomicBool,
     pub on_event: &'a (dyn Fn(ValidationStreamEvent) + Send + Sync),
+    /// When set, shell (and other tools that opt in) stream output while running.
+    pub tool_output: Option<super::tools::ToolOutputReporter>,
 }
 
 pub async fn run_streaming_validation<M>(
@@ -249,8 +259,12 @@ where
 {
     let cancel = config.cancel;
     let on_event = config.on_event;
+    let max_tokens = config.max_tokens;
     let mut tool_context = ToolContext::new();
     tool_context.insert(config.workspace);
+    if let Some(reporter) = config.tool_output {
+        tool_context.insert(reporter);
+    }
 
     let mut stream = agent
         .stream_prompt(config.prompt)
@@ -261,6 +275,7 @@ where
     let mut thinking_buffer = String::new();
     let mut text_buffer = String::new();
     let mut final_text = String::new();
+    let mut tokens_used: u64 = 0;
 
     while let Some(item) = stream.next().await {
         if cancel.load(Ordering::SeqCst) {
@@ -288,9 +303,10 @@ where
                 }
                 StreamedAssistantContent::ToolCall { tool_call, .. } => {
                     flush_validation_thinking(&mut thinking_buffer);
-                    (on_event)(ValidationStreamEvent::ToolActivity(format!(
-                        "Tool: {}",
-                        tool_call.function.name
+                    (on_event)(ValidationStreamEvent::ToolActivity(format_tool_label(
+                        &tool_call.function.name,
+                        &tool_call.function.arguments,
+                        "Calling",
                     )));
                 }
                 StreamedAssistantContent::ToolCallDelta { .. } => {}
@@ -298,13 +314,64 @@ where
                 StreamedAssistantContent::Unknown(_) => {}
             },
             MultiTurnStreamItem::ToolExecutionCommitted { tool_call, .. } => {
-                (on_event)(ValidationStreamEvent::ToolActivity(format!(
-                    "Tool: {}",
-                    tool_call.function.name
-                )));
+                let label = format_tool_label(
+                    &tool_call.function.name,
+                    &tool_call.function.arguments,
+                    "Running",
+                );
+                (on_event)(ValidationStreamEvent::ToolActivity(label));
+                // Shell streams live via ToolOutputReporter; other tools log a header here.
+                if tool_call.function.name != "shell" {
+                    let header = format_tool_output_header(
+                        &tool_call.function.name,
+                        &tool_call.function.arguments,
+                    );
+                    (on_event)(ValidationStreamEvent::ToolOutputDelta(header));
+                }
             }
-            MultiTurnStreamItem::StreamUserItem(_) => {}
-            MultiTurnStreamItem::CompletionCall(_) => {}
+            MultiTurnStreamItem::StreamUserItem(content) => match content {
+                StreamedUserContent::ToolResult {
+                    tool_result,
+                    internal_call_id,
+                } => {
+                    let output = tool_result
+                        .content
+                        .iter()
+                        .filter_map(tool_result_text)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let preview = truncate_for_ui(&output, 2_500);
+                    let name = internal_call_id;
+                    (on_event)(ValidationStreamEvent::ToolActivity(format!(
+                        "Finished {name}"
+                    )));
+                    // Shell already streamed stdout/stderr; skip JSON dump for that tool.
+                    if !is_shell_tool_result(&output) && !preview.trim().is_empty() {
+                        let note = format!("{preview}\n\n");
+                        (on_event)(ValidationStreamEvent::ToolOutputDelta(note));
+                    }
+                }
+            },
+            MultiTurnStreamItem::CompletionCall(call) => {
+                let turn_tokens = usage_total_tokens(
+                    call.usage.total_tokens,
+                    call.usage.input_tokens,
+                    call.usage.output_tokens,
+                );
+                tokens_used = tokens_used.saturating_add(turn_tokens);
+                (on_event)(ValidationStreamEvent::BudgetStatus(format_token_budget(
+                    tokens_used,
+                    max_tokens,
+                )));
+                if token_budget_exceeded(tokens_used, max_tokens) {
+                    flush_validation_thinking(&mut thinking_buffer);
+                    flush_validation_text(&mut text_buffer);
+                    return Err(format!(
+                        "AI validation stopped: token budget exceeded ({})",
+                        format_token_budget(tokens_used, max_tokens)
+                    ));
+                }
+            }
             MultiTurnStreamItem::ModelTurnRetried { .. } => {
                 flush_validation_thinking(&mut thinking_buffer);
                 flush_validation_text(&mut text_buffer);
@@ -364,6 +431,82 @@ fn flush_validation_text(text_buffer: &mut String) {
     }
 }
 
+fn truncate_for_ui(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max).collect();
+    format!("{truncated}\n…(truncated)")
+}
+
+fn is_shell_tool_result(output: &str) -> bool {
+    let trimmed = output.trim();
+    trimmed.contains("\"stdout\"") && trimmed.contains("\"stderr\"") && trimmed.contains("exit_code")
+}
+
+fn format_tool_output_header(name: &str, args: &serde_json::Value) -> String {
+    match name {
+        "grep" => {
+            let pattern = args
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            format!("▸ grep {pattern}\n")
+        }
+        "read_files" => {
+            let paths = args
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .map(|paths| {
+                    paths
+                        .iter()
+                        .filter_map(|p| p.as_str())
+                        .take(4)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            format!("▸ read_files {paths}\n")
+        }
+        "edit_files" => "▸ edit_files\n".into(),
+        _ => format!("▸ {name}\n"),
+    }
+}
+
+fn format_tool_label(name: &str, args: &serde_json::Value, verb: &str) -> String {
+    let detail = match name {
+        "shell" => args
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|cmd| truncate_for_ui(cmd, 160))
+            .unwrap_or_default(),
+        "grep" => args
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(|p| format!("pattern={p}"))
+            .unwrap_or_default(),
+        "read_files" => args
+            .get("paths")
+            .and_then(|v| v.as_array())
+            .map(|paths| {
+                let joined = paths
+                    .iter()
+                    .filter_map(|p| p.as_str())
+                    .take(4)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                truncate_for_ui(&joined, 160)
+            })
+            .unwrap_or_default(),
+        _ => String::new(),
+    };
+    if detail.is_empty() {
+        format!("{verb} {name}")
+    } else {
+        format!("{verb} {name}: {detail}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +515,14 @@ mod tests {
     fn build_preamble_includes_skill_instructions() {
         let preamble = build_preamble("Do the thing.");
         assert!(preamble.contains("Do the thing."));
+    }
+
+    #[test]
+    fn format_tool_label_includes_shell_command() {
+        let args = serde_json::json!({"command": "pytest tests/foo.py -q"});
+        assert_eq!(
+            format_tool_label("shell", &args, "Running"),
+            "Running shell: pytest tests/foo.py -q"
+        );
     }
 }

@@ -4,6 +4,7 @@ import type {
   LspSettingsMap,
 } from "../lsp/types";
 import { lucideIcon } from "./icons";
+import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { ChevronDown } from "lucide";
 
 export interface LspServersPanelState {
@@ -51,10 +52,12 @@ export function createLspServersPanel(
   list.className = "lsp-list";
 
   if (state.loading && state.servers.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "lsp-empty";
-    empty.textContent = "Checking language servers…";
-    list.appendChild(empty);
+    list.appendChild(
+      createLoadingPlaceholder({
+        title: "Checking language servers…",
+        size: "panel",
+      }),
+    );
   } else if (state.servers.length === 0) {
     const empty = document.createElement("div");
     empty.className = "lsp-empty";

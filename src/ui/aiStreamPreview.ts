@@ -1,61 +1,104 @@
 import type { AiValidationStream } from "../analysis/types";
 
+function ensureChild(parent: HTMLElement, selector: string, tag: string, className: string): HTMLElement {
+  let el = parent.querySelector<HTMLElement>(selector);
+  if (!el) {
+    el = document.createElement(tag);
+    el.className = className;
+    parent.appendChild(el);
+  }
+  return el;
+}
+
+/**
+ * Patch AI stream UI in place so progress ticks don't rebuild the DOM
+ * (full rebuilds were resetting the Progress tab scroll position).
+ */
 export function renderAiStreamPreview(
   container: HTMLElement,
   stream: AiValidationStream,
 ): void {
-  container.replaceChildren();
+  let wrap =
+    container.firstElementChild instanceof HTMLElement &&
+    container.firstElementChild.classList.contains("ai-stream-preview")
+      ? container.firstElementChild
+      : null;
+  if (!wrap) {
+    container.replaceChildren();
+    wrap = document.createElement("div");
+    wrap.className = "ai-stream-preview";
+    container.appendChild(wrap);
+  }
 
-  const wrap = document.createElement("div");
-  wrap.className = "ai-stream-preview";
-
-  const header = document.createElement("div");
-  header.className = "ai-stream-preview-header";
+  const header = ensureChild(wrap, ".ai-stream-preview-header", "div", "ai-stream-preview-header");
   header.textContent = `${stream.ruleName} · ${stream.status === "running" ? "streaming…" : stream.status}`;
 
-  const body = document.createElement("div");
-  body.className = "ai-stream-preview-body";
+  const body = ensureChild(wrap, ".ai-stream-preview-body", "div", "ai-stream-preview-body");
+  const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 48;
+
+  body.querySelector(".ai-stream-waiting")?.remove();
+
+  if (stream.budget) {
+    const budget = ensureChild(body, ".ai-stream-budget", "div", "ai-stream-budget");
+    if (budget.textContent !== stream.budget) {
+      budget.textContent = stream.budget;
+    }
+  } else {
+    body.querySelector(".ai-stream-budget")?.remove();
+  }
 
   if (stream.activity) {
-    const activity = document.createElement("div");
-    activity.className = "ai-stream-activity";
-    activity.textContent = stream.activity;
-    body.appendChild(activity);
+    const activity = ensureChild(body, ".ai-stream-activity", "div", "ai-stream-activity");
+    if (activity.textContent !== stream.activity) {
+      activity.textContent = stream.activity;
+    }
+  } else {
+    body.querySelector(".ai-stream-activity")?.remove();
+  }
+
+  const toolLog = stream.toolLog?.trim() ? stream.toolLog : "";
+  if (toolLog) {
+    ensureChild(body, ".ai-stream-tools-label", "div", "ai-stream-section-label ai-stream-tools-label")
+      .textContent = "Tool output";
+    const tools = ensureChild(body, ".ai-stream-tools", "pre", "ai-stream-tools");
+    if (tools.textContent !== toolLog) {
+      tools.textContent = toolLog;
+    }
+  } else {
+    body.querySelector(".ai-stream-tools-label")?.remove();
+    body.querySelector(".ai-stream-tools")?.remove();
   }
 
   if (stream.thinking.trim()) {
-    const thinkingLabel = document.createElement("div");
-    thinkingLabel.className = "ai-stream-section-label";
-    thinkingLabel.textContent = "Reasoning";
-    const thinking = document.createElement("pre");
-    thinking.className = "ai-stream-thinking";
-    thinking.textContent = stream.thinking;
-    body.append(thinkingLabel, thinking);
+    ensureChild(body, ".ai-stream-thinking-label", "div", "ai-stream-section-label ai-stream-thinking-label")
+      .textContent = "Reasoning";
+    const thinking = ensureChild(body, ".ai-stream-thinking", "pre", "ai-stream-thinking");
+    if (thinking.textContent !== stream.thinking) {
+      thinking.textContent = stream.thinking;
+    }
+  } else {
+    body.querySelector(".ai-stream-thinking-label")?.remove();
+    body.querySelector(".ai-stream-thinking")?.remove();
   }
 
   if (stream.text.trim()) {
-    const textLabel = document.createElement("div");
-    textLabel.className = "ai-stream-section-label";
-    textLabel.textContent = "Output";
-    const text = document.createElement("pre");
-    text.className = "ai-stream-text";
-    text.textContent = stream.text;
-    body.append(textLabel, text);
+    ensureChild(body, ".ai-stream-text-label", "div", "ai-stream-section-label ai-stream-text-label")
+      .textContent = "Output";
+    const text = ensureChild(body, ".ai-stream-text", "pre", "ai-stream-text");
+    if (text.textContent !== stream.text) {
+      text.textContent = stream.text;
+    }
+  } else {
+    body.querySelector(".ai-stream-text-label")?.remove();
+    body.querySelector(".ai-stream-text")?.remove();
   }
 
-  if (!stream.thinking.trim() && !stream.text.trim()) {
-    const waiting = document.createElement("div");
-    waiting.className = "ai-stream-waiting";
+  if (!stream.thinking.trim() && !stream.text.trim() && !stream.activity && !toolLog && !stream.budget) {
+    const waiting = ensureChild(body, ".ai-stream-waiting", "div", "ai-stream-waiting");
     waiting.textContent = "Waiting for model response…";
-    body.appendChild(waiting);
   }
 
-  wrap.append(header, body);
-  container.appendChild(wrap);
-
-  const scrollHost = body.querySelector(".ai-stream-text") ?? body.querySelector(".ai-stream-thinking");
-  if (scrollHost instanceof HTMLElement) {
-    scrollHost.scrollTop = scrollHost.scrollHeight;
+  if (nearBottom) {
+    body.scrollTop = body.scrollHeight;
   }
-  body.scrollTop = body.scrollHeight;
 }

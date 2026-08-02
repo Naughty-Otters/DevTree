@@ -22,6 +22,7 @@ import {
   resolveAiValidationLlm,
   resolveGlobalLlm,
   RUNTIME_TURNS_LIMITS,
+  RUNTIME_TOKEN_LIMITS,
   setGlobalConfiguration,
   shouldShowAiRuleSetting,
 } from "./aiValidation";
@@ -31,18 +32,30 @@ describe("aiValidation runtime settings", () => {
     const defaults = defaultAiValidationRuntimeSettings();
     expect(defaults.maxTurns).toBe(RUNTIME_TURNS_LIMITS.defaultValidation);
     expect(defaults.agentMaxTurns).toBe(RUNTIME_TURNS_LIMITS.defaultAgent);
+    expect(defaults.maxTokens).toBe(0);
   });
 
   it("clamps out-of-range values", () => {
-    const clamped = clampRuntimeSettings({ maxTurns: 9999, agentMaxTurns: 0 });
+    const clamped = clampRuntimeSettings({ maxTurns: 9999, agentMaxTurns: 0, maxTokens: 50 });
     expect(clamped.maxTurns).toBe(RUNTIME_TURNS_LIMITS.validationMax);
     expect(clamped.agentMaxTurns).toBe(RUNTIME_TURNS_LIMITS.min);
+    expect(clamped.maxTokens).toBe(RUNTIME_TOKEN_LIMITS.minWhenSet);
+  });
+
+  it("treats zero or negative maxTokens as unlimited", () => {
+    expect(clampRuntimeSettings({ maxTurns: 64, agentMaxTurns: 32, maxTokens: 0 }).maxTokens).toBe(
+      0,
+    );
+    expect(
+      clampRuntimeSettings({ maxTurns: 64, agentMaxTurns: 32, maxTokens: -1 }).maxTokens,
+    ).toBe(0);
   });
 
   it("migrates legacy default turn limits", () => {
     const migrated = migrateRuntimeSettings({
       maxTurns: RUNTIME_TURNS_LIMITS.legacyDefaultValidation,
       agentMaxTurns: RUNTIME_TURNS_LIMITS.legacyDefaultAgent,
+      maxTokens: 0,
     });
     expect(migrated.maxTurns).toBe(RUNTIME_TURNS_LIMITS.defaultValidation);
     expect(migrated.agentMaxTurns).toBe(RUNTIME_TURNS_LIMITS.defaultAgent);

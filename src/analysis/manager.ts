@@ -171,6 +171,13 @@ export function createAnalysisManager(
               task.status = "done";
             }
           }
+          // Pipeline finished computing; IPC/persist may still be in flight.
+          if (progress.percent < 100 || /saving/i.test(progress.message)) {
+            current.progress = {
+              ...current.progress,
+              message: progress.message || "Finalizing results…",
+            };
+          }
           if (current.progress?.aiStream) {
             current.progress = {
               ...current.progress,
@@ -205,8 +212,9 @@ export function createAnalysisManager(
             : undefined,
         };
         current.result = result;
-        notify(true);
+        // Apply report/graph before Progress UI switches tabs (setResult is sync).
         handlers.onRunCompleted(current);
+        notify(true);
       })
       .catch((err) => {
         const current = getRun(id);

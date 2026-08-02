@@ -660,21 +660,24 @@ fn extract_symbols(file_path: &str, content: &str) -> (Vec<SymbolInfo>, Vec<Symb
         }
     }
 
+    // Cap pairwise reference scan — O(symbols² × body) was freezing large generated files.
+    const MAX_SYMBOL_EDGE_SCAN: usize = 128;
+    let scan_syms = &symbols[..symbols.len().min(MAX_SYMBOL_EDGE_SCAN)];
+    let lines: Vec<&str> = content.lines().collect();
     let mut edges = Vec::new();
-    for (i, sym) in symbols.iter().enumerate() {
-        let start = sym.line as usize;
-        let end = symbols
+    for (i, sym) in scan_syms.iter().enumerate() {
+        let start = (sym.line as usize).saturating_sub(1);
+        let end = scan_syms
             .get(i + 1)
-            .map(|s| s.line as usize - 1)
-            .unwrap_or(content.lines().count());
-        let body: String = content
-            .lines()
-            .skip(start.saturating_sub(1))
-            .take(end.saturating_sub(start.saturating_sub(1)).max(1))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .map(|s| (s.line as usize).saturating_sub(1))
+            .unwrap_or(lines.len())
+            .max(start + 1)
+            .min(lines.len());
+        // Bound body size so contains() can't blow up on huge functions.
+        let body_end = end.min(start.saturating_add(400));
+        let body = lines[start..body_end].join("\n");
 
-        for other in &symbols {
+        for other in scan_syms {
             if other.id == sym.id {
                 continue;
             }

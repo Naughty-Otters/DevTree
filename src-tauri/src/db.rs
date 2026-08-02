@@ -73,6 +73,32 @@ pub fn get_db_path() -> Result<String, String> {
     db_path().map(|p| p.to_string_lossy().to_string())
 }
 
+fn open_kv_conn() -> Result<Connection, String> {
+    let conn = Connection::open(db_path()?).map_err(|e| e.to_string())?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS kv_store (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL,
+            updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+        );",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(conn)
+}
+
+/// Write a KV entry using a short-lived connection (safe from analysis worker threads).
+pub fn put_kv(key: &str, value: &str) -> Result<(), String> {
+    let conn = open_kv_conn()?;
+    set_value(&conn, key, value)
+}
+
+/// Reclaim space after replacing huge legacy analysis blobs with pointers.
+pub fn vacuum_db() -> Result<(), String> {
+    let conn = open_kv_conn()?;
+    conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

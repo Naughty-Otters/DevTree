@@ -6,6 +6,7 @@ const PIPELINE_STAGES = [
   { id: "lsp", label: "Start language servers" },
   { id: "analyzing", label: "Resolve imports & symbols" },
   { id: "validating", label: "Run validation rules" },
+  { id: "quality", label: "Precompute quality metrics" },
 ] as const;
 
 const STAGE_ORDER = [
@@ -15,11 +16,13 @@ const STAGE_ORDER = [
   "lsp",
   "analyzing",
   "validating",
+  "quality",
   "done",
 ] as const;
 
 export function normalizeStage(stage: string): string {
   if (stage === "starting") return "scanning";
+  if (stage === "metrics") return "quality";
   return stage;
 }
 

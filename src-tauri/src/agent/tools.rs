@@ -5,7 +5,32 @@ use rig_agent::tool::{Tool, ToolContext};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+use tokio::time::timeout;
+
+/// Optional Progress sink so long-running tools (shell) can stream output live.
+#[derive(Clone)]
+pub struct ToolOutputReporter {
+    emit: Arc<dyn Fn(String) + Send + Sync>,
+}
+
+impl ToolOutputReporter {
+    pub fn new(emit: Arc<dyn Fn(String) + Send + Sync>) -> Self {
+        Self { emit }
+    }
+
+    pub fn emit(&self, chunk: impl Into<String>) {
+        (self.emit)(chunk.into());
+    }
+}
+
+fn tool_output_reporter(ctx: &ToolContext) -> Option<ToolOutputReporter> {
+    ctx.get::<ToolOutputReporter>().cloned()
+}
 
 #[derive(Clone)]
 struct WorkspaceCtx {
@@ -46,7 +71,10 @@ impl Tool for ReadFilesTool {
     type Error = WorkspaceToolError;
 
     fn description(&self) -> String {
-        "Read one or more text files relative to the project root.".into()
+        "Read one or more text files relative to the project root. \
+Paths may include editor location suffixes (`file.py:60`, `file.py:60-68`, `file.py:60:1`); \
+those open the file and optionally return only the requested lines."
+            .into()
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -56,7 +84,7 @@ impl Tool for ReadFilesTool {
                 "paths": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Project-relative file paths"
+                    "description": "Project-relative file paths (optional :line or :start-end suffix)"
                 }
             },
             "required": ["paths"]
@@ -71,22 +99,34 @@ impl Tool for ReadFilesTool {
         let ws = workspace_from_context(context)?;
         let mut files = Vec::new();
         for path in args.paths {
-            match ws.workspace.resolve_relative(&path) {
-                Ok(full) => {
+            match ws.workspace.resolve_relative_with_location(&path) {
+                Ok((full, range)) => {
                     if !full.is_file() {
+                        let (clean, _) = super::workspace::split_path_and_location(&path);
                         files.push(ReadFileEntry {
                             path,
                             content: None,
-                            error: Some("Not a file".into()),
+                            error: Some(format!("Not a file: {clean}")),
                         });
                         continue;
                     }
                     match fs::read_to_string(&full) {
-                        Ok(content) => files.push(ReadFileEntry {
-                            path,
-                            content: Some(content),
-                            error: None,
-                        }),
+                        Ok(content) => {
+                            let content = if let Some(range) = range {
+                                let sliced = super::workspace::slice_line_range(&content, range);
+                                format!(
+                                    "[lines {}-{} of {}]\n{}",
+                                    range.start, range.end, clean_path_label(&path), sliced
+                                )
+                            } else {
+                                content
+                            };
+                            files.push(ReadFileEntry {
+                                path,
+                                content: Some(content),
+                                error: None,
+                            });
+                        }
                         Err(err) => files.push(ReadFileEntry {
                             path,
                             content: None,
@@ -103,6 +143,10 @@ impl Tool for ReadFilesTool {
         }
         Ok(ReadFilesOutput { files })
     }
+}
+
+fn clean_path_label(path: &str) -> String {
+    super::workspace::split_path_and_location(path).0
 }
 
 #[derive(Deserialize)]
@@ -341,6 +385,19 @@ struct ShellOutput {
 
 struct ShellTool;
 
+/// Hard cap so AI validation cannot hang forever on pytest/import loops.
+const SHELL_TIMEOUT_SECS: u64 = 90;
+/// Keep model context and Progress UI readable.
+const SHELL_OUTPUT_MAX_CHARS: usize = 12_000;
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max).collect();
+    format!("{truncated}\n…(truncated)")
+}
+
 impl Tool for ShellTool {
     const NAME: &'static str = "shell";
     type Args = ShellArgs;
@@ -348,7 +405,10 @@ impl Tool for ShellTool {
     type Error = WorkspaceToolError;
 
     fn description(&self) -> String {
-        "Run a shell command with the project root as the working directory.".into()
+        format!(
+            "Run a short shell command with the project root as the working directory \
+(timeout {SHELL_TIMEOUT_SECS}s). Prefer targeted reads/greps over full test suites."
+        )
     }
 
     fn parameters(&self) -> serde_json::Value {
@@ -380,19 +440,142 @@ impl Tool for ShellTool {
             ));
         }
 
-        let output = Command::new("sh")
-            .arg("-c")
+        let reporter = tool_output_reporter(context);
+        if let Some(ref reporter) = reporter {
+            reporter.emit(format!("$ {command}\n"));
+        }
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
             .arg(command)
             .current_dir(&ws.workspace.root)
-            .output()
-            .map_err(|err| WorkspaceToolError(format!("Failed to run command: {err}")))?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        // Own process group so timeout can kill pytest/cargo children, not just `sh`.
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| WorkspaceToolError(format!("Failed to start command: {err}")))?;
+
+        let mut stdout = child.stdout.take().ok_or_else(|| {
+            WorkspaceToolError("Failed to capture command stdout".into())
+        })?;
+        let mut stderr = child.stderr.take().ok_or_else(|| {
+            WorkspaceToolError("Failed to capture command stderr".into())
+        })?;
+
+        let stdout_reporter = reporter.clone();
+        let stderr_reporter = reporter.clone();
+        let stdout_task = tokio::spawn(async move {
+            pump_command_pipe(&mut stdout, stdout_reporter).await
+        });
+        let stderr_task = tokio::spawn(async move {
+            pump_command_pipe(&mut stderr, stderr_reporter).await
+        });
+
+        let status = match timeout(Duration::from_secs(SHELL_TIMEOUT_SECS), child.wait()).await {
+            Ok(Ok(status)) => status,
+            Ok(Err(err)) => {
+                return Err(WorkspaceToolError(format!("Failed to run command: {err}")));
+            }
+            Err(_) => {
+                if let Some(ref reporter) = reporter {
+                    reporter.emit(format!(
+                        "\n… timed out after {SHELL_TIMEOUT_SECS}s, killing process tree…\n"
+                    ));
+                }
+                force_kill_shell(&mut child);
+                // Don't hang forever if a grandchild still holds the pipes open.
+                let _ = timeout(Duration::from_secs(2), child.wait()).await;
+                stdout_task.abort();
+                stderr_task.abort();
+                let _ = timeout(Duration::from_secs(1), async {
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                })
+                .await;
+                let msg = format!(
+                    "Command timed out after {SHELL_TIMEOUT_SECS}s and was killed. \
+Prefer reading files / grepping over long test runs during AI validation."
+                );
+                if let Some(ref reporter) = reporter {
+                    reporter.emit(format!("{msg}\n"));
+                }
+                return Ok(ShellOutput {
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: msg,
+                });
+            }
+        };
+
+        let stdout_buf = stdout_task.await.unwrap_or_default();
+        let stderr_buf = stderr_task.await.unwrap_or_default();
+        let exit_code = status.code();
+        if let Some(ref reporter) = reporter {
+            match exit_code {
+                Some(code) => reporter.emit(format!("\n[exit {code}]\n")),
+                None => reporter.emit("\n[exit ?]\n"),
+            }
+        }
 
         Ok(ShellOutput {
-            exit_code: output.status.code(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            exit_code,
+            stdout: truncate_chars(&String::from_utf8_lossy(&stdout_buf), SHELL_OUTPUT_MAX_CHARS),
+            stderr: truncate_chars(&String::from_utf8_lossy(&stderr_buf), SHELL_OUTPUT_MAX_CHARS),
         })
     }
+}
+
+/// Read a pipe, accumulate bytes, and optionally stream chunks to Progress.
+async fn pump_command_pipe(
+    reader: &mut (impl AsyncReadExt + Unpin),
+    reporter: Option<ToolOutputReporter>,
+) -> Vec<u8> {
+    let mut acc = Vec::new();
+    let mut buf = [0u8; 1024];
+    let mut pending = String::new();
+    let mut last_emit = Instant::now();
+    loop {
+        let n = match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        acc.extend_from_slice(&buf[..n]);
+        let Some(ref reporter) = reporter else {
+            continue;
+        };
+        pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+        let due = pending.len() >= 120 || last_emit.elapsed() >= Duration::from_millis(150);
+        if due && !pending.is_empty() {
+            reporter.emit(std::mem::take(&mut pending));
+            last_emit = Instant::now();
+        }
+    }
+    if let Some(ref reporter) = reporter {
+        if !pending.is_empty() {
+            reporter.emit(pending);
+        }
+    }
+    acc
+}
+
+/// Kill `sh -c …` and any children (pytest, cargo, …) started in its process group.
+fn force_kill_shell(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        // Negative PID => entire process group (requires process_group(0) at spawn).
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &format!("-{pid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.start_kill();
 }
 
 fn is_blocked_shell_command(command: &str) -> bool {
