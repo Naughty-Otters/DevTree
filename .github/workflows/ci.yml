@@ -104,6 +104,10 @@ jobs:
         with:
           commit_message: "chore: update CI status badges [skip ci]"
           file_pattern: ".github/badges/*.json"
+        env:
+          # Badge JSON only — skip husky pre-commit (test:all / cargo test).
+          # This job has no GTK/glib deps; Rust tests already ran in test-rust.
+          HUSKY: "0"
 
   build:
     name: Build (${{ matrix.platform }})
