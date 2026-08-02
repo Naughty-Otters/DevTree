@@ -2,9 +2,12 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
 use std::sync::Mutex;
 
 /// Serializes tests that mutate `DEVTREE_CACHE_DIR` (env is process-global).
+#[cfg(test)]
 pub(crate) static CACHE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// `~/.devtree/cache/<projectHash>/` (or `$DEVTREE_CACHE_DIR/<hash>/` in tests).
