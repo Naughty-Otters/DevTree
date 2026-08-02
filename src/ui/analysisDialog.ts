@@ -266,12 +266,14 @@ export function showAnalysisDialog(
         }
         cron = expr;
       }
-      close({
+      // Remove the dialog immediately so it never sits over Progress.
+      const choice: AnalysisRunChoice = {
         mode,
         debounceMs,
         cron,
         runImmediately: mode === "now" ? true : runImmediately,
-      });
+      };
+      close(choice);
     });
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) close(null);

@@ -1522,8 +1522,11 @@ body.is-resizing-v {
 
 .analysis-run-card.is-collapsed {
   max-height: none;
+  min-height: 0;
+  flex: 0 0 auto;
   gap: 0;
   padding: 8px 10px;
+  overflow: visible;
 }
 
 .analysis-run-card.is-collapsed .analysis-run-body {
@@ -1539,7 +1542,7 @@ body.is-resizing-v {
 }
 
 .analysis-run-progress {
-  flex: 1 1 52%;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -1547,6 +1550,10 @@ body.is-resizing-v {
   gap: 6px;
   overflow: hidden;
   padding-right: 2px;
+}
+
+.analysis-run-card.has-ai-stream .analysis-run-progress {
+  flex: 1 1 52%;
 }
 
 .analysis-run-stream {
@@ -1559,6 +1566,11 @@ body.is-resizing-v {
   overflow: hidden;
   border-left: 1px solid var(--border);
   padding-left: 10px;
+}
+
+/* Author `display: flex` must not override the HTML hidden attribute. */
+.analysis-run-stream[hidden] {
+  display: none !important;
 }
 
 .analysis-run-header {
@@ -2019,6 +2031,12 @@ body.is-resizing-v {
   background: var(--bg-panel-hover);
 }
 
+.graph-nav-filter-empty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .graph-nav-filter-option input {
   margin: 0;
 }
@@ -2158,6 +2176,43 @@ body.is-resizing-v {
 
 #analysis-report-view.hidden {
   display: none;
+}
+
+#analysis-progress-view {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background:
+    radial-gradient(1000px 420px at 90% -10%, rgba(63, 185, 80, 0.07), transparent 55%),
+    var(--bg-base);
+  padding: 20px 24px 32px;
+}
+
+#analysis-progress-view.hidden {
+  display: none;
+}
+
+.analysis-progress-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 100%;
+}
+
+.analysis-progress-main .analysis-runs-heading {
+  font-size: 13px;
+}
+
+.analysis-progress-main .analysis-run-card:not(.is-collapsed) {
+  min-height: 280px;
+  flex: 1 1 auto;
+}
+
+.analysis-progress-main .analysis-run-card.is-collapsed {
+  min-height: 0;
+  flex: 0 0 auto;
 }
 
 .analysis-report {

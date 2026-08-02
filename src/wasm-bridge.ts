@@ -18,7 +18,8 @@ export type LayoutMode =
   | "hierarchical"
   | "circular"
   | "radial"
-  | "tree";
+  | "tree"
+  | "cluster";
 
 /** Top-level layout families shown in the primary dropdown. */
 export type LayoutFamily =
@@ -26,7 +27,8 @@ export type LayoutFamily =
   | "dag"
   | "circular"
   | "radial"
-  | "tree";
+  | "tree"
+  | "cluster";
 
 /** DAG / Lines style: Direct (L→R) or Hierarchical (T→B). */
 export type DagStyle = "direct" | "hierarchical";
@@ -40,6 +42,11 @@ export const LAYOUT_FAMILIES: {
     value: "organic",
     label: "Organic",
     hint: "Force-directed (d3-force style) — natural clusters",
+  },
+  {
+    value: "cluster",
+    label: "Cluster",
+    hint: "Group densely linked modules; separate groups linked by a single bridge",
   },
   {
     value: "dag",
@@ -121,6 +128,7 @@ export function parseLayoutMode(value: unknown): LayoutMode {
     s === "circular" ||
     s === "radial" ||
     s === "tree" ||
+    s === "cluster" ||
     s === "organic"
   ) {
     return s;

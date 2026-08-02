@@ -33,6 +33,8 @@ pub enum LayoutMode {
     Radial,
     /// Spanning tree from a root, children below parents.
     Tree,
+    /// Bridge-aware clusters: dense groups kept together, isolated from others.
+    Cluster,
 }
 
 impl LayoutMode {
@@ -44,6 +46,7 @@ impl LayoutMode {
             Self::Circular => "circular",
             Self::Radial => "radial",
             Self::Tree => "tree",
+            Self::Cluster => "cluster",
         }
     }
 
@@ -56,6 +59,7 @@ impl LayoutMode {
             "circular" | "circle" => Self::Circular,
             "radial" => Self::Radial,
             "tree" => Self::Tree,
+            "cluster" | "clustered" | "clusters" => Self::Cluster,
             _ => Self::Organic,
         }
     }
@@ -82,12 +86,13 @@ pub fn layout_with_mode(graph: &Graph, mode: LayoutMode) -> Vec<PositionedNode> 
         LayoutMode::Tree => layout_tree(n, &edge_indices),
         LayoutMode::Hierarchical => layout_dag(n, &edge_indices, DagOrientation::TopToBottom),
         LayoutMode::Direct => layout_dag(n, &edge_indices, DagOrientation::LeftToRight),
+        LayoutMode::Cluster => layout_cluster(n, &edge_indices),
     };
 
     normalize(&mut positions);
-    // Organic already resolves collisions via a collide force; extra separation
-    // would distort the force equilibrium.
-    if !matches!(mode, LayoutMode::Organic) {
+    // Organic already resolves collisions via a collide force; cluster uses organic
+    // per-group so skip the global separation pass that would smear clusters.
+    if !matches!(mode, LayoutMode::Organic | LayoutMode::Cluster) {
         separate_overlaps(&mut positions);
     }
 
@@ -284,6 +289,260 @@ fn unique_undirected_links(edges: &[(usize, usize)]) -> Vec<(usize, usize)> {
         }
     }
     out
+}
+
+/// Bridge-aware cluster layout.
+///
+/// Clusters are the connected components that remain after removing undirected
+/// bridges. That yields:
+/// 1. **Strict clusters** — fully isolated components (no edges to others).
+/// 2. **Soft clusters** — dense groups linked by a single bridge edge; nodes kept
+///    in a cluster have ≥2 edges inside it (2-edge-connected pieces). Bridge-only
+///    leaves become singleton clusters.
+fn layout_cluster(n: usize, edge_indices: &[(usize, usize)]) -> Vec<Point> {
+    if n == 1 {
+        return vec![Point { x: 0.0, y: 0.0 }];
+    }
+
+    let clusters = bridge_aware_clusters(n, edge_indices);
+    let mut cluster_members: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (node, &cid) in clusters.iter().enumerate() {
+        cluster_members.entry(cid).or_default().push(node);
+    }
+    let mut cluster_ids: Vec<usize> = cluster_members.keys().copied().collect();
+    cluster_ids.sort_unstable();
+
+    // Intra-cluster edges (non-bridges stay; bridges are between clusters).
+    let bridges = find_bridges(n, edge_indices);
+    let bridge_set: HashSet<(usize, usize)> = bridges.iter().copied().collect();
+    let internal_edges: Vec<(usize, usize)> = unique_undirected_links(edge_indices)
+        .into_iter()
+        .filter(|e| !bridge_set.contains(e))
+        .collect();
+
+    let mut positions = vec![Point { x: 0.0, y: 0.0 }; n];
+    let mut centroids = Vec::with_capacity(cluster_ids.len());
+
+    for &cid in &cluster_ids {
+        let members = &cluster_members[&cid];
+        let local = layout_cluster_members(members, &internal_edges);
+        // Bounding radius of this cluster for packing.
+        let mut max_r = MIN_NODE_DISTANCE;
+        for p in &local {
+            max_r = max_r.max((p.x * p.x + p.y * p.y).sqrt());
+        }
+        centroids.push((cid, max_r + 28.0));
+        for (k, &node) in members.iter().enumerate() {
+            positions[node] = local[k];
+        }
+    }
+
+    // Place cluster centroids on a packed ring / grid separated by radii.
+    let centers = pack_cluster_centers(&centroids);
+    let center_by_cid: HashMap<usize, Point> = cluster_ids
+        .iter()
+        .zip(centers.iter())
+        .map(|(&cid, p)| (cid, *p))
+        .collect();
+
+    for (node, &cid) in clusters.iter().enumerate() {
+        if let Some(c) = center_by_cid.get(&cid) {
+            positions[node].x += c.x;
+            positions[node].y += c.y;
+        }
+    }
+
+    positions
+}
+
+fn layout_cluster_members(
+    members: &[usize],
+    internal_edges: &[(usize, usize)],
+) -> Vec<Point> {
+    let m = members.len();
+    if m == 0 {
+        return Vec::new();
+    }
+    if m == 1 {
+        return vec![Point { x: 0.0, y: 0.0 }];
+    }
+
+    let index_of: HashMap<usize, usize> = members
+        .iter()
+        .enumerate()
+        .map(|(i, &n)| (n, i))
+        .collect();
+    let local_edges: Vec<(usize, usize)> = internal_edges
+        .iter()
+        .filter_map(|&(a, b)| {
+            let ia = *index_of.get(&a)?;
+            let ib = *index_of.get(&b)?;
+            Some((ia, ib))
+        })
+        .collect();
+
+    if local_edges.is_empty() {
+        // Disconnected leftovers inside a label — small circle.
+        return layout_circular(m);
+    }
+    layout_organic(m, &local_edges)
+}
+
+fn pack_cluster_centers(centroids: &[(usize, f32)]) -> Vec<Point> {
+    let k = centroids.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    if k == 1 {
+        return vec![Point { x: 0.0, y: 0.0 }];
+    }
+
+    // Greedy polar packing: place in size order on expanding rings.
+    let mut order: Vec<usize> = (0..k).collect();
+    order.sort_by(|&a, &b| {
+        centroids[b]
+            .1
+            .partial_cmp(&centroids[a].1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut placed = vec![Point { x: 0.0, y: 0.0 }; k];
+    let mut placed_meta: Vec<(Point, f32)> = Vec::new();
+
+    for &idx in &order {
+        let r = centroids[idx].1;
+        if placed_meta.is_empty() {
+            placed[idx] = Point { x: 0.0, y: 0.0 };
+            placed_meta.push((placed[idx], r));
+            continue;
+        }
+
+        let mut best = Point {
+            x: 0.0,
+            y: 400.0 + r,
+        };
+        let mut best_score = f32::MAX;
+        // Candidate angles on rings around already-placed centers.
+        for ring in 0..8 {
+            let radius = 80.0 + ring as f32 * 70.0 + r;
+            let steps = 8 + ring * 4;
+            for s in 0..steps {
+                let angle = (s as f32) * std::f32::consts::TAU / (steps as f32);
+                let cand = Point {
+                    x: radius * angle.cos(),
+                    y: radius * angle.sin(),
+                };
+                let mut ok = true;
+                let mut score = cand.x * cand.x + cand.y * cand.y;
+                for &(p, pr) in &placed_meta {
+                    let dx = cand.x - p.x;
+                    let dy = cand.y - p.y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    let need = pr + r + 36.0;
+                    if dist < need {
+                        ok = false;
+                        break;
+                    }
+                    score += 1.0 / (dist + 1.0);
+                }
+                if ok && score < best_score {
+                    best_score = score;
+                    best = cand;
+                }
+            }
+        }
+        placed[idx] = best;
+        placed_meta.push((best, r));
+    }
+
+    placed
+}
+
+/// Connected components after removing bridges (= 2-edge-connected pieces +
+/// bridge-only singletons).
+fn bridge_aware_clusters(n: usize, edges: &[(usize, usize)]) -> Vec<usize> {
+    let bridges = find_bridges(n, edges);
+    let bridge_set: HashSet<(usize, usize)> = bridges.into_iter().collect();
+    let non_bridge: Vec<(usize, usize)> = unique_undirected_links(edges)
+        .into_iter()
+        .filter(|e| !bridge_set.contains(e))
+        .collect();
+    connected_components(n, &non_bridge)
+}
+
+fn connected_components(n: usize, edges: &[(usize, usize)]) -> Vec<usize> {
+    let adj = undirected_adj(n, edges);
+    let mut cluster = vec![usize::MAX; n];
+    let mut next_id = 0usize;
+    for start in 0..n {
+        if cluster[start] != usize::MAX {
+            continue;
+        }
+        let mut stack = vec![start];
+        cluster[start] = next_id;
+        while let Some(u) = stack.pop() {
+            for &v in &adj[u] {
+                if cluster[v] == usize::MAX {
+                    cluster[v] = next_id;
+                    stack.push(v);
+                }
+            }
+        }
+        next_id += 1;
+    }
+    cluster
+}
+
+/// Tarjan bridges on the undirected simple graph.
+fn find_bridges(n: usize, edges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let adj = undirected_adj(n, &unique_undirected_links(edges));
+    let mut disc = vec![-1i32; n];
+    let mut low = vec![-1i32; n];
+    let mut parent = vec![None; n];
+    let mut time = 0i32;
+    let mut bridges = Vec::new();
+
+    fn dfs(
+        u: usize,
+        adj: &[Vec<usize>],
+        disc: &mut [i32],
+        low: &mut [i32],
+        parent: &mut [Option<usize>],
+        time: &mut i32,
+        bridges: &mut Vec<(usize, usize)>,
+    ) {
+        disc[u] = *time;
+        low[u] = *time;
+        *time += 1;
+        for &v in &adj[u] {
+            if disc[v] == -1 {
+                parent[v] = Some(u);
+                dfs(v, adj, disc, low, parent, time, bridges);
+                low[u] = low[u].min(low[v]);
+                if low[v] > disc[u] {
+                    let edge = if u < v { (u, v) } else { (v, u) };
+                    bridges.push(edge);
+                }
+            } else if parent[u] != Some(v) {
+                low[u] = low[u].min(disc[v]);
+            }
+        }
+    }
+
+    for u in 0..n {
+        if disc[u] == -1 {
+            dfs(
+                u,
+                &adj,
+                &mut disc,
+                &mut low,
+                &mut parent,
+                &mut time,
+                &mut bridges,
+            );
+        }
+    }
+    bridges
 }
 
 fn layout_circular(n: usize) -> Vec<Point> {
@@ -737,11 +996,111 @@ mod tests {
             LayoutMode::Circular,
             LayoutMode::Radial,
             LayoutMode::Tree,
+            LayoutMode::Cluster,
         ] {
             let positions = layout_with_mode(&graph, mode);
             assert_eq!(positions.len(), 3, "{mode:?}");
             assert_spread(&positions);
         }
+    }
+
+    #[test]
+    fn cluster_splits_bridge_linked_groups() {
+        // Two triangles linked by a single bridge A-D.
+        //   B—A—C
+        //     |
+        //   E—D—F
+        let nodes: Vec<Node> = ["a", "b", "c", "d", "e", "f"]
+            .into_iter()
+            .map(|id| Node {
+                id: id.into(),
+                label: id.into(),
+                path: id.into(),
+                loc: 10,
+                kind: "module".into(),
+                line: 0,
+            })
+            .collect();
+        let edges = vec![
+            Edge {
+                source: "a".into(),
+                target: "b".into(),
+                kind: "import".into(),
+            },
+            Edge {
+                source: "b".into(),
+                target: "c".into(),
+                kind: "import".into(),
+            },
+            Edge {
+                source: "c".into(),
+                target: "a".into(),
+                kind: "import".into(),
+            },
+            Edge {
+                source: "a".into(),
+                target: "d".into(),
+                kind: "import".into(),
+            },
+            Edge {
+                source: "d".into(),
+                target: "e".into(),
+                kind: "import".into(),
+            },
+            Edge {
+                source: "e".into(),
+                target: "f".into(),
+                kind: "import".into(),
+            },
+            Edge {
+                source: "f".into(),
+                target: "d".into(),
+                kind: "import".into(),
+            },
+        ];
+        let graph = Graph { nodes, edges };
+        let positions = layout_with_mode(&graph, LayoutMode::Cluster);
+        let by_id: HashMap<&str, &PositionedNode> =
+            positions.iter().map(|p| (p.id.as_str(), p)).collect();
+
+        fn centroid(ids: &[&str], by_id: &HashMap<&str, &PositionedNode>) -> (f32, f32) {
+            let mut x = 0.0;
+            let mut y = 0.0;
+            for id in ids {
+                x += by_id[id].x;
+                y += by_id[id].y;
+            }
+            let n = ids.len() as f32;
+            (x / n, y / n)
+        }
+        fn avg_dist_to(
+            ids: &[&str],
+            cx: f32,
+            cy: f32,
+            by_id: &HashMap<&str, &PositionedNode>,
+        ) -> f32 {
+            let mut s = 0.0;
+            for id in ids {
+                let p = by_id[id];
+                let dx = p.x - cx;
+                let dy = p.y - cy;
+                s += (dx * dx + dy * dy).sqrt();
+            }
+            s / ids.len() as f32
+        }
+
+        let left = ["a", "b", "c"];
+        let right = ["d", "e", "f"];
+        let (lx, ly) = centroid(&left, &by_id);
+        let (rx, ry) = centroid(&right, &by_id);
+        let between = ((lx - rx).powi(2) + (ly - ry).powi(2)).sqrt();
+        let left_spread = avg_dist_to(&left, lx, ly, &by_id);
+        let right_spread = avg_dist_to(&right, rx, ry, &by_id);
+        assert!(
+            between > left_spread + right_spread,
+            "cluster centers should separate more than intra-cluster spread \
+             (between={between}, left={left_spread}, right={right_spread})"
+        );
     }
 
     #[test]
@@ -837,6 +1196,8 @@ mod tests {
         assert_eq!(LayoutMode::parse("CIRCULAR"), LayoutMode::Circular);
         assert_eq!(LayoutMode::parse("radial"), LayoutMode::Radial);
         assert_eq!(LayoutMode::parse("tree"), LayoutMode::Tree);
+        assert_eq!(LayoutMode::parse("cluster"), LayoutMode::Cluster);
+        assert_eq!(LayoutMode::parse("clustered"), LayoutMode::Cluster);
         assert_eq!(LayoutMode::parse("unknown"), LayoutMode::Organic);
     }
 

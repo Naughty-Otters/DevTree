@@ -30,7 +30,7 @@ describe("ui/graphNav", () => {
     const layoutBtns = container.querySelectorAll<HTMLButtonElement>(
       '[aria-label="Graph layout"] .graph-nav-icon-btn',
     );
-    expect(layoutBtns.length).toBe(5);
+    expect(layoutBtns.length).toBe(6);
     const dagBtn = [...layoutBtns].find((b) => b.getAttribute("aria-label") === "DAG / Lines");
     expect(dagBtn?.classList.contains("is-active")).toBe(true);
 
@@ -100,9 +100,9 @@ describe("ui/graphNav", () => {
       { moduleFilters: DEFAULT_MODULE_FILTERS },
     );
 
-    const details = container.querySelector("details.graph-nav-filter");
+    const details = container.querySelector("details.graph-nav-filter:not(.graph-nav-language-filter)");
     expect(details).toBeTruthy();
-    const boxes = container.querySelectorAll<HTMLInputElement>(
+    const boxes = details!.querySelectorAll<HTMLInputElement>(
       ".graph-nav-filter-option input",
     );
     expect(boxes.length).toBe(4);
@@ -114,6 +114,52 @@ describe("ui/graphNav", () => {
     hub!.checked = false;
     hub!.dispatchEvent(new Event("change"));
     expect(filters.hub).toBe(false);
+  });
+
+  it("renders language filter toggles", () => {
+    const container = document.createElement("div");
+    let filters = {
+      typescript: true,
+      rust: true,
+      python: true,
+      go: true,
+      other: true,
+    };
+    renderGraphNav(
+      container,
+      rootNavigation(),
+      false,
+      false,
+      {
+        onBack: () => {},
+        onForward: () => {},
+        onNavigate: () => {},
+        onLanguageFiltersChange: (next) => {
+          filters = next;
+        },
+      },
+      {
+        languageFilters: filters,
+        presentLanguages: ["typescript", "rust"],
+      },
+    );
+
+    const details = container.querySelector("details.graph-nav-language-filter");
+    expect(details).toBeTruthy();
+    const boxes = details!.querySelectorAll<HTMLInputElement>(
+      ".graph-nav-filter-option input",
+    );
+    expect(boxes.length).toBe(2);
+    expect(details!.textContent).toContain("TypeScript");
+    expect(details!.textContent).toContain("Rust");
+    expect(details!.textContent).not.toContain("Python");
+
+    const rust = [...boxes].find((b) =>
+      b.parentElement?.textContent?.includes("Rust"),
+    );
+    rust!.checked = false;
+    rust!.dispatchEvent(new Event("change"));
+    expect(filters.rust).toBe(false);
   });
 
   it("renders Focus in the graph view button list", () => {

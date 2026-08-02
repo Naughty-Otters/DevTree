@@ -7,12 +7,20 @@ import {
   animateVisibilityTransition,
 } from "./canvas/layoutTransition";
 import { parseEdgeStyle, type EdgeStyle } from "./canvas/edgeStyle";
-import type { Graph } from "./graph/types";
+import type { Graph, GraphEdge, GraphNode } from "./graph/types";
 import {
   parseModuleFilters,
   visibleIdsForFilters,
   type ModuleFilterFlags,
 } from "./graph/moduleFilters";
+import {
+  allLanguageFiltersEnabled,
+  buildLanguageIndex,
+  parseLanguageFilters,
+  presentLanguages,
+  visibleIdsForLanguageFilters,
+  type LanguageFilterFlags,
+} from "./graph/languages";
 import { hierarchyFromGraph } from "./graph/hierarchy";
 import type { AnalysisResult, CycleGroup } from "./analysis/types";
 import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
@@ -156,7 +164,7 @@ interface AppState {
   dsmLevel: "package" | "file";
   dsmOrdering: "partitioned" | "hierarchical";
   designRules: DesignRule[];
-  centerView: "report" | "graph" | "dsm" | "file";
+  centerView: "report" | "progress" | "graph" | "dsm" | "file";
 }
 
 function hierarchyIsHydrated(hierarchy: HierarchyIndex | null | undefined): boolean {
@@ -199,6 +207,9 @@ export async function startApp(): Promise<void> {
   const analysisReportViewEl = document.querySelector<HTMLElement>(
     "#analysis-report-view",
   )!;
+  const analysisProgressViewEl = document.querySelector<HTMLElement>(
+    "#analysis-progress-view",
+  )!;
   const graphNavContainer = document.querySelector<HTMLElement>("#graph-nav")!;
   const viewTabs = document.querySelector<HTMLElement>("#view-tabs")!;
   const moduleDetailsPanelEl =
@@ -210,6 +221,9 @@ export async function startApp(): Promise<void> {
   const initialLinterSettings = ensureLinterSettings(persisted.linterSettings);
   let layoutMode: LayoutMode = parseLayoutMode(persisted.layoutMode);
   let moduleFilters: ModuleFilterFlags = parseModuleFilters(persisted.moduleFilters);
+  let languageFilters: LanguageFilterFlags = parseLanguageFilters(
+    persisted.languageFilters,
+  );
   let edgeStyle: EdgeStyle = parseEdgeStyle(persisted.edgeStyle);
   let percentileView: PercentileViewMode = parsePercentileViewMode(
     persisted.percentileView,
@@ -450,6 +464,9 @@ export async function startApp(): Promise<void> {
       onRequestShowReport: () => {
         showReportView();
       },
+      onRequestShowProgress: () => {
+        showProgressView();
+      },
       onRequestQualityFiles: async () => {
         if (!app.analysisResult) return null;
         const quality = await loadAnalysisQualityWithFiles(
@@ -465,7 +482,7 @@ export async function startApp(): Promise<void> {
         return quality;
       },
     },
-    { reportHost: analysisReportViewEl },
+    { reportHost: analysisReportViewEl, progressHost: analysisProgressViewEl },
   );
 
   /** Camera / visibility to apply on the first graph hydrate after session restore. */
@@ -634,6 +651,7 @@ export async function startApp(): Promise<void> {
       layoutMode,
       edgeStyle,
       moduleFilters: { ...moduleFilters },
+      languageFilters: { ...languageFilters },
       setupWizardCompleted,
     };
   }
@@ -647,7 +665,7 @@ export async function startApp(): Promise<void> {
   }
 
   function setActiveViewTab(
-    view: "report" | "graph" | "dsm" | "file",
+    view: "report" | "progress" | "graph" | "dsm" | "file",
   ): void {
     viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((t) => {
       t.classList.toggle("active", t.dataset.view === view);
@@ -656,9 +674,14 @@ export async function startApp(): Promise<void> {
 
   function hideCenterViews(): void {
     analysisReportViewEl.classList.add("hidden");
+    analysisProgressViewEl.classList.add("hidden");
     fileViewerEl.classList.add("hidden");
     dsmViewEl.classList.add("hidden");
     canvas.classList.add("hidden");
+  }
+
+  function dismissRunDialogs(): void {
+    document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
   }
 
   function showReportView(): void {
@@ -669,6 +692,17 @@ export async function startApp(): Promise<void> {
     setActiveViewTab("report");
     graphNavContainer.innerHTML = "";
     resultsPanel.refreshReport();
+  }
+
+  function showProgressView(): void {
+    app.centerView = "progress";
+    hideCenterViews();
+    hideOverlay();
+    dismissRunDialogs();
+    analysisProgressViewEl.classList.remove("hidden");
+    setActiveViewTab("progress");
+    graphNavContainer.innerHTML = "";
+    resultsPanel.refreshProgress();
   }
 
   function refreshDsmView(): void {
@@ -770,6 +804,18 @@ export async function startApp(): Promise<void> {
       void navigateGraph(opts ?? undefined);
       return;
     }
+    if (app.renderState) {
+      // Layout often finished while Report hid the canvas (0×0). Remeasure + redraw.
+      requestAnimationFrame(() => {
+        resize();
+        if (app.renderState) {
+          fitCameraToContent(app.renderState, canvas);
+          draw();
+        }
+        refreshGraphNav(app.analysisResult?.graph);
+      });
+      return;
+    }
     if (app.analysisResult?.graph) {
       refreshGraphNav(app.analysisResult.graph);
       return;
@@ -850,6 +896,7 @@ export async function startApp(): Promise<void> {
   viewTabs.querySelectorAll<HTMLButtonElement>(".view-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       if (tab.dataset.view === "report") showReportView();
+      else if (tab.dataset.view === "progress") showProgressView();
       else if (tab.dataset.view === "graph") showGraphView();
       else if (tab.dataset.view === "dsm") showDsmView();
       else if (tab.dataset.view === "file") showFileView();
@@ -1051,6 +1098,40 @@ export async function startApp(): Promise<void> {
     persist();
   }
 
+  function languageIndexForFilters() {
+    return buildLanguageIndex(app.hierarchy ?? app.analysisResult?.hierarchy);
+  }
+
+  function visibleIdsForCurrentFilters(
+    nodes: GraphNode[],
+    edges: GraphEdge[],
+  ): Set<string> {
+    const roleVisible = visibleIdsForFilters(nodes, edges, moduleFilters);
+    const langVisible = visibleIdsForLanguageFilters(
+      nodes,
+      languageFilters,
+      languageIndexForFilters(),
+    );
+    const visible = new Set<string>();
+    for (const id of roleVisible) {
+      if (langVisible.has(id)) visible.add(id);
+    }
+    return visible;
+  }
+
+  function applyGraphFilters(): void {
+    if (app.renderState) {
+      void applyVisibilityThenReorganize(
+        visibleIdsForCurrentFilters(
+          app.renderState.nodes,
+          app.renderState.edges,
+        ),
+      );
+    } else {
+      persist();
+    }
+  }
+
   async function applyVisibilityThenReorganize(
     nextVisible: Set<string>,
   ): Promise<void> {
@@ -1113,9 +1194,15 @@ export async function startApp(): Promise<void> {
   }
 
   function refreshGraphNav(graph?: Graph) {
-    if (app.centerView === "report" || app.centerView === "file") {
-      // Report / File use their own chrome; keep the graph toolbar unmounted.
-      if (app.centerView === "report") graphNavContainer.innerHTML = "";
+    if (
+      app.centerView === "report" ||
+      app.centerView === "progress" ||
+      app.centerView === "file"
+    ) {
+      // Report / Progress / File use their own chrome; keep the graph toolbar unmounted.
+      if (app.centerView === "report" || app.centerView === "progress") {
+        graphNavContainer.innerHTML = "";
+      }
       return;
     }
     const g = graph ?? app.analysisResult?.graph ?? null;
@@ -1159,16 +1246,20 @@ export async function startApp(): Promise<void> {
         },
         onModuleFiltersChange: (filters) => {
           moduleFilters = filters;
-          if (app.renderState) {
-            void applyVisibilityThenReorganize(
-              visibleIdsForFilters(
-                app.renderState.nodes,
-                app.renderState.edges,
-                moduleFilters,
-              ),
-            );
-          } else {
-            persist();
+          applyGraphFilters();
+        },
+        onLanguageFiltersChange: (filters) => {
+          languageFilters = filters;
+          applyGraphFilters();
+          // Package-level language membership needs hierarchy file lists.
+          if (
+            !allLanguageFiltersEnabled(filters) &&
+            !hierarchyIsHydrated(app.hierarchy)
+          ) {
+            void ensureAnalysisHierarchy({ silent: true }).then(() => {
+              applyGraphFilters();
+              if (app.centerView === "graph") refreshGraphNav();
+            });
           }
         },
         onFocusView: () => {
@@ -1193,6 +1284,11 @@ export async function startApp(): Promise<void> {
         layoutMode,
         edgeStyle,
         moduleFilters,
+        languageFilters,
+        presentLanguages: presentLanguages(
+          g?.nodes ?? app.renderState?.nodes ?? [],
+          languageIndexForFilters(),
+        ),
         focusEnabled: Boolean(app.renderState),
       },
     );
@@ -1541,10 +1637,26 @@ export async function startApp(): Promise<void> {
     render(ctx, canvas, app.renderState);
   }
 
+  function canvasCssSize(): { width: number; height: number } {
+    // Hidden canvases report 0×0 — fall back to the center content box so layout
+    // can finish while Report is showing, then Graph remounts cleanly.
+    const width =
+      canvas.clientWidth ||
+      canvas.parentElement?.clientWidth ||
+      0;
+    const height =
+      canvas.clientHeight ||
+      canvas.parentElement?.clientHeight ||
+      0;
+    return { width, height };
+  }
+
   function resize() {
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.clientWidth * dpr;
-    canvas.height = canvas.clientHeight * dpr;
+    const { width, height } = canvasCssSize();
+    if (width <= 0 || height <= 0) return;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
     draw();
   }
 
@@ -1553,10 +1665,13 @@ export async function startApp(): Promise<void> {
     opts?: { visibleIds?: string[]; camera?: PersistedAppState["camera"]; selectedId?: string | null },
   ) {
     hideModuleOverlays();
-    showOverlay(
-      "Computing layout…",
-      "Arranging modules for the current graph view.",
-    );
+    const showLayoutOverlay = app.centerView === "graph";
+    if (showLayoutOverlay) {
+      showOverlay(
+        "Computing layout…",
+        "Arranging modules for the current graph view.",
+      );
+    }
     refreshModulesList({ loading: true });
     const positionsList = await computeLayout(graph, layoutMode);
     const positions = new Map(positionsList.map((p) => [p.id, p]));
@@ -1564,11 +1679,7 @@ export async function startApp(): Promise<void> {
     app.renderState = createRenderState(graph.nodes, graph.edges, positions);
     app.renderState.edgeStyle = edgeStyle;
 
-    const filterVisible = visibleIdsForFilters(
-      graph.nodes,
-      graph.edges,
-      moduleFilters,
-    );
+    const filterVisible = visibleIdsForCurrentFilters(graph.nodes, graph.edges);
     const visible =
       opts?.visibleIds && opts.visibleIds.length > 0
         ? new Set(opts.visibleIds.filter((id) => filterVisible.has(id)))
@@ -1592,7 +1703,9 @@ export async function startApp(): Promise<void> {
       fitCameraToContent(app.renderState, canvas);
     }
 
-    hideOverlay();
+    if (showLayoutOverlay) {
+      hideOverlay();
+    }
     draw();
     refreshModulesList({ loading: false });
     // Always rebuild the graph toolbar (layout / filter / focus) after layout.
@@ -1958,7 +2071,8 @@ export async function startApp(): Promise<void> {
     app.linterSettings = linterSettings;
     lintersState.settings = linterSettings;
 
-    showGraphView();
+    dismissRunDialogs();
+    showProgressView();
 
     analysisManager.start({
       projectPath: app.projectPath,
@@ -2049,6 +2163,7 @@ export async function startApp(): Promise<void> {
       },
     });
     if (!choice) return;
+    dismissRunDialogs();
 
     try {
       await applyRunChoice(choice);

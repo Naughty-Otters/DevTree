@@ -69,6 +69,8 @@ export interface ResultsPanelHandlers {
   onRequestQualityFiles?: () => Promise<QualityIndex | null>;
   /** Switch the main center view to the overall analysis report. */
   onRequestShowReport?: () => void;
+  /** Switch the main center view to live analysis progress. */
+  onRequestShowProgress?: () => void;
 }
 
 export interface ResultsPanelOptions {
@@ -77,6 +79,11 @@ export interface ResultsPanelOptions {
    * the bottom panel tabs.
    */
   reportHost?: HTMLElement;
+  /**
+   * When set, live Progress / AI stream renders in the main center view instead
+   * of the bottom panel tabs.
+   */
+  progressHost?: HTMLElement;
 }
 
 export function createResultsPanel(
@@ -88,10 +95,12 @@ export function createResultsPanel(
   setRuns: (runs: AnalysisRun[]) => void;
   showTab: (tab: TabId) => void;
   refreshReport: () => void;
+  refreshProgress: () => void;
 } {
   const reportHost = options.reportHost ?? null;
   const reportInMainView = reportHost != null;
-  let activeTab: TabId = reportInMainView ? "validation" : "analysis";
+  const progressInMainView = options.progressHost != null;
+  let activeTab: TabId = reportInMainView || progressInMainView ? "validation" : "analysis";
   let currentResult: AnalysisResult | null = null;
   let activeRuns: AnalysisRun[] = [];
   /** Tracks lazy quality.files fetch for Analysis → File ratings. */
@@ -117,22 +126,28 @@ export function createResultsPanel(
       label: "Validation",
       title: "Rule findings, design violations, and AI review results",
     },
-    {
-      id: "progress",
-      label: "Progress",
-      title: "Live run progress and AI stream output",
-    },
+    ...(progressInMainView
+      ? []
+      : [
+          {
+            id: "progress" as const,
+            label: "Progress",
+            title: "Live run progress and AI stream output",
+          },
+        ]),
   ];
 
-  const tabButtons: Record<TabId, HTMLButtonElement> = {} as Record<
-    TabId,
-    HTMLButtonElement
-  >;
+  const tabButtons: Record<string, HTMLButtonElement> = {};
 
   function setActiveTab(tab: TabId): void {
     if (reportInMainView && tab === "analysis") {
       renderReport();
       handlers.onRequestShowReport?.();
+      return;
+    }
+    if (progressInMainView && tab === "progress") {
+      handlers.onRequestShowProgress?.();
+      updateProgressRuns();
       return;
     }
     activeTab = tab;
@@ -159,9 +174,13 @@ export function createResultsPanel(
   const content = document.createElement("div");
   content.className = "results-content";
 
-  const progressHost = document.createElement("div");
-  progressHost.className = "results-progress-content";
-  progressHost.hidden = true;
+  const progressHost = options.progressHost ?? document.createElement("div");
+  progressHost.classList.add("results-progress-content");
+  if (progressInMainView) {
+    progressHost.classList.add("analysis-progress-main");
+  } else {
+    progressHost.hidden = true;
+  }
 
   const resultsHost = document.createElement("div");
   resultsHost.className = "results-tab-content";
@@ -172,7 +191,11 @@ export function createResultsPanel(
     "Run analysis to see an overview, health scores, and validation findings";
   emptyHost.hidden = true;
 
-  content.append(progressHost, resultsHost, emptyHost);
+  if (progressInMainView) {
+    content.append(resultsHost, emptyHost);
+  } else {
+    content.append(progressHost, resultsHost, emptyHost);
+  }
   container.append(tabs, content);
 
   interface TaskBarRefs {
@@ -359,13 +382,10 @@ export function createResultsPanel(
 
     const streamCol = document.createElement("div");
     streamCol.className = "analysis-run-stream";
+    streamCol.hidden = true;
 
     const aiStreamHost = document.createElement("div");
     aiStreamHost.className = "analysis-ai-stream-host";
-    const streamPlaceholder = document.createElement("div");
-    streamPlaceholder.className = "ai-stream-waiting";
-    streamPlaceholder.textContent = "AI output will appear here during validation…";
-    aiStreamHost.appendChild(streamPlaceholder);
     streamCol.appendChild(aiStreamHost);
 
     body.append(progressCol, streamCol);
@@ -577,27 +597,22 @@ export function createResultsPanel(
 
     syncRuleTaskBars(refs, ruleTasks, currentStage, progress);
 
-    // Progress tab always keeps the progress column + AI text channel visible.
-    refs.streamCol.hidden = false;
-    refs.root.classList.add("has-ai-stream");
-    if (!refs.aiStreamHost) {
-      refs.aiStreamHost = document.createElement("div");
-      refs.aiStreamHost.className = "analysis-ai-stream-host";
-      refs.streamCol.appendChild(refs.aiStreamHost);
-    }
-    if (progress?.aiStream) {
-      renderAiStreamPreview(refs.aiStreamHost, progress.aiStream);
-    } else if (!refs.aiStreamHost.querySelector(".ai-stream-preview")) {
-      refs.aiStreamHost.replaceChildren();
-      const waiting = document.createElement("div");
-      waiting.className = "ai-stream-waiting";
-      waiting.textContent = "AI output will appear here during validation…";
-      refs.aiStreamHost.appendChild(waiting);
+    // Show the AI text box only once an AI validation stream has started.
+    const hasAiConversation = Boolean(progress?.aiStream);
+    refs.streamCol.hidden = !hasAiConversation;
+    refs.root.classList.toggle("has-ai-stream", hasAiConversation);
+    if (hasAiConversation) {
+      if (!refs.aiStreamHost) {
+        refs.aiStreamHost = document.createElement("div");
+        refs.aiStreamHost.className = "analysis-ai-stream-host";
+        refs.streamCol.appendChild(refs.aiStreamHost);
+      }
+      renderAiStreamPreview(refs.aiStreamHost, progress!.aiStream!);
     }
   }
 
   function updateProgressRuns(): void {
-    const scrollRoot = content;
+    const scrollRoot = progressInMainView ? progressHost : content;
     const savedRootScroll = scrollRoot.scrollTop;
     const savedColScroll = new Map<string, number>();
     const savedRulesScroll = new Map<string, number>();
@@ -625,7 +640,7 @@ export function createResultsPanel(
       if (!progressEmptyEl) {
         progressEmptyEl = document.createElement("div");
         progressEmptyEl.className = "panel-empty";
-        progressEmptyEl.textContent = "Run analysis to see progress and AI output";
+        progressEmptyEl.textContent = "Run analysis to see progress";
       }
       if (!progressHost.contains(progressEmptyEl)) {
         progressHost.replaceChildren(progressEmptyEl);
@@ -802,9 +817,14 @@ export function createResultsPanel(
     if (reportInMainView) {
       renderReport();
     }
+    if (progressInMainView) {
+      updateProgressRuns();
+    }
 
-    const showProgress = activeTab === "progress";
-    progressHost.hidden = !showProgress;
+    const showProgress = !progressInMainView && activeTab === "progress";
+    if (!progressInMainView) {
+      progressHost.hidden = !showProgress;
+    }
     resultsHost.hidden = showProgress;
 
     if (showProgress) {
@@ -852,6 +872,11 @@ export function createResultsPanel(
 
       activeRuns = runs;
       if (startedNew) {
+        if (progressInMainView) {
+          updateProgressRuns();
+          handlers.onRequestShowProgress?.();
+          return;
+        }
         setActiveTab("progress");
         return;
       }
@@ -859,7 +884,8 @@ export function createResultsPanel(
         if (reportInMainView) {
           renderReport();
           handlers.onRequestShowReport?.();
-          setActiveTab("validation");
+          if (progressInMainView) updateProgressRuns();
+          else setActiveTab("validation");
           return;
         }
         setActiveTab("analysis");
@@ -872,6 +898,9 @@ export function createResultsPanel(
     },
     refreshReport() {
       renderReport();
+    },
+    refreshProgress() {
+      updateProgressRuns();
     },
   };
 }

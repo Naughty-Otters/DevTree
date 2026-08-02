@@ -24,10 +24,12 @@ export function fitCameraToContent(
   const nodePad = 18;
   const contentWidth = Math.max(1, maxX - minX + nodePad * 2);
   const contentHeight = Math.max(1, maxY - minY + nodePad * 2);
+  const viewW = Math.max(1, canvas.width);
+  const viewH = Math.max(1, canvas.height);
 
   state.camera.zoom = Math.min(
-    (canvas.width / contentWidth) * padding,
-    (canvas.height / contentHeight) * padding,
+    (viewW / contentWidth) * padding,
+    (viewH / contentHeight) * padding,
     6,
   );
   state.camera.x = -(minX + maxX) / 2;

@@ -22,6 +22,7 @@ describe("wasm-bridge", () => {
 
   it("parses layout mode names", () => {
     expect(parseLayoutMode("radial")).toBe("radial");
+    expect(parseLayoutMode("cluster")).toBe("cluster");
     expect(parseLayoutMode("TREE")).toBe("tree");
     expect(parseLayoutMode("direct")).toBe("direct");
     expect(parseLayoutMode("dag")).toBe("direct");

@@ -42,6 +42,7 @@
           <main id="center-panel">
             <div id="view-tabs">
               <button class="view-tab" data-view="report" title="Overall analysis report — health, ratings, and key findings">Report</button>
+              <button class="view-tab" data-view="progress" title="Live analysis progress and AI stream output">Progress</button>
               <button class="view-tab active" data-view="graph" title="Dependency graph — packages and modules">Graph</button>
               <button class="view-tab" data-view="dsm" title="Design Structure Matrix — dependency grid and modularity health">DSM</button>
               <button class="view-tab" data-view="file" title="Source file viewer — open from the Project Tree or double-click a graph node">File</button>
@@ -49,6 +50,7 @@
             <div id="graph-nav" class="graph-nav"></div>
             <div id="center-content">
               <div id="analysis-report-view" class="analysis-report-view hidden" aria-label="Analysis report"></div>
+              <div id="analysis-progress-view" class="analysis-progress-view hidden" aria-label="Analysis progress"></div>
               <canvas id="graph-canvas"></canvas>
               <div id="dsm-view" class="hidden"></div>
               <div id="file-viewer" class="hidden"></div>

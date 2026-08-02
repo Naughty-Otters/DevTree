@@ -6,6 +6,7 @@ import {
   CornerDownRight,
   Crosshair,
   GitFork,
+  Group,
   Minus,
   Share2,
   Spline,
@@ -21,6 +22,11 @@ import {
   MODULE_FILTER_OPTIONS,
   type ModuleFilterFlags,
 } from "../graph/moduleFilters";
+import {
+  LANGUAGE_FILTER_OPTIONS,
+  type GraphLanguageId,
+  type LanguageFilterFlags,
+} from "../graph/languages";
 import { lucideIcon } from "./icons";
 import {
   DAG_STYLES,
@@ -39,6 +45,9 @@ export interface GraphNavOptions {
   layoutMode?: LayoutMode;
   edgeStyle?: EdgeStyle;
   moduleFilters?: ModuleFilterFlags;
+  languageFilters?: LanguageFilterFlags;
+  /** Languages present in the current graph (limits Language menu options). */
+  presentLanguages?: GraphLanguageId[];
   /** Enable Focus (relayout visible + fit) in the graph toolbar. */
   focusEnabled?: boolean;
 }
@@ -50,6 +59,7 @@ export interface GraphNavCallbacks {
   onLayoutModeChange?: (mode: LayoutMode) => void;
   onEdgeStyleChange?: (style: EdgeStyle) => void;
   onModuleFiltersChange?: (filters: ModuleFilterFlags) => void;
+  onLanguageFiltersChange?: (filters: LanguageFilterFlags) => void;
   onFocusView?: () => void;
   /** Shown on the stale-imports warning banner. */
   onRunAnalysis?: () => void;
@@ -57,6 +67,7 @@ export interface GraphNavCallbacks {
 
 const LAYOUT_ICONS: Record<LayoutFamily, IconNode> = {
   organic: Share2,
+  cluster: Group,
   dag: Workflow,
   circular: Circle,
   radial: Target,
@@ -117,6 +128,79 @@ function renderFilterDropdown(
 
     row.append(input, text);
     menu.appendChild(row);
+  }
+
+  wrap.append(summary, menu);
+
+  const onDocClick = (e: MouseEvent) => {
+    if (!document.body.contains(wrap)) {
+      document.removeEventListener("click", onDocClick);
+      return;
+    }
+    if (!wrap.open) return;
+    if (e.target instanceof Node && wrap.contains(e.target)) return;
+    wrap.open = false;
+  };
+  wrap.addEventListener("toggle", () => {
+    if (wrap.open) {
+      requestAnimationFrame(() => document.addEventListener("click", onDocClick));
+    } else {
+      document.removeEventListener("click", onDocClick);
+    }
+  });
+
+  return wrap;
+}
+
+function renderLanguageFilterDropdown(
+  flags: LanguageFilterFlags,
+  present: GraphLanguageId[] | undefined,
+  onChange: (filters: LanguageFilterFlags) => void,
+): HTMLElement {
+  const wrap = document.createElement("details");
+  wrap.className = "graph-nav-filter graph-nav-language-filter";
+
+  const summary = document.createElement("summary");
+  summary.className = "graph-nav-filter-summary";
+  summary.textContent = "Language";
+  summary.title = "Show or hide modules by programming language";
+
+  const menu = document.createElement("div");
+  menu.className = "graph-nav-filter-menu";
+  menu.setAttribute("role", "group");
+  menu.setAttribute("aria-label", "Language filters");
+
+  const current = { ...flags };
+  const options =
+    present && present.length > 0
+      ? LANGUAGE_FILTER_OPTIONS.filter((opt) => present.includes(opt.key))
+      : LANGUAGE_FILTER_OPTIONS;
+
+  if (options.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "graph-nav-filter-empty";
+    empty.textContent = "No languages detected yet";
+    menu.appendChild(empty);
+  } else {
+    for (const opt of options) {
+      const row = document.createElement("label");
+      row.className = "graph-nav-filter-option";
+      row.title = opt.hint;
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = current[opt.key];
+      input.addEventListener("change", () => {
+        current[opt.key] = input.checked;
+        onChange({ ...current });
+      });
+
+      const text = document.createElement("span");
+      text.textContent = opt.label;
+
+      row.append(input, text);
+      menu.appendChild(row);
+    }
   }
 
   wrap.append(summary, menu);
@@ -309,6 +393,21 @@ export function renderGraphNav(
     callbacks.onModuleFiltersChange?.(next);
   });
 
+  const languageFlags = options.languageFilters ?? {
+    typescript: true,
+    rust: true,
+    python: true,
+    go: true,
+    other: true,
+  };
+  const languageDropdown = renderLanguageFilterDropdown(
+    languageFlags,
+    options.presentLanguages,
+    (next) => {
+      callbacks.onLanguageFiltersChange?.(next);
+    },
+  );
+
   const focusTool = document.createElement("div");
   focusTool.className = "graph-nav-tool";
   const focusLabel = document.createElement("span");
@@ -373,6 +472,7 @@ export function renderGraphNav(
     layoutControls,
     edgeStyleControl,
     filterDropdown,
+    languageDropdown,
     focusTool,
     crumbs,
     hint,

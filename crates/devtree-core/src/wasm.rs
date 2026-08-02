@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 /// Takes a JSON-encoded `Graph` and a layout mode name, returns a JSON-encoded
 /// array of `PositionedNode` (`{id, x, y}`).
 ///
-/// Mode: `organic` (default), `hierarchical`, `circular`, `radial`, or `tree`.
+/// Mode: `organic` (default), `cluster`, `hierarchical`, `circular`, `radial`, or `tree`.
 #[wasm_bindgen]
 pub fn compute_layout(graph_json: &str, mode: &str) -> Result<String, String> {
     let graph: Graph = serde_json::from_str(graph_json).map_err(|e| e.to_string())?;

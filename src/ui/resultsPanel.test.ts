@@ -278,6 +278,47 @@ describe("resultsPanel", () => {
     expect(onRequestShowReport).toHaveBeenCalled();
   });
 
+  it("renders Progress in a main-view host and activates it when a run starts", () => {
+    const bottom = document.createElement("div");
+    const progressHost = document.createElement("div");
+    const onRequestShowProgress = vi.fn();
+    const panel = createResultsPanel(
+      bottom,
+      { onRequestShowProgress },
+      { progressHost },
+    );
+
+    const tabLabels = [...bottom.querySelectorAll(".results-tab")].map(
+      (t) => t.textContent,
+    );
+    expect(tabLabels).toEqual(["Analysis", "Validation"]);
+
+    panel.setRuns([
+      {
+        id: "run-1",
+        label: "Run #1",
+        startedAt: Date.now(),
+        status: "running",
+        progress: {
+          analysisId: "run-1",
+          stage: "scanning",
+          message: "Scanning…",
+          current: 1,
+          total: 4,
+          percent: 25,
+        },
+        ruleTasks: [],
+        result: null,
+        error: null,
+      },
+    ]);
+
+    expect(onRequestShowProgress).toHaveBeenCalled();
+    expect(progressHost.textContent).toContain("in progress");
+    expect(progressHost.querySelector(".analysis-run-card")).toBeTruthy();
+    expect(bottom.querySelector(".analysis-run-card")).toBeNull();
+  });
+
   it("shows empty modularity guidance on Analysis when DSM missing", () => {
     const container = document.createElement("div");
     const onShowDsm = vi.fn();
@@ -422,7 +463,42 @@ describe("resultsPanel", () => {
       container.querySelector(".results-progress-content")?.hasAttribute("hidden"),
     ).toBe(false);
     expect(container.querySelector(".analysis-run-stream")).toBeTruthy();
+    expect(
+      container.querySelector(".analysis-run-stream")?.hasAttribute("hidden"),
+    ).toBe(false);
     expect(container.textContent).toContain("Finding one");
+  });
+
+  it("hides the AI text box until an AI conversation starts", () => {
+    const container = document.createElement("div");
+    const panel = createResultsPanel(container);
+    panel.setRuns([
+      {
+        id: "run-1",
+        label: "Run #1",
+        startedAt: Date.now(),
+        status: "running",
+        progress: {
+          analysisId: "run-1",
+          stage: "scanning",
+          message: "Scanning…",
+          current: 1,
+          total: 4,
+          percent: 25,
+        },
+        ruleTasks: [],
+        result: null,
+        error: null,
+      },
+    ]);
+
+    const stream = container.querySelector(".analysis-run-stream");
+    expect(stream).toBeTruthy();
+    expect(stream?.hasAttribute("hidden")).toBe(true);
+    expect(container.querySelector(".analysis-run-card.has-ai-stream")).toBeNull();
+    expect(container.textContent).not.toContain(
+      "AI output will appear here during validation",
+    );
   });
 
   it("renders architecture health and switches percentile view", async () => {

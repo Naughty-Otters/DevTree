@@ -48,7 +48,7 @@ export interface PersistedUiState {
   /** Quality metric distribution emphasis: avg | p50 | p80 | p90 | all */
   percentileView?: "avg" | "p50" | "p80" | "p90" | "all";
   /** Modularization graph layout algorithm */
-  layoutMode?: "organic" | "direct" | "hierarchical" | "circular" | "radial" | "tree";
+  layoutMode?: "organic" | "direct" | "hierarchical" | "circular" | "radial" | "tree" | "cluster";
   /** Dependency edge routing: straight, orthogonal (H/V), or curved */
   edgeStyle?: "straight" | "orthogonal" | "curved";
   /** Which dependency-role module groups are shown on the graph */
@@ -57,6 +57,14 @@ export interface PersistedUiState {
     independent: boolean;
     circular: boolean;
     hub: boolean;
+  };
+  /** Which programming languages are shown on the graph */
+  languageFilters?: {
+    typescript: boolean;
+    rust: boolean;
+    python: boolean;
+    go: boolean;
+    other: boolean;
   };
   /** LDM design rules for architecture conformance */
   designRules?: DesignRule[];
@@ -102,6 +110,13 @@ export function defaultPersistedState(): PersistedAppState {
       independent: true,
       circular: true,
       hub: true,
+    },
+    languageFilters: {
+      typescript: true,
+      rust: true,
+      python: true,
+      go: true,
+      other: true,
     },
     designRules: defaultDesignRules(),
     setupWizardCompleted: false,
