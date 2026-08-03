@@ -7,6 +7,7 @@ export type GraphLanguageId =
   | "rust"
   | "python"
   | "go"
+  | "java"
   | "other";
 
 export interface LanguageFilterFlags {
@@ -14,6 +15,7 @@ export interface LanguageFilterFlags {
   rust: boolean;
   python: boolean;
   go: boolean;
+  java: boolean;
   other: boolean;
 }
 
@@ -22,6 +24,7 @@ export const DEFAULT_LANGUAGE_FILTERS: LanguageFilterFlags = {
   rust: true,
   python: true,
   go: true,
+  java: true,
   other: true,
 };
 
@@ -51,6 +54,11 @@ export const LANGUAGE_FILTER_OPTIONS: {
     hint: ".go",
   },
   {
+    key: "java",
+    label: "Java",
+    hint: ".java",
+  },
+  {
     key: "other",
     label: "Other / unknown",
     hint: "Unrecognized extensions or modules with no source files yet",
@@ -67,6 +75,7 @@ export function parseLanguageFilters(value: unknown): LanguageFilterFlags {
     rust: v.rust !== false,
     python: v.python !== false,
     go: v.go !== false,
+    java: v.java !== false,
     other: v.other !== false,
   };
 }
@@ -77,6 +86,7 @@ export function allLanguageFiltersEnabled(flags: LanguageFilterFlags): boolean {
     flags.rust &&
     flags.python &&
     flags.go &&
+    flags.java &&
     flags.other
   );
 }
@@ -101,6 +111,8 @@ export function languageFromPath(path: string): GraphLanguageId | null {
       return "python";
     case "go":
       return "go";
+    case "java":
+      return "java";
     default:
       return "other";
   }

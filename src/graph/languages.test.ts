@@ -24,6 +24,7 @@ describe("graph/languages", () => {
     expect(languageFromPath("lib/main.rs")).toBe("rust");
     expect(languageFromPath("pkg/main.py")).toBe("python");
     expect(languageFromPath("cmd/main.go")).toBe("go");
+    expect(languageFromPath("src/main/java/App.java")).toBe("java");
     expect(languageFromPath("README.md")).toBe("other");
     expect(languageFromPath("src/pkg")).toBeNull();
   });
@@ -39,6 +40,7 @@ describe("graph/languages", () => {
       rust: false,
       python: false,
       go: false,
+      java: false,
       other: false,
     });
     expect([...visible]).toEqual(["a.ts"]);
@@ -73,6 +75,7 @@ describe("graph/languages", () => {
         rust: false,
         python: true,
         go: false,
+        java: false,
         other: false,
       },
       index,
@@ -87,6 +90,7 @@ describe("graph/languages", () => {
       rust: false,
       python: false,
       go: false,
+      java: false,
       other: true,
     });
     expect(visible.has("lib")).toBe(true);
@@ -106,6 +110,7 @@ describe("graph/languages", () => {
       rust: false,
       python: true,
       go: true,
+      java: true,
       other: true,
     });
   });

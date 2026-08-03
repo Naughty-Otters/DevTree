@@ -218,6 +218,7 @@ describe("ui/graphNav", () => {
       rust: true,
       python: true,
       go: true,
+      java: true,
       other: true,
     };
     renderGraphNav(

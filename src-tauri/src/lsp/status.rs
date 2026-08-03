@@ -74,6 +74,11 @@ const SERVERS: &[ServerDef] = &[
         label: "Go",
         install_hint: "go install golang.org/x/tools/gopls@latest",
     },
+    ServerDef {
+        kind: LanguageKind::Java,
+        label: "Java",
+        install_hint: "brew install jdtls  (requires Java 17+)",
+    },
 ];
 
 fn num_setting(key: &str, label: &str, default: u32, min: u32, max: u32) -> LspSettingDef {
@@ -99,6 +104,10 @@ fn bool_setting(key: &str, label: &str, default: bool) -> LspSettingDef {
 }
 
 fn settings_for(kind: LanguageKind) -> Vec<LspSettingDef> {
+    let diagnostic_default = match kind {
+        LanguageKind::Java => 2500,
+        _ => 800,
+    };
     let mut settings = vec![
         bool_setting("enabled", "Use during analysis", true),
         num_setting(
@@ -118,7 +127,7 @@ fn settings_for(kind: LanguageKind) -> Vec<LspSettingDef> {
         num_setting(
             "diagnostic_wait_ms",
             "Wait for diagnostics (ms)",
-            800,
+            diagnostic_default,
             0,
             10000,
         ),
@@ -155,6 +164,9 @@ fn settings_for(kind: LanguageKind) -> Vec<LspSettingDef> {
                 "Enable staticcheck diagnostics",
                 true,
             ));
+        }
+        LanguageKind::Java => {
+            // jdtls settings are mostly environment/workspace based; no extra toggles yet.
         }
     }
 
@@ -330,6 +342,25 @@ pub fn install_lsp_server(id: &str) -> Result<LspInstallResult, String> {
                 false,
             )
         }
+        LanguageKind::Java => {
+            if !command_on_path("java") {
+                return Err(
+                    "Java runtime not found. Install JDK 17+ first (e.g. `brew install openjdk@17`), then retry."
+                        .into(),
+                );
+            }
+            if !command_on_path("brew") {
+                return Err(format!(
+                    "Homebrew not found. Install jdtls manually:\n{}",
+                    def.install_hint
+                ));
+            }
+            (
+                "brew",
+                vec!["install".into(), "jdtls".into()],
+                false,
+            )
+        }
     };
 
     if !command_on_path(program) {
@@ -405,5 +436,23 @@ mod tests {
     #[test]
     fn lists_lsp_servers() {
         assert!(!list_lsp_servers().is_empty());
+    }
+
+    #[test]
+    fn lists_java_lsp_server() {
+        let servers = list_lsp_servers();
+        let java = servers
+            .iter()
+            .find(|s| s.id == "java")
+            .expect("java LSP should be listed");
+        assert_eq!(java.label, "Java");
+        assert!(java.install_hint.contains("jdtls"));
+        assert!(
+            java.settings
+                .iter()
+                .any(|s| s.key == "diagnostic_wait_ms"
+                    && s.default.as_u64() == Some(2500)),
+            "java should default to a longer diagnostic wait"
+        );
     }
 }

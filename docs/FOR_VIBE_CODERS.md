@@ -117,7 +117,7 @@ Toggle any mix below. Deterministic rules always run locally; AI rules need an L
 | **Type Coverage** | Untyped / loosely typed modules (e.g. plain JS) |
 | **Test Coverage** | Modules missing corresponding tests |
 | **Language Linters** | eslint, biome, oxlint, clippy, ruff, pylint, flake8, golangci-lint, staticcheck, … |
-| **Language Diagnostics** | rust-analyzer, tsserver/vtsls, gopls, pyright/basedpyright/pylsp, … |
+| **Language Diagnostics** | rust-analyzer, tsserver/vtsls, gopls, pyright/basedpyright/pylsp, jdtls, … |
 
 ### Maintainability (deterministic)
 

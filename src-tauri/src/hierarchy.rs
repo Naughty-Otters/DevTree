@@ -496,6 +496,39 @@ fn extract_py_imports(content: &str) -> Vec<String> {
     imports
 }
 
+fn extract_java_imports(content: &str) -> Vec<String> {
+    let mut imports = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim().trim_end_matches(';').trim();
+        let (rest, is_static) = if let Some(r) = trimmed.strip_prefix("import static ") {
+            (r, true)
+        } else if let Some(r) = trimmed.strip_prefix("import ") {
+            (r, false)
+        } else {
+            continue;
+        };
+        let module = rest.split_whitespace().next().unwrap_or("").trim();
+        if module.is_empty() || module.ends_with('*') {
+            // Skip wildcard imports — they don't map to a single file.
+            continue;
+        }
+        let path = if is_static {
+            // `import static com.foo.Bar.MEMBER` → class `com/foo/Bar`
+            let mut parts: Vec<&str> = module.split('.').collect();
+            if parts.len() > 1 {
+                parts.pop();
+            }
+            parts.join("/")
+        } else {
+            module.replace('.', "/")
+        };
+        if !path.is_empty() {
+            imports.push(path);
+        }
+    }
+    imports
+}
+
 fn resolve_import(
     from_file: &str,
     import_path: &str,
@@ -581,13 +614,29 @@ fn resolve_import(
     }
 
     let mut cands = Vec::new();
-    for prefix in ["", "src/", "lib/"] {
+    for prefix in [
+        "",
+        "src/",
+        "lib/",
+        "src/main/java/",
+        "src/test/java/",
+        "app/src/main/java/",
+        "lib/src/main/java/",
+    ] {
         let joined = format!("{prefix}{}", import_path.replace('\\', "/"));
         cands.extend(build_file_candidates(&joined));
     }
     for cand in cands {
         if all_files.contains(&cand) {
             return Some(cand);
+        }
+    }
+
+    // Maven/Gradle layouts: match any file ending with /com/example/Foo.java
+    let java_rel = format!("{}.java", import_path.replace('\\', "/").trim_start_matches('/'));
+    for f in all_files {
+        if f == &java_rel || f.ends_with(&format!("/{java_rel}")) {
+            return Some(f.clone());
         }
     }
     None
@@ -622,6 +671,7 @@ fn build_file_candidates(base: &str) -> Vec<String> {
         format!("{clean}.rs"),
         format!("{clean}.py"),
         format!("{clean}.go"),
+        format!("{clean}.java"),
         format!("{clean}/mod.rs"),
         format!("{clean}/index.ts"),
         format!("{clean}/index.tsx"),
@@ -645,6 +695,7 @@ fn extract_symbols(file_path: &str, content: &str) -> (Vec<SymbolInfo>, Vec<Symb
         let parsed = match ext {
             "rs" => parse_rs_symbol(trimmed),
             "py" => parse_py_symbol(trimmed),
+            "java" => parse_java_symbol(trimmed),
             _ => parse_ts_symbol(trimmed),
         };
 
@@ -781,6 +832,84 @@ fn parse_py_symbol(line: &str) -> Option<(String, String)> {
             .to_string();
         if !name.is_empty() {
             return Some(("function".into(), name));
+        }
+    }
+    None
+}
+
+fn parse_java_symbol(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    // Strip common modifiers so `public static class Foo` still matches.
+    let mut rest = trimmed;
+    loop {
+        let mut advanced = false;
+        for prefix in [
+            "public ",
+            "protected ",
+            "private ",
+            "static ",
+            "final ",
+            "abstract ",
+            "sealed ",
+            "non-sealed ",
+        ] {
+            if let Some(r) = rest.strip_prefix(prefix) {
+                rest = r;
+                advanced = true;
+            }
+        }
+        if !advanced {
+            break;
+        }
+    }
+
+    let kinds = [
+        ("class ", "class"),
+        ("interface ", "interface"),
+        ("enum ", "enum"),
+        ("record ", "class"),
+        ("void ", "function"),
+    ];
+    for (prefix, kind) in kinds {
+        if let Some(after) = rest.strip_prefix(prefix) {
+            let name = after
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if !name.is_empty() {
+                return Some((kind.to_string(), name));
+            }
+        }
+    }
+
+    // Methods / fields with an explicit type: `String name(` / `int count`
+    // Skip if it looks like a control keyword.
+    for kw in ["if", "for", "while", "switch", "return", "new", "throw", "catch", "try"] {
+        if rest.starts_with(kw)
+            && rest
+                .chars()
+                .nth(kw.len())
+                .map(|c| !c.is_alphanumeric() && c != '_')
+                .unwrap_or(true)
+        {
+            return None;
+        }
+    }
+    if rest.contains('(') {
+        // Prefer the identifier before '(' after the last type token.
+        if let Some(before_paren) = rest.split('(').next() {
+            let tokens: Vec<&str> = before_paren
+                .split_whitespace()
+                .filter(|t| !t.is_empty())
+                .collect();
+            if tokens.len() >= 2 {
+                let name = tokens[tokens.len() - 1]
+                    .trim_matches(|c: char| !c.is_alphanumeric() && c != '_');
+                if !name.is_empty() && name.chars().next().is_some_and(|c| c.is_alphabetic()) {
+                    return Some(("function".into(), name.to_string()));
+                }
+            }
         }
     }
     None
@@ -1132,6 +1261,7 @@ pub fn build_hierarchy_with_progress(
         let raw_imports = match ext {
             "rs" => extract_rs_imports(&content),
             "py" => extract_py_imports(&content),
+            "java" => extract_java_imports(&content),
             _ => extract_ts_imports(&content),
         };
 
@@ -1521,6 +1651,59 @@ mod tests {
         assert_eq!(
             resolve_import("src/main.ts", "./canvas/renderer", &files, &roots),
             Some("src/canvas/renderer.ts".into())
+        );
+    }
+
+    #[test]
+    fn java_import_extraction_and_resolve() {
+        let content = r#"
+package com.example.app;
+
+import com.example.lib.Helper;
+import static com.example.lib.Utils.FORMAT;
+import java.util.List;
+import com.example.lib.*;
+"#;
+        let imports = extract_java_imports(content);
+        assert!(imports.contains(&"com/example/lib/Helper".to_string()));
+        assert!(imports.contains(&"com/example/lib/Utils".to_string()));
+        assert!(imports.contains(&"java/util/List".to_string()));
+        assert!(!imports.iter().any(|i| i.ends_with('*') || i.contains("lib/*")));
+
+        let files: HashSet<String> = [
+            "src/main/java/com/example/app/App.java".into(),
+            "src/main/java/com/example/lib/Helper.java".into(),
+        ]
+        .into_iter()
+        .collect();
+        let roots = vec![PackageRoot {
+            path: ".".into(),
+            crate_names: vec![],
+        }];
+        assert_eq!(
+            resolve_import(
+                "src/main/java/com/example/app/App.java",
+                "com/example/lib/Helper",
+                &files,
+                &roots,
+            ),
+            Some("src/main/java/com/example/lib/Helper.java".into())
+        );
+    }
+
+    #[test]
+    fn java_symbol_parsing() {
+        assert_eq!(
+            parse_java_symbol("public class App {"),
+            Some(("class".into(), "App".into()))
+        );
+        assert_eq!(
+            parse_java_symbol("private static void run(String[] args) {"),
+            Some(("function".into(), "run".into()))
+        );
+        assert_eq!(
+            parse_java_symbol("public interface Service {"),
+            Some(("interface".into(), "Service".into()))
         );
     }
 }

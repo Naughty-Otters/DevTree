@@ -33,7 +33,7 @@ const SKIP_DIR_NAMES: &[&str] = &[
     "wasm",
 ];
 
-const SOURCE_EXTS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "py", "go"];
+const SOURCE_EXTS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "py", "go", "java"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

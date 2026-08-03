@@ -123,7 +123,7 @@ macOS / Windows installers: [GitHub Releases](https://github.com/Naughty-Otters/
 
 ## Build from source
 
-**Prerequisites:** Rust (stable) + `wasm32-unknown-unknown`, Node.js 20+, [wasm-pack](https://rustwasm.github.io/wasm-pack/), [Tauri OS deps](https://tauri.app/start/prerequisites/). Optional language servers (`rust-analyzer`, `typescript-language-server` / `vtsls`, `gopls`, `basedpyright`) improve diagnostics and symbol graphs.
+**Prerequisites:** Rust (stable) + `wasm32-unknown-unknown`, Node.js 20+, [wasm-pack](https://rustwasm.github.io/wasm-pack/), [Tauri OS deps](https://tauri.app/start/prerequisites/). Optional language servers (`rust-analyzer`, `typescript-language-server` / `vtsls`, `gopls`, `basedpyright`, `jdtls`) improve diagnostics and symbol graphs.
 
 ```bash
 npm install

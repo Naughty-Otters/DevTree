@@ -523,6 +523,7 @@ export function renderGraphNav(
     rust: true,
     python: true,
     go: true,
+    java: true,
     other: true,
   };
   const languageDropdown = renderLanguageFilterDropdown(

@@ -64,6 +64,7 @@ export interface PersistedUiState {
     rust: boolean;
     python: boolean;
     go: boolean;
+    java: boolean;
     other: boolean;
   };
   /** LDM design rules for architecture conformance */
@@ -116,6 +117,7 @@ export function defaultPersistedState(): PersistedAppState {
       rust: true,
       python: true,
       go: true,
+      java: true,
       other: true,
     },
     designRules: defaultDesignRules(),

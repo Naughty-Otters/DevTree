@@ -246,7 +246,7 @@ pub fn default_rules() -> Vec<AnalysisRule> {
         AnalysisRule {
             id: "lsp_diagnostics".into(),
             name: "Language Diagnostics".into(),
-            description: "Surface errors and warnings from language servers (rust-analyzer, tsserver, gopls, pyright)".into(),
+            description: "Surface errors and warnings from language servers (rust-analyzer, tsserver, gopls, pyright, jdtls)".into(),
             category: "quality".into(),
             settings: vec![
                 bool_setting("include_warnings", "Include warnings", true),
@@ -376,7 +376,7 @@ const SKIP_DIRS: &[&str] = &[
     ".cache", "coverage", "__pycache__", ".venv", "venv", ".idea", ".vscode", "pkg", "wasm",
 ];
 
-const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "py", "go"];
+const SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "py", "go", "java"];
 
 fn should_skip_dir(name: &str) -> bool {
     SKIP_DIRS.contains(&name) || name.starts_with('.')

@@ -12,6 +12,7 @@ pub enum LanguageKind {
     Rust,
     Python,
     Go,
+    Java,
 }
 
 impl LanguageKind {
@@ -21,6 +22,7 @@ impl LanguageKind {
             Self::Rust => "rust",
             Self::Python => "python",
             Self::Go => "go",
+            Self::Java => "java",
         }
     }
 
@@ -30,6 +32,7 @@ impl LanguageKind {
             Self::Rust => "rust",
             Self::Python => "python",
             Self::Go => "go",
+            Self::Java => "java",
         }
     }
 
@@ -79,6 +82,7 @@ impl LanguageKind {
                     }
                 }
             }),
+            Self::Java => json!({}),
         }
     }
 }
@@ -101,6 +105,7 @@ pub fn file_language(rel_path: &str) -> Option<LanguageKind> {
         "rs" => Some(LanguageKind::Rust),
         "py" => Some(LanguageKind::Python),
         "go" => Some(LanguageKind::Go),
+        "java" => Some(LanguageKind::Java),
         _ => None,
     }
 }
@@ -158,6 +163,7 @@ pub fn probe_language_server(lang: LanguageKind) -> Option<(String, Vec<String>)
         LanguageKind::Rust => find_rust_analyzer(),
         LanguageKind::Python => find_python_server(),
         LanguageKind::Go => find_native_server(&["gopls"], &[]),
+        LanguageKind::Java => find_java_server(),
     }
 }
 
@@ -169,6 +175,7 @@ fn probe_failure_hint(lang: LanguageKind) -> &'static str {
         LanguageKind::Rust => "run `rustup component add rust-analyzer`",
         LanguageKind::Python => "install basedpyright or pyright (npm -g basedpyright)",
         LanguageKind::Go => "install gopls (go install golang.org/x/tools/gopls@latest)",
+        LanguageKind::Java => "install jdtls (brew install jdtls) — requires Java 17+",
     }
 }
 
@@ -421,6 +428,41 @@ fn find_python_server() -> Option<(String, Vec<String>)> {
     find_native_server(&["pylsp"], &[])
 }
 
+/// Eclipse JDT Language Server (`jdtls` wrapper from Homebrew / Mason / manual install).
+fn find_java_server() -> Option<(String, Vec<String>)> {
+    if let Some(inv) = find_native_server(&["jdtls"], &[]) {
+        return Some(inv);
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        for rel in [
+            ".local/share/nvim/mason/bin/jdtls",
+            ".local/bin/jdtls",
+            "bin/jdtls",
+        ] {
+            let path = home.join(rel);
+            if path.is_file() {
+                return Some((path.to_string_lossy().into_owned(), vec![]));
+            }
+        }
+    }
+
+    for abs in [
+        "/opt/homebrew/bin/jdtls",
+        "/usr/local/bin/jdtls",
+        "/opt/homebrew/opt/jdtls/bin/jdtls",
+        "/usr/local/opt/jdtls/bin/jdtls",
+    ] {
+        let path = PathBuf::from(abs);
+        if path.is_file() {
+            return Some((path.to_string_lossy().into_owned(), vec![]));
+        }
+    }
+
+    None
+}
+
 fn resolve_which_any(names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| resolve_which(name))
 }
@@ -448,6 +490,13 @@ fn language_root(project_root: &Path, lang: LanguageKind, files: &[(String, u32)
         LanguageKind::Rust => &["Cargo.toml"],
         LanguageKind::Python => &["pyproject.toml", "setup.cfg", "setup.py"],
         LanguageKind::Go => &["go.mod"],
+        LanguageKind::Java => &[
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "settings.gradle",
+            "settings.gradle.kts",
+        ],
     };
 
     // Prefer nearest marker above the first file of this language
@@ -539,5 +588,15 @@ mod tests {
             "expected Node >={MIN_NODE_MAJOR}, got v{} at {node}",
             ver.0
         );
+    }
+
+    #[test]
+    fn java_extension_maps_to_java_kind() {
+        assert_eq!(file_language("src/Main.java"), Some(LanguageKind::Java));
+        assert_eq!(
+            file_language("com/example/App.java"),
+            Some(LanguageKind::Java)
+        );
+        assert_eq!(file_language("Main.kt"), None);
     }
 }

@@ -549,6 +549,16 @@ function mockLspServers(): LspServerStatus[] {
         },
       ],
     },
+    {
+      id: "java",
+      language: "java",
+      label: "Java",
+      status: "missing",
+      installHint: "brew install jdtls  (requires Java 17+)",
+      settings: shared.map((s) =>
+        s.key === "diagnostic_wait_ms" ? { ...s, default: 2500 } : s,
+      ),
+    },
   ];
 }
 
@@ -814,7 +824,7 @@ function mockRules(): AnalysisRule[] {
       id: "lsp_diagnostics",
       name: "Language Diagnostics",
       description:
-        "Surface errors and warnings from language servers (rust-analyzer, tsserver, gopls, pyright)",
+        "Surface errors and warnings from language servers (rust-analyzer, tsserver, gopls, pyright, jdtls)",
       category: "quality",
       settings: [
         {

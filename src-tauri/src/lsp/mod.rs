@@ -400,8 +400,8 @@ fn spawn_server(
     let client = LspClient::spawn(&spec.command, &spec.args, &root, Box::new(on_diag))?;
     client.initialize(&root_uri, language.init_options_with_settings(cfg))?;
     client.initialized()?;
-    // Give rust-analyzer a moment to start cargo metadata before flooding didOpen.
-    if language == LanguageKind::Rust {
+    // Give rust-analyzer / jdtls a moment to start before flooding didOpen.
+    if language == LanguageKind::Rust || language == LanguageKind::Java {
         std::thread::sleep(Duration::from_millis(400));
     }
 
