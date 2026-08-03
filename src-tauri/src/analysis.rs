@@ -260,6 +260,22 @@ pub fn default_rules() -> Vec<AnalysisRule> {
                 ),
             ],
         },
+        AnalysisRule {
+            id: "gitleaks".into(),
+            name: "Secret Scan (gitleaks)".into(),
+            description: "Scan the repository for hardcoded secrets and credentials using gitleaks".into(),
+            category: "security".into(),
+            settings: vec![
+                bool_setting("enabled", "Run gitleaks during validation", true),
+                num_setting(
+                    "sample_limit",
+                    "Max findings to list",
+                    20,
+                    1,
+                    100,
+                ),
+            ],
+        },
     ];
     rules.extend(crate::agent::ai_validation::rule_definitions());
     rules
@@ -468,6 +484,7 @@ fn run_single_validation_rule(
         "file_size" => run_file_size_check(files, cfg),
         "naming" => run_naming_check(files, cfg),
         "lsp_diagnostics" => run_lsp_diagnostics_check(lsp_diags, cfg),
+        "gitleaks" => crate::gitleaks::run_gitleaks_check(root, cfg),
         _ => ValidationItem {
             rule_id: rule_id.into(),
             rule_name: rule_display_name(rule_id),

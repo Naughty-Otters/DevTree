@@ -6,6 +6,7 @@ mod db;
 mod design_rules;
 mod dsm;
 mod git_metrics;
+mod gitleaks;
 mod hierarchy;
 mod quality;
 mod linter;
@@ -27,6 +28,7 @@ use db::{init_db, DbState};
 use dsm::{compute_dsm, DsmOptions, DsmResult};
 use design_rules::DesignRule;
 use hierarchy::HierarchyIndex;
+use gitleaks::{GitleaksInstallResult, GitleaksStatus};
 use linter::{LinterInstallResult, LinterSettingsMap, LanguageLinterGroup};
 use lsp::{LspInstallResult, LspServerStatus, LspSettingsMap};
 use project::{list_project_children, scan_project, ProjectScan, TreeEntry};
@@ -175,6 +177,18 @@ async fn list_language_linters() -> Vec<LanguageLinterGroup> {
 }
 
 #[tauri::command]
+fn get_gitleaks_status() -> GitleaksStatus {
+    gitleaks::gitleaks_status()
+}
+
+#[tauri::command]
+async fn install_gitleaks() -> Result<GitleaksInstallResult, String> {
+    tauri::async_runtime::spawn_blocking(gitleaks::install_gitleaks)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn install_linter(language_id: String, linter_id: String) -> Result<LinterInstallResult, String> {
     tauri::async_runtime::spawn_blocking(move || linter::install_linter(&language_id, &linter_id))
         .await
@@ -282,6 +296,8 @@ pub fn run() {
             install_lsp_server,
             list_language_linters,
             install_linter,
+            get_gitleaks_status,
+            install_gitleaks,
             schedule::get_analysis_triggers,
             schedule::start_analysis_watch,
             schedule::stop_analysis_watch,

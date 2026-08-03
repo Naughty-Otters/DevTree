@@ -24,6 +24,7 @@ import {
 import { hierarchyFromGraph } from "./graph/hierarchy";
 import type { AnalysisResult, CycleGroup } from "./analysis/types";
 import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
+import { isGitleaksMissingMessage } from "./gitleaks/types";
 import { createAnalysisManager } from "./analysis/manager";
 import type { LlmProviderInfo } from "./agent/types";
 import type { LlmConfiguration, AiValidationRuntimeSettings } from "./validation/aiValidation";
@@ -46,6 +47,8 @@ import {
   listLlmModels,
   listLanguageLinters,
   installLinter,
+  getGitleaksStatus,
+  installGitleaks,
   startAnalysisWatch,
   stopAnalysisWatch,
   startAnalysisSchedule,
@@ -236,6 +239,9 @@ export async function startApp(): Promise<void> {
     expandedRuleId: null,
     loading: true,
     loadError: null,
+    gitleaksStatus: null,
+    gitleaksInstalling: false,
+    gitleaksInstallError: null,
   };
 
   const migratedAi = migratePersistedAiSettings(persisted);
@@ -246,7 +252,76 @@ export async function startApp(): Promise<void> {
     return {
       llmProviders: app.llmProviders,
       llmConfigurations: app.llmConfigurations,
+      onInstallGitleaks: () => installGitleaksTool(),
     };
+  }
+
+  async function refreshGitleaksStatus(): Promise<void> {
+    try {
+      rulesState.gitleaksStatus = await getGitleaksStatus();
+      rulesState.gitleaksInstallError = null;
+    } catch (err) {
+      console.error(err);
+      rulesState.gitleaksInstallError =
+        err instanceof Error ? err.message : String(err);
+    }
+    renderRulesPanel();
+  }
+
+  async function installGitleaksTool(prompt = true): Promise<boolean> {
+    if (rulesState.gitleaksInstalling) return false;
+    if (prompt) {
+      const ok = window.confirm(
+        "Install gitleaks? DevTree will try Homebrew, go install, or another supported package manager.",
+      );
+      if (!ok) return false;
+    }
+    rulesState.gitleaksInstalling = true;
+    rulesState.gitleaksInstallError = null;
+    renderRulesPanel();
+    try {
+      const result = await installGitleaks();
+      rulesState.gitleaksStatus = result.status;
+      if (!result.ok) {
+        rulesState.gitleaksInstallError = result.message;
+        if (prompt) {
+          alert(result.message);
+        }
+        return false;
+      }
+      rulesState.gitleaksInstallError = null;
+      if (prompt) {
+        alert(result.message);
+      }
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      rulesState.gitleaksInstallError = message;
+      if (prompt) {
+        alert(message);
+      }
+      return false;
+    } finally {
+      rulesState.gitleaksInstalling = false;
+      renderRulesPanel();
+    }
+  }
+
+  function offerGitleaksInstall(result: AnalysisResult): void {
+    const item = result.validation.find(
+      (entry) =>
+        entry.rule_id === "gitleaks" && isGitleaksMissingMessage(entry.message),
+    );
+    if (!item || rulesState.gitleaksStatus?.status === "installed") {
+      return;
+    }
+    if (
+      window.confirm(
+        "gitleaks is not installed, so the secret scan could not run. Install gitleaks now?",
+      )
+    ) {
+      void installGitleaksTool(false);
+    }
   }
 
   function renderRulesPanel(): void {
@@ -346,6 +421,13 @@ export async function startApp(): Promise<void> {
       ) {
         selected.add("circular_dependencies");
       }
+      if (
+        persisted.selectedRuleIds.length > 0 &&
+        !selected.has("gitleaks") &&
+        rules.some((r) => r.id === "gitleaks")
+      ) {
+        selected.add("gitleaks");
+      }
 
       rulesState.rules = rules;
       rulesState.selected = selected;
@@ -354,6 +436,7 @@ export async function startApp(): Promise<void> {
       app.selectedRules = rulesState.selected;
       app.ruleSettings = rulesState.settings;
       renderRulesPanel();
+      void refreshGitleaksStatus();
     } catch (err) {
       rulesState.loading = false;
       rulesState.loadError =
@@ -413,6 +496,7 @@ export async function startApp(): Promise<void> {
     onRunCompleted: (run) => {
       if (run.id === analysisManager.getLatestRunId() && run.result) {
         void applyAnalysisResult(run.result);
+        offerGitleaksInstall(run.result);
       }
     },
     onRunFailed: (run) => {
@@ -442,6 +526,7 @@ export async function startApp(): Promise<void> {
       onShowCycleOnGraph: (cycle) => {
         void showCycleOnGraph(cycle);
       },
+      onInstallGitleaks: () => installGitleaksTool(),
       onShowModuleOnGraph: (nodeId) => {
         void showModuleOnGraph(nodeId);
       },

@@ -6,6 +6,7 @@ import {
   type ValidationAffectedEntry,
 } from "../validation/parseAffected";
 import { cycleGroupsFromValidation, cycleKindLabel } from "../validation/cycles";
+import { isGitleaksMissingMessage } from "../gitleaks/types";
 
 export interface ValidationNavTarget {
   file: string;
@@ -17,6 +18,7 @@ export interface ValidationDetailHandlers {
   onOpenFile: (target: ValidationNavTarget) => void;
   onShowOnGraph: (target: ValidationNavTarget) => void;
   onShowCycleOnGraph?: (cycle: CycleGroup) => void;
+  onInstallGitleaks?: () => void | Promise<void>;
   resolveSymbol?: (
     file: string,
     line?: number,
@@ -113,7 +115,25 @@ export function showValidationDetail(
   closeBtn.textContent = "×";
   closeBtn.addEventListener("click", () => hideValidationDetail());
 
-  header.append(titleRow, message, closeBtn);
+  header.append(titleRow, message);
+  if (
+    item.rule_id === "gitleaks" &&
+    isGitleaksMissingMessage(item.message) &&
+    handlers.onInstallGitleaks
+  ) {
+    const installRow = document.createElement("div");
+    installRow.className = "validation-detail-install-row";
+    const installBtn = document.createElement("button");
+    installBtn.type = "button";
+    installBtn.className = "btn btn-ghost";
+    installBtn.textContent = "Install gitleaks";
+    installBtn.addEventListener("click", () => {
+      void handlers.onInstallGitleaks?.();
+    });
+    installRow.appendChild(installBtn);
+    header.appendChild(installRow);
+  }
+  header.appendChild(closeBtn);
 
   const body = document.createElement("div");
   body.className = "validation-detail-body scrollable";

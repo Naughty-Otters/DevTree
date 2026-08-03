@@ -12,6 +12,7 @@ import {
   shouldShowAiRuleSetting,
 } from "../validation/aiValidation";
 import type { LlmProviderInfo } from "../agent/types";
+import type { GitleaksStatus } from "../gitleaks/types";
 import { effectiveLlmModel } from "../validation/llmCatalog";
 import { createLlmConfigurationPicker } from "./llmConfigurationPicker";
 import { lucideIcon } from "./icons";
@@ -27,11 +28,15 @@ export interface RulesPanelState {
   /** True while analysis rules are loading from the backend. */
   loading?: boolean;
   loadError?: string | null;
+  gitleaksStatus?: GitleaksStatus | null;
+  gitleaksInstalling?: boolean;
+  gitleaksInstallError?: string | null;
 }
 
 export interface RulesPanelContext {
   llmProviders: LlmProviderInfo[];
   llmConfigurations: LlmConfiguration[];
+  onInstallGitleaks?: () => void | Promise<void>;
 }
 
 export function createRulesPanel(
@@ -240,6 +245,10 @@ function ruleItem(
     const settingsEl = document.createElement("div");
     settingsEl.className = "rule-settings";
 
+    if (rule.id === "gitleaks") {
+      appendGitleaksTooling(rule, state, settingsEl, context);
+    }
+
     if (isAiValidationRuleId(rule.id) && context) {
       const hint = document.createElement("p");
       hint.className = "rule-settings-hint";
@@ -363,6 +372,51 @@ function ruleItem(
   }
 
   return wrap;
+}
+
+function appendGitleaksTooling(
+  rule: AnalysisRule,
+  state: RulesPanelState,
+  settingsEl: HTMLElement,
+  context?: RulesPanelContext,
+): void {
+  const status = state.gitleaksStatus;
+  const hint = document.createElement("p");
+  hint.className = "rule-settings-hint";
+  if (status?.status === "installed") {
+    hint.textContent = status.command
+      ? `gitleaks is ready (${status.command})`
+      : "gitleaks is ready";
+  } else if (status?.status === "missing") {
+    hint.className = "rule-settings-hint settings-hint-warn";
+    hint.textContent = `gitleaks is not installed. ${status.installHint}`;
+  } else {
+    hint.textContent = "Checking gitleaks installation…";
+  }
+  settingsEl.appendChild(hint);
+
+  if (status?.status === "missing" && context?.onInstallGitleaks) {
+    const actions = document.createElement("div");
+    actions.className = "rule-gitleaks-actions";
+
+    const install = document.createElement("button");
+    install.type = "button";
+    install.className = "btn btn-ghost";
+    install.disabled = Boolean(state.gitleaksInstalling);
+    install.textContent = state.gitleaksInstalling ? "Installing…" : "Install gitleaks";
+    install.addEventListener("click", () => {
+      void context.onInstallGitleaks?.();
+    });
+    actions.appendChild(install);
+    settingsEl.appendChild(actions);
+  }
+
+  if (state.gitleaksInstallError) {
+    const err = document.createElement("p");
+    err.className = "rule-settings-hint settings-hint-warn";
+    err.textContent = state.gitleaksInstallError;
+    settingsEl.appendChild(err);
+  }
 }
 
 function settingControl(

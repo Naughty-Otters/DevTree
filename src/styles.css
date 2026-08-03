@@ -3170,6 +3170,12 @@ body.is-resizing-v {
   line-height: 1.4;
 }
 
+.rule-gitleaks-actions {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
 .rule-setting-select,
 .rule-setting-text {
   min-width: 120px;
@@ -4538,6 +4544,10 @@ body.is-resizing-v {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.validation-detail-install-row {
+  margin-top: 8px;
 }
 
 .validation-detail-close {

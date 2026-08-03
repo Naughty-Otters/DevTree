@@ -261,6 +261,7 @@ export function cleanCodePrincipleSettingDefs(): RuleSettingDef[] {
 
 export function aiRuleCategoryLabel(category: string): string {
   if (category === "ai") return "AI Validation";
+  if (category === "security") return "Security";
   return category;
 }
 

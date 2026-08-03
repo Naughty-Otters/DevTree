@@ -18,6 +18,7 @@ import type {
   LinterInstallResult,
   LinterSettingsMap,
 } from "../linter/types";
+import type { GitleaksInstallResult, GitleaksStatus } from "../gitleaks/types";
 import type {
   LlmConfiguration,
   AiValidationRuntimeSettings,
@@ -139,6 +140,32 @@ export async function installLspServer(id: string): Promise<LspInstallResult> {
       label: id,
       status: "missing",
       installHint: "",
+    },
+  };
+}
+
+export async function getGitleaksStatus(): Promise<GitleaksStatus> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<GitleaksStatus>("get_gitleaks_status");
+  }
+  return {
+    status: "missing",
+    installHint: "brew install gitleaks",
+  };
+}
+
+export async function installGitleaks(): Promise<GitleaksInstallResult> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<GitleaksInstallResult>("install_gitleaks");
+  }
+  return {
+    ok: false,
+    message: "gitleaks install requires the DevTree desktop app.",
+    status: {
+      status: "missing",
+      installHint: "brew install gitleaks",
     },
   };
 }
@@ -783,6 +810,29 @@ function mockRules(): AnalysisRule[] {
       ],
     },
     {
+      id: "gitleaks",
+      name: "Secret Scan (gitleaks)",
+      description:
+        "Scan the repository for hardcoded secrets and credentials using gitleaks",
+      category: "security",
+      settings: [
+        {
+          key: "enabled",
+          label: "Run gitleaks during validation",
+          kind: "boolean",
+          default: true,
+        },
+        {
+          key: "sample_limit",
+          label: "Max findings to list",
+          kind: "number",
+          default: 20,
+          min: 1,
+          max: 100,
+        },
+      ],
+    },
+    {
       id: "ai_architecture",
       name: "AI Architecture Review",
       description:
@@ -907,6 +957,7 @@ async function mockAnalysis(
     naming: "Naming Conventions",
     language_linters: "Language Linters",
     lsp_diagnostics: "Language Diagnostics",
+    gitleaks: "Secret Scan (gitleaks)",
   };
   const ruleTasks: RuleTaskProgress[] = rules.map((id) => ({
     ruleId: id,
@@ -992,6 +1043,7 @@ async function mockAnalysis(
       file_size: "File Size",
       naming: "Naming Conventions",
       lsp_diagnostics: "Language Diagnostics",
+      gitleaks: "Secret Scan (gitleaks)",
     };
     return [
       {
