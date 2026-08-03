@@ -54,6 +54,7 @@ export interface ResultsPanelHandlers {
   onShowValidationOnGraph?: ValidationDetailHandlers["onShowOnGraph"];
   onShowCycleOnGraph?: ValidationDetailHandlers["onShowCycleOnGraph"];
   onInstallGitleaks?: ValidationDetailHandlers["onInstallGitleaks"];
+  onInstallTrufflehog?: ValidationDetailHandlers["onInstallTrufflehog"];
   onShowModuleOnGraph?: AnalysisDetailHandlers["onShowModuleOnGraph"];
   onOpenModuleFile?: AnalysisDetailHandlers["onOpenModuleFile"];
   onShowDependencyOnGraph?: AnalysisDetailHandlers["onShowDependencyOnGraph"];
@@ -1004,6 +1005,7 @@ function renderAnalysisTab(
     onShowOnGraph: (target) => handlers.onShowValidationOnGraph?.(target),
     onShowCycleOnGraph: (cycle) => handlers.onShowCycleOnGraph?.(cycle),
     onInstallGitleaks: () => handlers.onInstallGitleaks?.(),
+    onInstallTrufflehog: () => handlers.onInstallTrufflehog?.(),
     resolveSymbol: (file, line) => {
       const hierarchy = handlers.getHierarchy?.() ?? null;
       if (!hierarchy || line == null) return undefined;
@@ -1717,6 +1719,9 @@ function renderValidationTab(
           },
           onInstallGitleaks: () => {
             handlers.onInstallGitleaks?.();
+          },
+          onInstallTrufflehog: () => {
+            handlers.onInstallTrufflehog?.();
           },
           resolveSymbol: (file, line) => {
             if (!hierarchy || line == null) return undefined;

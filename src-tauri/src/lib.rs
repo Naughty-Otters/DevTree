@@ -13,6 +13,7 @@ mod linter;
 mod lsp;
 mod project;
 mod schedule;
+mod trufflehog;
 #[cfg(target_os = "macos")]
 mod tray;
 
@@ -33,6 +34,7 @@ use linter::{LinterInstallResult, LinterSettingsMap, LanguageLinterGroup};
 use lsp::{LspInstallResult, LspServerStatus, LspSettingsMap};
 use project::{list_project_children, scan_project, ProjectScan, TreeEntry};
 use schedule::AnalysisTriggerState;
+use trufflehog::{TrufflehogInstallResult, TrufflehogStatus};
 use tauri::ipc::Channel;
 
 #[tauri::command]
@@ -189,6 +191,18 @@ async fn install_gitleaks() -> Result<GitleaksInstallResult, String> {
 }
 
 #[tauri::command]
+fn get_trufflehog_status() -> TrufflehogStatus {
+    trufflehog::trufflehog_status()
+}
+
+#[tauri::command]
+async fn install_trufflehog() -> Result<TrufflehogInstallResult, String> {
+    tauri::async_runtime::spawn_blocking(trufflehog::install_trufflehog)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn install_linter(language_id: String, linter_id: String) -> Result<LinterInstallResult, String> {
     tauri::async_runtime::spawn_blocking(move || linter::install_linter(&language_id, &linter_id))
         .await
@@ -298,6 +312,8 @@ pub fn run() {
             install_linter,
             get_gitleaks_status,
             install_gitleaks,
+            get_trufflehog_status,
+            install_trufflehog,
             schedule::get_analysis_triggers,
             schedule::start_analysis_watch,
             schedule::stop_analysis_watch,

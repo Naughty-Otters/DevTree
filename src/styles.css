@@ -592,6 +592,46 @@ body.is-resizing-v {
   gap: 8px;
 }
 
+.modal-dialog-report {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(420px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 16px;
+  overflow: hidden;
+}
+
+.message-dialog-title-success {
+  color: var(--success);
+}
+
+.message-dialog-title-error {
+  color: var(--danger);
+}
+
+.message-dialog-output {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 260px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.modal-dialog-report .modal-actions {
+  flex-shrink: 0;
+  margin-top: 0;
+}
+
 .btn-ghost-modal {
   background: transparent;
   border: 1px solid var(--border);
@@ -606,7 +646,7 @@ body.is-resizing-v {
 
 /* ── Setup wizard ── */
 .setup-wizard {
-  width: min(520px, calc(100vw - 32px));
+  width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
@@ -655,7 +695,7 @@ body.is-resizing-v {
 }
 
 .setup-wizard-step-label {
-  max-width: 88px;
+  max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -708,6 +748,14 @@ body.is-resizing-v {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.setup-wizard-secret-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .setup-wizard-lsp-list {

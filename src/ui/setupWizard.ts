@@ -1,5 +1,10 @@
 import type { LlmProviderId, LlmProviderInfo } from "../agent/types";
 import type { LspInstallResult, LspServerStatus, LspSettingsMap } from "../lsp/types";
+import type { GitleaksInstallResult, GitleaksStatus } from "../gitleaks/types";
+import type {
+  TrufflehogInstallResult,
+  TrufflehogStatus,
+} from "../trufflehog/types";
 import type { LlmConfiguration } from "../validation/aiValidation";
 import {
   configuredLlmConfigurations,
@@ -10,7 +15,7 @@ import {
 import { createLlmConfigFields } from "./llmConfigFields";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 
-export type SetupWizardStep = 0 | 1 | 2 | 3;
+export type SetupWizardStep = 0 | 1 | 2 | 3 | 4;
 
 export type SetupWizardResult =
   | { action: "done" }
@@ -21,6 +26,8 @@ export interface SetupWizardSummary {
   projectPath: string | null;
   lspInstalled: number;
   lspTotal: number;
+  secretScannersInstalled: number;
+  secretScannersTotal: number;
   llmReady: boolean;
   llmLabel: string | null;
 }
@@ -32,6 +39,12 @@ export interface SetupWizardDeps {
   installLspServer: (id: string) => Promise<LspInstallResult>;
   getLspSettings: () => LspSettingsMap;
   setLspSettings: (settings: LspSettingsMap) => void;
+  getGitleaksStatus: () => Promise<GitleaksStatus>;
+  installGitleaks: () => Promise<GitleaksInstallResult>;
+  getTrufflehogStatus: () => Promise<TrufflehogStatus>;
+  installTrufflehog: () => Promise<TrufflehogInstallResult>;
+  /** Called after a secret scanner installs successfully (enable rules, refresh UI). */
+  onSecretScannerInstalled?: (id: "gitleaks" | "trufflehog") => void;
   getLlmProviders: () => LlmProviderInfo[];
   listLlmModels: (provider: LlmProviderId, apiKey: string) => Promise<string[]>;
   getLlmConfigurations: () => LlmConfiguration[];
@@ -41,9 +54,25 @@ export interface SetupWizardDeps {
 export const SETUP_WIZARD_STEPS = [
   { id: 0 as const, title: "Open a project", subtitle: "Choose the folder DevTree should analyze." },
   { id: 1 as const, title: "Language servers", subtitle: "Optional — analysis falls back to heuristics if missing." },
-  { id: 2 as const, title: "LLM configuration", subtitle: "Optional — needed only for AI validation rules." },
-  { id: 3 as const, title: "You're ready", subtitle: "Review setup, then run analysis or finish." },
+  {
+    id: 2 as const,
+    title: "Secret scanners",
+    subtitle: "Optional — install gitleaks and TruffleHog for secret scanning rules.",
+  },
+  { id: 3 as const, title: "LLM configuration", subtitle: "Optional — needed only for AI validation rules." },
+  { id: 4 as const, title: "You're ready", subtitle: "Review setup, then run analysis or finish." },
 ] as const;
+
+type SecretScannerId = "gitleaks" | "trufflehog";
+
+interface SecretScannerRow {
+  id: SecretScannerId;
+  label: string;
+  description: string;
+  status: "installed" | "missing" | "unknown";
+  detail: string;
+  error?: string;
+}
 
 export function canAdvanceFromProject(projectPath: string | null): boolean {
   return Boolean(projectPath && projectPath.trim());
@@ -52,15 +81,25 @@ export function canAdvanceFromProject(projectPath: string | null): boolean {
 export function buildSetupWizardSummary(input: {
   projectPath: string | null;
   servers: LspServerStatus[];
+  gitleaks?: GitleaksStatus | null;
+  trufflehog?: TrufflehogStatus | null;
   configs: LlmConfiguration[];
 }): SetupWizardSummary {
   const installed = input.servers.filter((s) => s.status === "installed").length;
+  const secrets: Array<GitleaksStatus | TrufflehogStatus | null | undefined> = [
+    input.gitleaks,
+    input.trufflehog,
+  ];
+  const secretTotal = 2;
+  const secretInstalled = secrets.filter((s) => s?.status === "installed").length;
   const ready = configuredLlmConfigurations(input.configs);
   const global = ready.find((c) => c.isGlobal) ?? ready[0];
   return {
     projectPath: input.projectPath,
     lspInstalled: installed,
     lspTotal: input.servers.length,
+    secretScannersInstalled: secretInstalled,
+    secretScannersTotal: secretTotal,
     llmReady: ready.length > 0,
     llmLabel: global
       ? `${global.name || global.provider}${global.model ? ` · ${global.model}` : ""}`
@@ -75,6 +114,11 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
     let lspLoading = false;
     let installingId: string | null = null;
     let lspErrors: Record<string, string> = {};
+    let gitleaksStatus: GitleaksStatus | null = null;
+    let trufflehogStatus: TrufflehogStatus | null = null;
+    let secretsLoading = false;
+    let secretsLoaded = false;
+    let secretErrors: Partial<Record<SecretScannerId | "_", string>> = {};
     let models: string[] = [];
     let modelsLoading = false;
     let modelsError: string | null = null;
@@ -151,7 +195,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
         close({ action: "dismissed" });
         return;
       }
-      if (step === 3) {
+      if (step === 4) {
         close({ action: "done" });
         return;
       }
@@ -161,10 +205,10 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
 
     nextBtn.addEventListener("click", () => {
       if (step === 0 && !canAdvanceFromProject(deps.getProjectPath())) return;
-      if (step === 2) {
+      if (step === 3) {
         persistDraftConfig();
       }
-      if (step < 3) {
+      if (step < 4) {
         step = (step + 1) as SetupWizardStep;
         void render();
         return;
@@ -227,6 +271,94 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       }
     }
 
+    async function loadSecretScanners(): Promise<void> {
+      if (secretsLoading) return;
+      secretsLoading = true;
+      renderBody();
+      try {
+        const [gitleaks, trufflehog] = await Promise.all([
+          deps.getGitleaksStatus(),
+          deps.getTrufflehogStatus(),
+        ]);
+        gitleaksStatus = gitleaks;
+        trufflehogStatus = trufflehog;
+        secretErrors = {};
+        secretsLoaded = true;
+      } catch (err) {
+        secretErrors = {
+          _: err instanceof Error ? err.message : String(err),
+        };
+      } finally {
+        secretsLoading = false;
+        renderBody();
+        updateChrome();
+      }
+    }
+
+    async function installSecretScanner(id: SecretScannerId): Promise<void> {
+      installingId = id;
+      delete secretErrors[id];
+      renderBody();
+      try {
+        const result =
+          id === "gitleaks"
+            ? await deps.installGitleaks()
+            : await deps.installTrufflehog();
+        if (id === "gitleaks") {
+          gitleaksStatus = result.status;
+        } else {
+          trufflehogStatus = result.status;
+        }
+        if (!result.ok) {
+          secretErrors[id] = result.message;
+        } else {
+          deps.onSecretScannerInstalled?.(id);
+        }
+      } catch (err) {
+        secretErrors[id] = err instanceof Error ? err.message : String(err);
+      } finally {
+        installingId = null;
+        renderBody();
+        updateChrome();
+      }
+    }
+
+    async function installMissingSecretScanners(): Promise<void> {
+      const missing = secretScannerRows()
+        .filter((row) => row.status !== "installed")
+        .map((row) => row.id);
+      for (const id of missing) {
+        await installSecretScanner(id);
+      }
+    }
+
+    function secretScannerRows(): SecretScannerRow[] {
+      return [
+        {
+          id: "gitleaks",
+          label: "gitleaks",
+          description: "Fast local secret scan (Secret Scan · gitleaks)",
+          status: gitleaksStatus?.status ?? "unknown",
+          detail:
+            gitleaksStatus?.status === "installed"
+              ? gitleaksStatus.command || "Installed"
+              : gitleaksStatus?.installHint || "Not checked yet",
+          error: secretErrors.gitleaks,
+        },
+        {
+          id: "trufflehog",
+          label: "TruffleHog",
+          description: "Deep secret detection (Secret Scan · TruffleHog)",
+          status: trufflehogStatus?.status ?? "unknown",
+          detail:
+            trufflehogStatus?.status === "installed"
+              ? trufflehogStatus.command || "Installed"
+              : trufflehogStatus?.installHint || "Not checked yet",
+          error: secretErrors.trufflehog,
+        },
+      ];
+    }
+
     async function refreshModels(): Promise<void> {
       if (!draftConfig.provider || !draftConfig.apiKey.trim()) {
         models = [];
@@ -279,7 +411,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
         nextBtn.textContent = "Next";
         nextBtn.dataset.action = "next";
         nextBtn.disabled = !canAdvanceFromProject(deps.getProjectPath());
-      } else if (step === 3) {
+      } else if (step === 4) {
         const hasProject = canAdvanceFromProject(deps.getProjectPath());
         nextBtn.textContent = hasProject ? "Run analysis" : "Done";
         nextBtn.dataset.action = hasProject ? "run" : "done";
@@ -304,7 +436,8 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       body.replaceChildren();
       if (step === 0) renderProjectStep();
       else if (step === 1) renderLspStep();
-      else if (step === 2) renderLlmStep();
+      else if (step === 2) renderSecretScannersStep();
+      else if (step === 3) renderLlmStep();
       else renderSummaryStep();
     }
 
@@ -433,6 +566,110 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       return row;
     }
 
+    function renderSecretScannersStep(): void {
+      const header = document.createElement("div");
+      header.className = "setup-wizard-lsp-header";
+
+      const note = document.createElement("p");
+      note.className = "setup-wizard-copy";
+      note.textContent =
+        "Install secret scanners used by Security rules. DevTree will try Homebrew, go install, or another supported package manager.";
+
+      const actionsRow = document.createElement("div");
+      actionsRow.className = "setup-wizard-secret-actions";
+
+      const refresh = document.createElement("button");
+      refresh.type = "button";
+      refresh.className = "btn-text";
+      refresh.textContent = "Refresh";
+      refresh.disabled = secretsLoading || installingId != null;
+      refresh.addEventListener("click", () => {
+        void loadSecretScanners();
+      });
+
+      const installAll = document.createElement("button");
+      installAll.type = "button";
+      installAll.className = "btn btn-ghost";
+      const missingCount = secretScannerRows().filter(
+        (row) => row.status !== "installed",
+      ).length;
+      installAll.textContent =
+        installingId != null ? "Installing…" : "Install missing";
+      installAll.disabled =
+        secretsLoading || installingId != null || missingCount === 0;
+      installAll.addEventListener("click", () => {
+        void installMissingSecretScanners();
+      });
+
+      actionsRow.append(refresh, installAll);
+      header.append(note, actionsRow);
+      body.appendChild(header);
+
+      const list = document.createElement("div");
+      list.className = "setup-wizard-lsp-list";
+
+      if (secretErrors._) {
+        const err = document.createElement("div");
+        err.className = "setup-wizard-error";
+        err.textContent = secretErrors._;
+        list.appendChild(err);
+      }
+
+      if (secretsLoading && !secretsLoaded) {
+        list.appendChild(
+          createLoadingPlaceholder({
+            title: "Checking secret scanners…",
+            size: "panel",
+          }),
+        );
+      } else {
+        for (const row of secretScannerRows()) {
+          list.appendChild(secretScannerRow(row));
+        }
+      }
+      body.appendChild(list);
+    }
+
+    function secretScannerRow(scanner: SecretScannerRow): HTMLElement {
+      const row = document.createElement("div");
+      row.className = "setup-wizard-lsp-row";
+
+      const info = document.createElement("div");
+      info.className = "setup-wizard-lsp-info";
+      const name = document.createElement("div");
+      name.className = "setup-wizard-lsp-name";
+      name.textContent = scanner.label;
+      const meta = document.createElement("div");
+      meta.className = "setup-wizard-lsp-meta";
+      meta.textContent = `${scanner.description} · ${scanner.detail}`;
+      info.append(name, meta);
+
+      if (scanner.error) {
+        const err = document.createElement("div");
+        err.className = "setup-wizard-error";
+        err.textContent = scanner.error;
+        info.appendChild(err);
+      }
+
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "btn btn-ghost";
+      if (scanner.status === "installed") {
+        action.textContent = "Installed";
+        action.disabled = true;
+      } else {
+        action.textContent =
+          installingId === scanner.id ? "Installing…" : "Install";
+        action.disabled = installingId != null || secretsLoading;
+        action.addEventListener("click", () => {
+          void installSecretScanner(scanner.id);
+        });
+      }
+
+      row.append(info, action);
+      return row;
+    }
+
     function renderLlmStep(): void {
       const copy = document.createElement("p");
       copy.className = "setup-wizard-copy";
@@ -493,6 +730,8 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       const summary = buildSetupWizardSummary({
         projectPath: deps.getProjectPath(),
         servers,
+        gitleaks: gitleaksStatus,
+        trufflehog: trufflehogStatus,
         configs: deps.getLlmConfigurations(),
       });
 
@@ -517,6 +756,15 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       );
       list.appendChild(
         checklistItem(
+          summary.secretScannersInstalled > 0 || !secretsLoaded,
+          "Secret scanners",
+          !secretsLoaded
+            ? "Not checked yet (optional)"
+            : `${summary.secretScannersInstalled} of ${summary.secretScannersTotal} installed`,
+        ),
+      );
+      list.appendChild(
+        checklistItem(
           summary.llmReady,
           "LLM",
           summary.llmReady
@@ -528,7 +776,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       const tip = document.createElement("p");
       tip.className = "setup-wizard-copy";
       tip.textContent = summary.projectPath
-        ? "You can change LSP and LLM settings anytime from the Settings panel."
+        ? "You can change LSP, secret scanners, and LLM settings anytime from the Settings panel."
         : "Open a project from the toolbar when you are ready to analyze code.";
 
       body.append(list, tip);
@@ -562,7 +810,10 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       if (step === 1 && servers.length === 0 && !lspLoading) {
         await loadLsp();
       }
-      if (step === 2 && draftConfig.apiKey.trim() && models.length === 0 && !modelsLoading) {
+      if (step === 2 && !secretsLoaded && !secretsLoading) {
+        await loadSecretScanners();
+      }
+      if (step === 3 && draftConfig.apiKey.trim() && models.length === 0 && !modelsLoading) {
         await refreshModels();
       }
       requestAnimationFrame(() => nextBtn.focus());

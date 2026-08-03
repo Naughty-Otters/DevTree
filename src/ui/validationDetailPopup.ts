@@ -7,6 +7,7 @@ import {
 } from "../validation/parseAffected";
 import { cycleGroupsFromValidation, cycleKindLabel } from "../validation/cycles";
 import { isGitleaksMissingMessage } from "../gitleaks/types";
+import { isTrufflehogMissingMessage } from "../trufflehog/types";
 
 export interface ValidationNavTarget {
   file: string;
@@ -19,6 +20,7 @@ export interface ValidationDetailHandlers {
   onShowOnGraph: (target: ValidationNavTarget) => void;
   onShowCycleOnGraph?: (cycle: CycleGroup) => void;
   onInstallGitleaks?: () => void | Promise<void>;
+  onInstallTrufflehog?: () => void | Promise<void>;
   resolveSymbol?: (
     file: string,
     line?: number,
@@ -129,6 +131,23 @@ export function showValidationDetail(
     installBtn.textContent = "Install gitleaks";
     installBtn.addEventListener("click", () => {
       void handlers.onInstallGitleaks?.();
+    });
+    installRow.appendChild(installBtn);
+    header.appendChild(installRow);
+  }
+  if (
+    item.rule_id === "trufflehog" &&
+    isTrufflehogMissingMessage(item.message) &&
+    handlers.onInstallTrufflehog
+  ) {
+    const installRow = document.createElement("div");
+    installRow.className = "validation-detail-install-row";
+    const installBtn = document.createElement("button");
+    installBtn.type = "button";
+    installBtn.className = "btn btn-ghost";
+    installBtn.textContent = "Install trufflehog";
+    installBtn.addEventListener("click", () => {
+      void handlers.onInstallTrufflehog?.();
     });
     installRow.appendChild(installBtn);
     header.appendChild(installRow);

@@ -13,6 +13,7 @@ import {
 } from "../validation/aiValidation";
 import type { LlmProviderInfo } from "../agent/types";
 import type { GitleaksStatus } from "../gitleaks/types";
+import type { TrufflehogStatus } from "../trufflehog/types";
 import { effectiveLlmModel } from "../validation/llmCatalog";
 import { createLlmConfigurationPicker } from "./llmConfigurationPicker";
 import { lucideIcon } from "./icons";
@@ -31,12 +32,16 @@ export interface RulesPanelState {
   gitleaksStatus?: GitleaksStatus | null;
   gitleaksInstalling?: boolean;
   gitleaksInstallError?: string | null;
+  trufflehogStatus?: TrufflehogStatus | null;
+  trufflehogInstalling?: boolean;
+  trufflehogInstallError?: string | null;
 }
 
 export interface RulesPanelContext {
   llmProviders: LlmProviderInfo[];
   llmConfigurations: LlmConfiguration[];
   onInstallGitleaks?: () => void | Promise<void>;
+  onInstallTrufflehog?: () => void | Promise<void>;
 }
 
 export function createRulesPanel(
@@ -248,6 +253,9 @@ function ruleItem(
     if (rule.id === "gitleaks") {
       appendGitleaksTooling(rule, state, settingsEl, context);
     }
+    if (rule.id === "trufflehog") {
+      appendTrufflehogTooling(rule, state, settingsEl, context);
+    }
 
     if (isAiValidationRuleId(rule.id) && context) {
       const hint = document.createElement("p");
@@ -415,6 +423,53 @@ function appendGitleaksTooling(
     const err = document.createElement("p");
     err.className = "rule-settings-hint settings-hint-warn";
     err.textContent = state.gitleaksInstallError;
+    settingsEl.appendChild(err);
+  }
+}
+
+function appendTrufflehogTooling(
+  _rule: AnalysisRule,
+  state: RulesPanelState,
+  settingsEl: HTMLElement,
+  context?: RulesPanelContext,
+): void {
+  const status = state.trufflehogStatus;
+  const hint = document.createElement("p");
+  hint.className = "rule-settings-hint";
+  if (status?.status === "installed") {
+    hint.textContent = status.command
+      ? `trufflehog is ready (${status.command})`
+      : "trufflehog is ready";
+  } else if (status?.status === "missing") {
+    hint.className = "rule-settings-hint settings-hint-warn";
+    hint.textContent = `trufflehog is not installed. ${status.installHint}`;
+  } else {
+    hint.textContent = "Checking trufflehog installation…";
+  }
+  settingsEl.appendChild(hint);
+
+  if (status?.status === "missing" && context?.onInstallTrufflehog) {
+    const actions = document.createElement("div");
+    actions.className = "rule-gitleaks-actions";
+
+    const install = document.createElement("button");
+    install.type = "button";
+    install.className = "btn btn-ghost";
+    install.disabled = Boolean(state.trufflehogInstalling);
+    install.textContent = state.trufflehogInstalling
+      ? "Installing…"
+      : "Install trufflehog";
+    install.addEventListener("click", () => {
+      void context.onInstallTrufflehog?.();
+    });
+    actions.appendChild(install);
+    settingsEl.appendChild(actions);
+  }
+
+  if (state.trufflehogInstallError) {
+    const err = document.createElement("p");
+    err.className = "rule-settings-hint settings-hint-warn";
+    err.textContent = state.trufflehogInstallError;
     settingsEl.appendChild(err);
   }
 }

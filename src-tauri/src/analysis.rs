@@ -276,6 +276,32 @@ pub fn default_rules() -> Vec<AnalysisRule> {
                 ),
             ],
         },
+        AnalysisRule {
+            id: "trufflehog".into(),
+            name: "Secret Scan (TruffleHog)".into(),
+            description: "Scan the repository for secrets and credentials using TruffleHog".into(),
+            category: "security".into(),
+            settings: vec![
+                bool_setting("enabled", "Run TruffleHog during validation", true),
+                bool_setting(
+                    "verify",
+                    "Verify findings against live APIs (slower)",
+                    false,
+                ),
+                bool_setting(
+                    "only_verified",
+                    "Only report verified findings",
+                    false,
+                ),
+                num_setting(
+                    "sample_limit",
+                    "Max findings to list",
+                    20,
+                    1,
+                    100,
+                ),
+            ],
+        },
     ];
     rules.extend(crate::agent::ai_validation::rule_definitions());
     rules
@@ -485,6 +511,7 @@ fn run_single_validation_rule(
         "naming" => run_naming_check(files, cfg),
         "lsp_diagnostics" => run_lsp_diagnostics_check(lsp_diags, cfg),
         "gitleaks" => crate::gitleaks::run_gitleaks_check(root, cfg),
+        "trufflehog" => crate::trufflehog::run_trufflehog_check(root, cfg),
         _ => ValidationItem {
             rule_id: rule_id.into(),
             rule_name: rule_display_name(rule_id),

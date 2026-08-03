@@ -25,6 +25,7 @@ import { hierarchyFromGraph } from "./graph/hierarchy";
 import type { AnalysisResult, CycleGroup } from "./analysis/types";
 import { mergeRuleSettings, type RuleSettingsMap } from "./analysis/types";
 import { isGitleaksMissingMessage } from "./gitleaks/types";
+import { isTrufflehogMissingMessage } from "./trufflehog/types";
 import { createAnalysisManager } from "./analysis/manager";
 import type { LlmProviderInfo } from "./agent/types";
 import type { LlmConfiguration, AiValidationRuntimeSettings } from "./validation/aiValidation";
@@ -49,6 +50,8 @@ import {
   installLinter,
   getGitleaksStatus,
   installGitleaks,
+  getTrufflehogStatus,
+  installTrufflehog,
   startAnalysisWatch,
   stopAnalysisWatch,
   startAnalysisSchedule,
@@ -84,6 +87,7 @@ import { mountToolbarIcons } from "./ui/toolbar";
 import { createSettingsPanel } from "./ui/settingsPanel";
 import { initResizers } from "./ui/resizer";
 import { showAnalysisDialog } from "./ui/analysisDialog";
+import { showMessageDialog, splitInstallReport } from "./ui/messageDialog";
 import { hideFlowOverlay, renderFlowOverlay } from "./ui/flowOverlay";
 import { showSetupWizard } from "./ui/setupWizard";
 import {
@@ -242,6 +246,9 @@ export async function startApp(): Promise<void> {
     gitleaksStatus: null,
     gitleaksInstalling: false,
     gitleaksInstallError: null,
+    trufflehogStatus: null,
+    trufflehogInstalling: false,
+    trufflehogInstallError: null,
   };
 
   const migratedAi = migratePersistedAiSettings(persisted);
@@ -255,6 +262,9 @@ export async function startApp(): Promise<void> {
       onInstallGitleaks: () => {
         void installGitleaksTool();
       },
+      onInstallTrufflehog: () => {
+        void installTrufflehogTool();
+      },
     };
   }
 
@@ -265,6 +275,18 @@ export async function startApp(): Promise<void> {
     } catch (err) {
       console.error(err);
       rulesState.gitleaksInstallError =
+        err instanceof Error ? err.message : String(err);
+    }
+    renderRulesPanel();
+  }
+
+  async function refreshTrufflehogStatus(): Promise<void> {
+    try {
+      rulesState.trufflehogStatus = await getTrufflehogStatus();
+      rulesState.trufflehogInstallError = null;
+    } catch (err) {
+      console.error(err);
+      rulesState.trufflehogInstallError =
         err instanceof Error ? err.message : String(err);
     }
     renderRulesPanel();
@@ -287,26 +309,74 @@ export async function startApp(): Promise<void> {
       if (!result.ok) {
         rulesState.gitleaksInstallError = result.message;
         if (prompt) {
-          alert(result.message);
+          await showInstallReport("gitleaks install failed", result.message, "error");
         }
         return false;
       }
       rulesState.gitleaksInstallError = null;
       if (prompt) {
-        alert(result.message);
+        await showInstallReport("gitleaks installed", result.message, "success");
       }
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       rulesState.gitleaksInstallError = message;
       if (prompt) {
-        alert(message);
+        await showInstallReport("gitleaks install failed", message, "error");
       }
       return false;
     } finally {
       rulesState.gitleaksInstalling = false;
       renderRulesPanel();
     }
+  }
+
+  async function installTrufflehogTool(prompt = true): Promise<boolean> {
+    if (rulesState.trufflehogInstalling) return false;
+    if (prompt) {
+      const ok = window.confirm(
+        "Install TruffleHog? DevTree will try Homebrew, go install, or another supported package manager.",
+      );
+      if (!ok) return false;
+    }
+    rulesState.trufflehogInstalling = true;
+    rulesState.trufflehogInstallError = null;
+    renderRulesPanel();
+    try {
+      const result = await installTrufflehog();
+      rulesState.trufflehogStatus = result.status;
+      if (!result.ok) {
+        rulesState.trufflehogInstallError = result.message;
+        if (prompt) {
+          await showInstallReport("trufflehog install failed", result.message, "error");
+        }
+        return false;
+      }
+      rulesState.trufflehogInstallError = null;
+      if (prompt) {
+        await showInstallReport("trufflehog installed", result.message, "success");
+      }
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      rulesState.trufflehogInstallError = message;
+      if (prompt) {
+        await showInstallReport("trufflehog install failed", message, "error");
+      }
+      return false;
+    } finally {
+      rulesState.trufflehogInstalling = false;
+      renderRulesPanel();
+    }
+  }
+
+  async function showInstallReport(
+    title: string,
+    message: string,
+    tone: "success" | "error",
+  ): Promise<void> {
+    const { summary, body } = splitInstallReport(message);
+    await showMessageDialog({ title, summary, body, tone });
   }
 
   function offerGitleaksInstall(result: AnalysisResult): void {
@@ -323,6 +393,24 @@ export async function startApp(): Promise<void> {
       )
     ) {
       void installGitleaksTool(false);
+    }
+  }
+
+  function offerTrufflehogInstall(result: AnalysisResult): void {
+    const item = result.validation.find(
+      (entry) =>
+        entry.rule_id === "trufflehog" &&
+        isTrufflehogMissingMessage(entry.message),
+    );
+    if (!item || rulesState.trufflehogStatus?.status === "installed") {
+      return;
+    }
+    if (
+      window.confirm(
+        "TruffleHog is not installed, so the secret scan could not run. Install TruffleHog now?",
+      )
+    ) {
+      void installTrufflehogTool(false);
     }
   }
 
@@ -439,6 +527,7 @@ export async function startApp(): Promise<void> {
       app.ruleSettings = rulesState.settings;
       renderRulesPanel();
       void refreshGitleaksStatus();
+      void refreshTrufflehogStatus();
     } catch (err) {
       rulesState.loading = false;
       rulesState.loadError =
@@ -499,6 +588,7 @@ export async function startApp(): Promise<void> {
       if (run.id === analysisManager.getLatestRunId() && run.result) {
         void applyAnalysisResult(run.result);
         offerGitleaksInstall(run.result);
+        offerTrufflehogInstall(run.result);
       }
     },
     onRunFailed: (run) => {
@@ -530,6 +620,9 @@ export async function startApp(): Promise<void> {
       },
       onInstallGitleaks: () => {
         void installGitleaksTool();
+      },
+      onInstallTrufflehog: () => {
+        void installTrufflehogTool();
       },
       onShowModuleOnGraph: (nodeId) => {
         void showModuleOnGraph(nodeId);
@@ -2396,6 +2489,23 @@ export async function startApp(): Promise<void> {
         setLspSettings: (settings) => {
           app.lspSettings = settings;
           lspState.settings = settings;
+          persist();
+        },
+        getGitleaksStatus: () => getGitleaksStatus(),
+        installGitleaks: () => installGitleaks(),
+        getTrufflehogStatus: () => getTrufflehogStatus(),
+        installTrufflehog: () => installTrufflehog(),
+        onSecretScannerInstalled: (id) => {
+          if (id === "gitleaks") {
+            void refreshGitleaksStatus();
+            app.selectedRules.add("gitleaks");
+            rulesState.selected = new Set(app.selectedRules);
+          } else {
+            void refreshTrufflehogStatus();
+            app.selectedRules.add("trufflehog");
+            rulesState.selected = new Set(app.selectedRules);
+          }
+          renderRulesPanel();
           persist();
         },
         getLlmProviders: () => app.llmProviders,

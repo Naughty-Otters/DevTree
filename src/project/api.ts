@@ -20,6 +20,10 @@ import type {
 } from "../linter/types";
 import type { GitleaksInstallResult, GitleaksStatus } from "../gitleaks/types";
 import type {
+  TrufflehogInstallResult,
+  TrufflehogStatus,
+} from "../trufflehog/types";
+import type {
   LlmConfiguration,
   AiValidationRuntimeSettings,
 } from "../validation/aiValidation";
@@ -166,6 +170,32 @@ export async function installGitleaks(): Promise<GitleaksInstallResult> {
     status: {
       status: "missing",
       installHint: "brew install gitleaks",
+    },
+  };
+}
+
+export async function getTrufflehogStatus(): Promise<TrufflehogStatus> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<TrufflehogStatus>("get_trufflehog_status");
+  }
+  return {
+    status: "missing",
+    installHint: "brew install trufflehog",
+  };
+}
+
+export async function installTrufflehog(): Promise<TrufflehogInstallResult> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<TrufflehogInstallResult>("install_trufflehog");
+  }
+  return {
+    ok: false,
+    message: "trufflehog install requires the DevTree desktop app.",
+    status: {
+      status: "missing",
+      installHint: "brew install trufflehog",
     },
   };
 }
@@ -833,6 +863,41 @@ function mockRules(): AnalysisRule[] {
       ],
     },
     {
+      id: "trufflehog",
+      name: "Secret Scan (TruffleHog)",
+      description:
+        "Scan the repository for secrets and credentials using TruffleHog",
+      category: "security",
+      settings: [
+        {
+          key: "enabled",
+          label: "Run TruffleHog during validation",
+          kind: "boolean",
+          default: true,
+        },
+        {
+          key: "verify",
+          label: "Verify findings against live APIs (slower)",
+          kind: "boolean",
+          default: false,
+        },
+        {
+          key: "only_verified",
+          label: "Only report verified findings",
+          kind: "boolean",
+          default: false,
+        },
+        {
+          key: "sample_limit",
+          label: "Max findings to list",
+          kind: "number",
+          default: 20,
+          min: 1,
+          max: 100,
+        },
+      ],
+    },
+    {
       id: "ai_architecture",
       name: "AI Architecture Review",
       description:
@@ -958,6 +1023,7 @@ async function mockAnalysis(
     language_linters: "Language Linters",
     lsp_diagnostics: "Language Diagnostics",
     gitleaks: "Secret Scan (gitleaks)",
+    trufflehog: "Secret Scan (TruffleHog)",
   };
   const ruleTasks: RuleTaskProgress[] = rules.map((id) => ({
     ruleId: id,
@@ -1044,6 +1110,7 @@ async function mockAnalysis(
       naming: "Naming Conventions",
       lsp_diagnostics: "Language Diagnostics",
       gitleaks: "Secret Scan (gitleaks)",
+      trufflehog: "Secret Scan (TruffleHog)",
     };
     return [
       {
