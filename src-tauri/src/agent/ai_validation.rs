@@ -156,7 +156,8 @@ Rules:
 - Every item MUST include rule_id matching the phase that produced it.
 - Emit one final JSON covering every phase you ran (not intermediate JSON per phase).
 - Use pass when a phase finds no issues (one pass item per clean phase is enough).
-- Each affected entry MUST be `relative/path:line — detail` or `relative/path:start-end — detail` (em dash between location and detail). Use a single line when possible; use start-end only for multi-line spans."#;
+- Each affected entry MUST be `relative/path:line — detail` or `relative/path:start-end — detail` (em dash between location and detail). Use a single line when possible; use start-end only for multi-line spans.
+- Paths must be exact project-relative file paths only — never add parenthetical notes like `(parent repo)` to the path; put that context in the detail after the em dash."#;
 
 const WORKFLOW_HEADER: &str = r#"You run ONE multi-phase AI validation session for DevTree.
 Complete phases in order. Finish each phase before starting the next.

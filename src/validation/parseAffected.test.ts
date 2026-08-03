@@ -74,6 +74,17 @@ describe("parseAffectedEntry", () => {
       lineEnd: 77,
     });
   });
+
+  it("strips model parenthetical annotations from paths", () => {
+    const entry = parseAffectedEntry(
+      "tests/test_admin_console.py (parent repo) — admin routes lack auth checks",
+    );
+    expect(entry.file).toBe("tests/test_admin_console.py");
+    expect(entry.message).toBe("admin routes lack auth checks");
+    expect(splitPathAndLocation("tests/test_admin_console.py (parent repo)").file).toBe(
+      "tests/test_admin_console.py",
+    );
+  });
 });
 
 describe("expandAffectedForDisplay", () => {

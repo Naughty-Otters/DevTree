@@ -81,7 +81,7 @@ impl ProjectWorkspace {
 /// - `path:12:3` (line:column — column ignored)
 /// - `path:12-20` (inclusive line range)
 pub fn split_path_and_location(input: &str) -> (String, Option<LineRange>) {
-    let trimmed = input.trim();
+    let trimmed = strip_path_annotations(input.trim());
     if trimmed.is_empty() {
         return (String::new(), None);
     }
@@ -92,7 +92,7 @@ pub fn split_path_and_location(input: &str) -> (String, Option<LineRange>) {
             if let Some((path, line)) = left.rsplit_once(':') {
                 if let Some(range) = parse_line_range(line) {
                     if !is_windows_drive_prefix(path) {
-                        return (path.to_string(), Some(range));
+                        return (strip_path_annotations(path), Some(range));
                     }
                 }
             }
@@ -103,12 +103,31 @@ pub fn split_path_and_location(input: &str) -> (String, Option<LineRange>) {
     if let Some((path, rest)) = trimmed.rsplit_once(':') {
         if let Some(range) = parse_line_range(rest) {
             if !is_windows_drive_prefix(path) {
-                return (path.to_string(), Some(range));
+                return (strip_path_annotations(path), Some(range));
             }
         }
     }
 
     (trimmed.to_string(), None)
+}
+
+/// Strip model-added context suffixes such as "(parent repo)" from paths.
+fn strip_path_annotations(path: &str) -> String {
+    let mut cleaned = path.trim().to_string();
+    loop {
+        let Some(open) = cleaned.rfind(" (") else {
+            break;
+        };
+        if !cleaned.ends_with(')') {
+            break;
+        }
+        let inner = &cleaned[open + 2..cleaned.len() - 1];
+        if inner.contains('/') || inner.contains(':') {
+            break;
+        }
+        cleaned = cleaned[..open].trim_end().to_string();
+    }
+    cleaned
 }
 
 fn is_windows_drive_prefix(path: &str) -> bool {
@@ -212,6 +231,10 @@ mod tests {
         assert_eq!(
             split_path_and_location("src/main.rs"),
             ("src/main.rs".into(), None)
+        );
+        assert_eq!(
+            split_path_and_location("tests/test_admin_console.py (parent repo)"),
+            ("tests/test_admin_console.py".into(), None)
         );
     }
 

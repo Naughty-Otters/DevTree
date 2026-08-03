@@ -53,12 +53,28 @@ function parseLineToken(token: string): { start: number; end: number } | null {
   return { start, end: start };
 }
 
+function stripPathAnnotations(path: string): string {
+  let cleaned = path.trim();
+  // Model-added context suffixes, e.g. "(parent repo)" or "[monorepo]".
+  while (true) {
+    const next = cleaned
+      .replace(/\s+\([^()]*\)\s*$/u, "")
+      .replace(/\s+\[[^\[\]]*\]\s*$/u, "")
+      .trim();
+    if (next === cleaned) {
+      break;
+    }
+    cleaned = next;
+  }
+  return cleaned;
+}
+
 /**
  * Strip editor-style location suffixes from a project-relative path.
  * Mirrors Rust `split_path_and_location`.
  */
 export function splitPathAndLocation(input: string): PathLocation {
-  const trimmed = input.trim();
+  const trimmed = stripPathAnnotations(input.trim());
   if (!trimmed) return { file: "" };
 
   const lastColon = trimmed.lastIndexOf(":");
@@ -68,7 +84,7 @@ export function splitPathAndLocation(input: string): PathLocation {
       const beforeLast = trimmed.slice(0, lastColon);
       const secondColon = beforeLast.lastIndexOf(":");
       if (secondColon > 0) {
-        const pathPart = beforeLast.slice(0, secondColon);
+        const pathPart = stripPathAnnotations(beforeLast.slice(0, secondColon));
         const linePart = beforeLast.slice(secondColon + 1);
         const range = parseLineToken(linePart);
         if (range && pathPart.includes("/") && !isWindowsDrivePrefix(pathPart)) {
@@ -79,7 +95,7 @@ export function splitPathAndLocation(input: string): PathLocation {
   }
 
   if (lastColon > 0) {
-    const pathPart = trimmed.slice(0, lastColon);
+    const pathPart = stripPathAnnotations(trimmed.slice(0, lastColon));
     const rest = trimmed.slice(lastColon + 1);
     const range = parseLineToken(rest);
     if (range && pathPart.includes("/") && !isWindowsDrivePrefix(pathPart)) {
@@ -106,7 +122,7 @@ export function parseAffectedEntry(raw: string): ValidationAffectedEntry {
   if (flake8Match && looksLikeFilePath(flake8Match[1])) {
     return {
       raw: trimmed,
-      file: flake8Match[1],
+      file: splitPathAndLocation(flake8Match[1]).file,
       line: Number.parseInt(flake8Match[2], 10),
       message: flake8Match[4].trim(),
     };
@@ -128,16 +144,12 @@ export function parseAffectedEntry(raw: string): ValidationAffectedEntry {
   }
 
   const loc = splitPathAndLocation(trimmed);
-  if (looksLikeFilePath(loc.file) && (loc.line != null || loc.file !== trimmed)) {
+  if (looksLikeFilePath(loc.file)) {
     return {
       raw: trimmed,
       file: loc.file,
       line: loc.line,
     };
-  }
-
-  if (looksLikeFilePath(trimmed)) {
-    return { raw: trimmed, file: trimmed };
   }
 
   return { raw: trimmed, file: trimmed, message: trimmed };
