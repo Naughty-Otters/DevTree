@@ -50,7 +50,7 @@ Primary downloads are **GitHub Releases**. Release automation also updates **npm
 ## Before first public release
 
 1. Replace placeholder `authors` in `src-tauri/Cargo.toml` with real names or org.
-2. Repository URL is set in `package.json` / README badges (`Naughty-Otters/DevTree`). CI on `main` refreshes version + coverage badges in `.github/badges/`.
+2. Repository URL is set in `package.json` / README badges (`Naughty-Otters/DevTree`). CI on `main` refreshes badges as **`teralexi-ci-bot[bot]`** (same app as OpenFDE): environment **`CI-build`** with `GIT_CI_BUILD_BOT_APP_ID` + `GIT_CI_BUILD_BOT_APP_PRIVATE_ID`. Install the app on DevTree and add **`teralexi-ci-bot[bot]`** to the main ruleset bypass list.
 3. Run `npm run test:all` and `npm run tauri build` on a clean machine.
 4. Create `Naughty-Otters/homebrew-tap` (if missing) and add repo secrets `NPM_TOKEN` / `HOMEBREW_TAP_TOKEN`.
 5. Create a GitHub Environment named **`release`** and add the same `MAC_SIGN_*` / `MAC_APPLE_*` and Windows `AZURE_*` (preferred) or `WIN_SIGN_*` secrets used by OpenFDE — see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).

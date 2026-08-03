@@ -40,7 +40,21 @@ brew tap Naughty-Otters/tap && brew install --cask devtree
 | 6 | GitHub Actions artifacts | Same installers uploaded on the Release workflow run (`DevTree-vX.Y.Z-<target>`, 90-day retention) |
 | 7 | Manual release | Actions → **Release** → **Run workflow** (or `gh workflow run Release -f version=0.1.0`) |
 
-Secrets (repo or GitHub Environment **`release`** — same names as [OpenFDE](https://github.com/Naughty-Otters/OpenFDE)):
+Secrets (same names as [OpenFDE](https://github.com/Naughty-Otters/OpenFDE)):
+
+GitHub Environment **`CI-build`** (CI badge push to protected `main` — same **`teralexi-ci-bot`** app as OpenFDE/Teralexi):
+
+| Secret | Used for |
+| --- | --- |
+| `GIT_CI_BUILD_BOT_APP_ID` | `teralexi-ci-bot` GitHub App ID (numeric) |
+| `GIT_CI_BUILD_BOT_APP_PRIVATE_ID` | App private key `.pem` (or base64 / `\n`-escaped PEM) |
+
+Configure **`teralexi-ci-bot`**:
+1. App → Permissions → **Contents: Read and write** → Save → accept on the org installation.
+2. Install on `Naughty-Otters/DevTree`.
+3. On `main` rules: add **`teralexi-ci-bot[bot]`** to the bypass / allowed-push list (not `github-actions[bot]`).
+
+GitHub Environment **`release`** (signing / publish):
 
 | Secret | Used for |
 | --- | --- |

@@ -102,12 +102,125 @@ jobs:
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: update CI status badges [skip ci]"
-          file_pattern: ".github/badges/*.json"
+
+          name: coverage-summary
+          path: coverage/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Same pattern as OpenFDE / Teralexi: push as teralexi-ci-bot[bot] via GitHub App
+  # installation token (not github-actions[bot] / GITHUB_TOKEN).
+  # Secrets live in the "CI-build" environment (GIT_CI_BUILD_BOT_APP_ID + PRIVATE_ID).
+  publish-badges:
+    name: Publish README badges
+    needs: [test-typescript]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: CI-build
+    permissions:
+      contents: read
+
+    steps:
+      - name: Normalize GitHub App private key
+        id: app-key
         env:
-          # Badge JSON only — skip husky pre-commit (test:all / cargo test).
-          # This job has no GTK/glib deps; Rust tests already ran in test-rust.
+          RAW_KEY: ${{ secrets.GIT_CI_BUILD_BOT_APP_PRIVATE_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAW_KEY}" ]; then
+            echo "::error::CI-build secret GIT_CI_BUILD_BOT_APP_PRIVATE_ID is empty."
+            echo "::error::Paste the full GitHub App private key .pem (including BEGIN/END lines)."
+            exit 1
+          fi
+
+          key="$RAW_KEY"
+          if [[ "$key" == \"*\" && "$key" == *\" ]]; then
+            key="${key:1:-1}"
+          fi
+          key="${key//\\n/$'\n'}"
+          key="${key//$'\r'/}"
+
+          if ! printf '%s' "$key" | grep -q 'BEGIN.*PRIVATE KEY'; then
+            decoded="$(printf '%s' "$key" | base64 -d 2>/dev/null || true)"
+            if printf '%s' "$decoded" | grep -q 'BEGIN.*PRIVATE KEY'; then
+              key="$decoded"
+              key="${key//$'\r'/}"
+            fi
+          fi
+
+          if ! printf '%s' "$key" | grep -q 'BEGIN.*PRIVATE KEY'; then
+            echo "::error::GIT_CI_BUILD_BOT_APP_PRIVATE_ID is not a PEM private key."
+            echo "::error::Use the .pem from GitHub App → Generate a private key."
+            exit 1
+          fi
+
+          {
+            echo "private-key<<PRIVATE_KEY_EOF"
+            printf '%s\n' "$key"
+            echo "PRIVATE_KEY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate GitHub App token (teralexi-ci-bot)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GIT_CI_BUILD_BOT_APP_ID }}
+          private-key: ${{ steps.app-key.outputs.private-key }}
+          # Inherit all permissions granted on the installation (explicit
+          # permission-* inputs can produce tokens that fail protected-branch push).
+
+      - name: Require teralexi-ci-bot app
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          echo "Resolved app slug: ${APP_SLUG}"
+          if [ "${APP_SLUG}" != "teralexi-ci-bot" ]; then
+            echo "::error::Expected GitHub App slug 'teralexi-ci-bot', got '${APP_SLUG}'."
+            echo "::error::Point CI-build secrets GIT_CI_BUILD_BOT_APP_ID / PRIVATE_ID at the teralexi-ci-bot app (same as OpenFDE)."
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Verify teralexi-ci-bot can push
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+          APP_SLUG: teralexi-ci-bot
+        run: bash .github/scripts/verify-app-push.sh
+
+      - name: Download coverage summary
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage
+
+      - name: Write version + coverage badge JSON
+        run: node scripts/write-ci-badges.mjs
+
+      - name: Commit and push badges as teralexi-ci-bot[bot]
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           HUSKY: "0"
+        run: |
+          set -euo pipefail
+          git config user.name "teralexi-ci-bot[bot]"
+          git config user.email "teralexi-ci-bot[bot]@users.noreply.github.com"
+          git add .github/badges/*.json
+          if git diff --staged --quiet; then
+            echo "Badges already up to date."
+            exit 0
+          fi
+          git commit -m "chore: update CI status badges [skip ci]"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
 
   build:
     name: Build (${{ matrix.platform }})
