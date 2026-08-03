@@ -192,6 +192,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
           APP_SLUG: teralexi-ci-bot
+          HUSKY: "0"
         run: bash .github/scripts/verify-app-push.sh
 
       - name: Download coverage summary
@@ -216,8 +217,8 @@ jobs:
             echo "Badges already up to date."
             exit 0
           fi
-          git commit -m "chore: update CI status badges [skip ci]"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
+          git commit --no-verify -m "chore: update CI status badges [skip ci]"
+          git push --no-verify "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${GITHUB_REF_NAME}"
 
   build:
     name: Build (${{ matrix.platform }})
