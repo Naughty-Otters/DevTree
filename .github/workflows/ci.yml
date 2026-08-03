@@ -1,7 +1,8 @@
 name: CI
 
 # Builds stay on GitHub only (Actions artifacts). User-facing downloads come from GitHub Releases.
-# On push to main/master, version + coverage badge JSON is published for the README.
+# On push to main/master, badges are published by publish-badges as teralexi-ci-bot[bot]
+# (GitHub App token via CI-build env) — not github-actions[bot] / git-auto-commit.
 
 on:
   push:
@@ -50,8 +51,6 @@ jobs:
   test-typescript:
     name: TypeScript tests
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -98,11 +97,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish README badges on main
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        uses: stefanzweifel/git-auto-commit-action@v5
+      - name: Upload coverage summary for badge job
+        uses: actions/upload-artifact@v4
         with:
-
           name: coverage-summary
           path: coverage/coverage-summary.json
           if-no-files-found: error
