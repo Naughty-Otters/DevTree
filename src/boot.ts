@@ -252,7 +252,9 @@ export async function startApp(): Promise<void> {
     return {
       llmProviders: app.llmProviders,
       llmConfigurations: app.llmConfigurations,
-      onInstallGitleaks: () => installGitleaksTool(),
+      onInstallGitleaks: () => {
+        void installGitleaksTool();
+      },
     };
   }
 
@@ -526,7 +528,9 @@ export async function startApp(): Promise<void> {
       onShowCycleOnGraph: (cycle) => {
         void showCycleOnGraph(cycle);
       },
-      onInstallGitleaks: () => installGitleaksTool(),
+      onInstallGitleaks: () => {
+        void installGitleaksTool();
+      },
       onShowModuleOnGraph: (nodeId) => {
         void showModuleOnGraph(nodeId);
       },

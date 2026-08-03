@@ -375,7 +375,7 @@ function ruleItem(
 }
 
 function appendGitleaksTooling(
-  rule: AnalysisRule,
+  _rule: AnalysisRule,
   state: RulesPanelState,
   settingsEl: HTMLElement,
   context?: RulesPanelContext,
