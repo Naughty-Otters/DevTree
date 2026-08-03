@@ -150,13 +150,13 @@ const SESSION_STREAM_ID: &str = "ai_validation";
 const SESSION_STREAM_NAME: &str = "AI validation";
 
 const OUTPUT_CONTRACT: &str = r#"Respond with ONLY valid JSON (no markdown fences) after finishing ALL workflow phases:
-{"items":[{"rule_id":"ai_architecture|ai_code_review|ai_clean_code|ai_maintainability|ai_test_gaps","status":"pass|warn|fail","message":"summary","affected":["relative/path — detail"]}]}
+{"items":[{"rule_id":"ai_architecture|ai_code_review|ai_clean_code|ai_maintainability|ai_test_gaps","status":"pass|warn|fail","message":"summary","affected":["relative/path:line — detail"]}]}
 
 Rules:
 - Every item MUST include rule_id matching the phase that produced it.
 - Emit one final JSON covering every phase you ran (not intermediate JSON per phase).
 - Use pass when a phase finds no issues (one pass item per clean phase is enough).
-- Each affected entry should use project-relative paths (path:line when possible)."#;
+- Each affected entry MUST be `relative/path:line — detail` or `relative/path:start-end — detail` (em dash between location and detail). Use a single line when possible; use start-end only for multi-line spans."#;
 
 const WORKFLOW_HEADER: &str = r#"You run ONE multi-phase AI validation session for DevTree.
 Complete phases in order. Finish each phase before starting the next.

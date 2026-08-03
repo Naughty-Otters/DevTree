@@ -4,6 +4,7 @@ import {
   groupAffectedByFile,
   isOpenableValidationPath,
   parseAffectedEntry,
+  splitPathAndLocation,
 } from "./parseAffected";
 
 describe("parseAffectedEntry", () => {
@@ -11,6 +12,21 @@ describe("parseAffectedEntry", () => {
     const entry = parseAffectedEntry("api/routes/auth.py — routes call services");
     expect(entry.file).toBe("api/routes/auth.py");
     expect(entry.message).toBe("routes call services");
+  });
+
+  it("parses AI validation path:line-range — detail format", () => {
+    const entry = parseAffectedEntry(
+      "services/app_web/publish.py:56-77 — missing error handling",
+    );
+    expect(entry.file).toBe("services/app_web/publish.py");
+    expect(entry.line).toBe(56);
+    expect(entry.message).toBe("missing error handling");
+  });
+
+  it("parses bare path:line-range without detail", () => {
+    const entry = parseAffectedEntry("services/app_web/publish.py:56-77");
+    expect(entry.file).toBe("services/app_web/publish.py");
+    expect(entry.line).toBe(56);
   });
 
   it("parses linter path:line — [severity] message", () => {
@@ -48,6 +64,15 @@ describe("parseAffectedEntry", () => {
     expect(isOpenableValidationPath('{"items":[]}')).toBe(false);
     expect(isOpenableValidationPath("```json")).toBe(false);
     expect(isOpenableValidationPath("src/a.ts")).toBe(true);
+    expect(isOpenableValidationPath("services/app_web/publish.py:56-77")).toBe(true);
+  });
+
+  it("splitPathAndLocation strips line ranges", () => {
+    expect(splitPathAndLocation("services/app_web/publish.py:56-77")).toEqual({
+      file: "services/app_web/publish.py",
+      line: 56,
+      lineEnd: 77,
+    });
   });
 });
 

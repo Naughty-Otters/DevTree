@@ -113,7 +113,7 @@ import {
   navigationToPackageFile,
   type ValidationNavTarget,
 } from "./validation/navigation";
-import { isOpenableValidationPath } from "./validation/parseAffected";
+import { isOpenableValidationPath, splitPathAndLocation } from "./validation/parseAffected";
 import { renderFileNav } from "./ui/fileNav";
 import { collectFileIssues } from "./validation/fileIssues";
 import { hideValidationDetail } from "./ui/validationDetailPopup";
@@ -1814,10 +1814,12 @@ export async function startApp(): Promise<void> {
 
   async function openValidationTarget(target: ValidationNavTarget) {
     hideValidationDetail();
-    if (!isOpenableValidationPath(target.file)) {
+    const { file, line } = splitPathAndLocation(target.file);
+    const openLine = target.line ?? line;
+    if (!isOpenableValidationPath(file)) {
       return;
     }
-    await handleFileOpen(target.file, target.line);
+    await handleFileOpen(file, openLine);
   }
 
   async function showModuleOnGraph(nodeId: string) {

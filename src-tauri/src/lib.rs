@@ -185,12 +185,13 @@ async fn install_linter(language_id: String, linter_id: String) -> Result<Linter
 fn read_project_file(project_root: String, relative_path: String) -> Result<String, String> {
     use std::path::PathBuf;
     let root = PathBuf::from(&project_root);
-    let file = root.join(&relative_path);
+    let (clean_path, _) = agent::workspace::split_path_and_location(&relative_path);
+    let file = root.join(&clean_path);
     if !file.starts_with(&root) {
         return Err("Path escapes project root".into());
     }
     if !file.is_file() {
-        return Err(format!("Not a file: {relative_path}"));
+        return Err(format!("Not a file: {clean_path}"));
     }
     std::fs::read_to_string(&file).map_err(|e| e.to_string())
 }
