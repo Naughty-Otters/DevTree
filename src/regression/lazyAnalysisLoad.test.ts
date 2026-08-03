@@ -10,7 +10,7 @@ import { buildArchitectureHealth } from "../analysis/architectureHealth";
 import type { AnalysisResult, HierarchyIndex, QualityIndex } from "../analysis/types";
 import { rootNavigation } from "../graph/navigation";
 import { DEFAULT_MODULE_FILTERS } from "../graph/moduleFilters";
-import { renderGraphNav } from "../ui/graphNav";
+import { renderGraphNav, renderBreadcrumbBar } from "../ui/graphNav";
 import { defaultPersistedState } from "../state/types";
 
 function packageQuality(): QualityIndex {
@@ -85,7 +85,25 @@ describe("regression/lazyAnalysisLoad", () => {
 
   it("graph toolbar includes Filter and Focus without a hydrated hierarchy", () => {
     const container = document.createElement("div");
+    const crumbs = document.createElement("div");
     const result = slimAnalysisResult();
+    renderBreadcrumbBar(
+      crumbs,
+      rootNavigation(),
+      false,
+      false,
+      {
+        onBack: () => {},
+        onForward: () => {},
+        onNavigate: () => {},
+      },
+      {
+        stats: {
+          nodes: result.graph.nodes.length,
+          edges: result.graph.edges.length,
+        },
+      },
+    );
     renderGraphNav(
       container,
       rootNavigation(),
@@ -99,10 +117,6 @@ describe("regression/lazyAnalysisLoad", () => {
         onModuleFiltersChange: () => {},
       },
       {
-        stats: {
-          nodes: result.graph.nodes.length,
-          edges: result.graph.edges.length,
-        },
         moduleFilters: DEFAULT_MODULE_FILTERS,
         focusEnabled: true,
       },
@@ -112,7 +126,7 @@ describe("regression/lazyAnalysisLoad", () => {
     expect(
       container.querySelector('[aria-label="Graph view actions"] [aria-label="Focus"]'),
     ).toBeTruthy();
-    expect(container.querySelector(".graph-nav-stats")?.textContent).toContain(
+    expect(crumbs.querySelector(".breadcrumb-stats")?.textContent).toContain(
       "2 modules",
     );
   });

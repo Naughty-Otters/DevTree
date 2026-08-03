@@ -2,6 +2,7 @@ import type { IconNode } from "lucide";
 import {
   ArrowDown,
   ArrowRight,
+  ChevronRight,
   Circle,
   CornerDownRight,
   Crosshair,
@@ -63,6 +64,148 @@ export interface GraphNavCallbacks {
   onFocusView?: () => void;
   /** Shown on the stale-imports warning banner. */
   onRunAnalysis?: () => void;
+}
+
+export interface BreadcrumbBarCallbacks {
+  onBack: () => void;
+  onForward: () => void;
+  onNavigate: (crumb: NavCrumb) => void;
+}
+
+export interface BreadcrumbBarOptions {
+  stats?: { nodes: number; edges: number };
+  /** Flat file path for the File view (VS Code-style segments). */
+  filePath?: string | null;
+  hint?: string | null;
+}
+
+/** VS Code-style location bar under the main toolbar. */
+export function renderBreadcrumbBar(
+  container: HTMLElement,
+  nav: GraphNavigation,
+  canBack: boolean,
+  canForward: boolean,
+  callbacks: BreadcrumbBarCallbacks,
+  options: BreadcrumbBarOptions = {},
+): void {
+  container.innerHTML = "";
+  container.classList.remove("is-empty");
+
+  const bar = document.createElement("div");
+  bar.className = "breadcrumb-bar-inner";
+
+  const history = document.createElement("div");
+  history.className = "breadcrumb-history";
+
+  const backBtn = document.createElement("button");
+  backBtn.type = "button";
+  backBtn.className = "breadcrumb-history-btn";
+  backBtn.title = "Back";
+  backBtn.setAttribute("aria-label", "Back");
+  backBtn.disabled = !canBack;
+  backBtn.textContent = "←";
+  backBtn.addEventListener("click", callbacks.onBack);
+
+  const forwardBtn = document.createElement("button");
+  forwardBtn.type = "button";
+  forwardBtn.className = "breadcrumb-history-btn";
+  forwardBtn.title = "Forward";
+  forwardBtn.setAttribute("aria-label", "Forward");
+  forwardBtn.disabled = !canForward;
+  forwardBtn.textContent = "→";
+  forwardBtn.addEventListener("click", callbacks.onForward);
+
+  history.append(backBtn, forwardBtn);
+
+  const crumbs = document.createElement("nav");
+  crumbs.className = "breadcrumb-items";
+  crumbs.setAttribute("aria-label", "Location");
+
+  if (options.filePath) {
+    appendFilePathCrumbs(crumbs, options.filePath);
+  } else {
+    nav.crumbs.forEach((crumb, i) => {
+      if (i > 0) {
+        crumbs.appendChild(breadcrumbSeparator());
+      }
+      const isLast = i === nav.crumbs.length - 1;
+      if (isLast) {
+        const current = document.createElement("span");
+        current.className = "breadcrumb-item breadcrumb-item-current";
+        current.textContent = crumb.label;
+        current.title = crumb.label;
+        crumbs.appendChild(current);
+      } else {
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "breadcrumb-item breadcrumb-item-link";
+        link.textContent = crumb.label;
+        link.title = crumb.label;
+        link.addEventListener("click", () => callbacks.onNavigate(crumb));
+        crumbs.appendChild(link);
+      }
+    });
+  }
+
+  bar.append(history, crumbs);
+
+  if (options.stats && !options.filePath) {
+    const stats = document.createElement("span");
+    stats.className = "breadcrumb-stats";
+    stats.textContent = `${options.stats.nodes} modules · ${options.stats.edges} deps`;
+    bar.appendChild(stats);
+  }
+
+  if (options.hint) {
+    const hint = document.createElement("span");
+    hint.className = "breadcrumb-hint";
+    hint.textContent = options.hint;
+    hint.title = options.hint;
+    bar.appendChild(hint);
+  }
+
+  container.appendChild(bar);
+}
+
+export function clearBreadcrumbBar(container: HTMLElement): void {
+  container.innerHTML = "";
+  container.classList.add("is-empty");
+}
+
+function breadcrumbSeparator(): HTMLElement {
+  const sep = document.createElement("span");
+  sep.className = "breadcrumb-sep";
+  sep.setAttribute("aria-hidden", "true");
+  sep.appendChild(
+    lucideIcon(ChevronRight, {
+      size: 12,
+      class: "lucide-icon breadcrumb-sep-icon",
+      "stroke-width": 2,
+    }),
+  );
+  return sep;
+}
+
+function appendFilePathCrumbs(crumbs: HTMLElement, filePath: string): void {
+  const parts = filePath.replace(/\\/g, "/").split("/").filter(Boolean);
+  if (parts.length === 0) {
+    const current = document.createElement("span");
+    current.className = "breadcrumb-item breadcrumb-item-current";
+    current.textContent = filePath;
+    crumbs.appendChild(current);
+    return;
+  }
+  parts.forEach((part, i) => {
+    if (i > 0) crumbs.appendChild(breadcrumbSeparator());
+    const isLast = i === parts.length - 1;
+    const el = document.createElement("span");
+    el.className = isLast
+      ? "breadcrumb-item breadcrumb-item-current"
+      : "breadcrumb-item";
+    el.textContent = part;
+    el.title = parts.slice(0, i + 1).join("/");
+    crumbs.appendChild(el);
+  });
 }
 
 const LAYOUT_ICONS: Record<LayoutFamily, IconNode> = {
@@ -349,29 +492,11 @@ export function renderGraphNav(
 ): void {
   container.innerHTML = "";
 
-  const bar = document.createElement("div");
-  bar.className = "graph-nav-bar";
+  const stack = document.createElement("div");
+  stack.className = "graph-nav-stack";
 
-  const controls = document.createElement("div");
-  controls.className = "graph-nav-controls";
-
-  const backBtn = document.createElement("button");
-  backBtn.type = "button";
-  backBtn.className = "btn btn-icon btn-ghost graph-nav-btn";
-  backBtn.title = "Back";
-  backBtn.disabled = !canBack;
-  backBtn.textContent = "←";
-  backBtn.addEventListener("click", callbacks.onBack);
-
-  const forwardBtn = document.createElement("button");
-  forwardBtn.type = "button";
-  forwardBtn.className = "btn btn-icon btn-ghost graph-nav-btn";
-  forwardBtn.title = "Forward";
-  forwardBtn.disabled = !canForward;
-  forwardBtn.textContent = "→";
-  forwardBtn.addEventListener("click", callbacks.onForward);
-
-  controls.append(backBtn, forwardBtn);
+  const toolsBar = document.createElement("div");
+  toolsBar.className = "graph-nav-bar";
 
   const layoutControls = renderLayoutControls(
     options.layoutMode ?? "organic",
@@ -427,57 +552,85 @@ export function renderGraphNav(
   focusList.appendChild(focusBtn);
   focusTool.append(focusLabel, focusList);
 
+  toolsBar.append(
+    layoutControls,
+    edgeStyleControl,
+    filterDropdown,
+    languageDropdown,
+    focusTool,
+  );
+
+  const crumbBar = document.createElement("div");
+  crumbBar.className = "graph-nav-crumb-bar";
+
+  const history = document.createElement("div");
+  history.className = "graph-nav-crumb-history";
+
+  const backBtn = document.createElement("button");
+  backBtn.type = "button";
+  backBtn.className = "graph-nav-crumb-history-btn";
+  backBtn.title = "Back";
+  backBtn.setAttribute("aria-label", "Back");
+  backBtn.disabled = !canBack;
+  backBtn.textContent = "←";
+  backBtn.addEventListener("click", callbacks.onBack);
+
+  const forwardBtn = document.createElement("button");
+  forwardBtn.type = "button";
+  forwardBtn.className = "graph-nav-crumb-history-btn";
+  forwardBtn.title = "Forward";
+  forwardBtn.setAttribute("aria-label", "Forward");
+  forwardBtn.disabled = !canForward;
+  forwardBtn.textContent = "→";
+  forwardBtn.addEventListener("click", callbacks.onForward);
+
+  history.append(backBtn, forwardBtn);
+
   const crumbs = document.createElement("nav");
   crumbs.className = "graph-nav-crumbs";
   crumbs.setAttribute("aria-label", "Graph location");
-
   nav.crumbs.forEach((crumb, i) => {
     if (i > 0) {
       const sep = document.createElement("span");
       sep.className = "graph-nav-sep";
-      sep.textContent = "›";
+      sep.appendChild(
+        lucideIcon(ChevronRight, {
+          size: 12,
+          class: "lucide-icon graph-nav-sep-icon",
+          "stroke-width": 2,
+        }),
+      );
       crumbs.appendChild(sep);
     }
-
     const isLast = i === nav.crumbs.length - 1;
     if (isLast) {
       const current = document.createElement("span");
       current.className = "graph-nav-crumb graph-nav-crumb-current";
       current.textContent = crumb.label;
+      current.title = crumb.label;
       crumbs.appendChild(current);
     } else {
       const link = document.createElement("button");
       link.type = "button";
       link.className = "graph-nav-crumb graph-nav-crumb-link";
       link.textContent = crumb.label;
+      link.title = crumb.label;
       link.addEventListener("click", () => callbacks.onNavigate(crumb));
       crumbs.appendChild(link);
     }
   });
 
+  crumbBar.append(history, crumbs);
+
   if (options.stats) {
     const stats = document.createElement("span");
     stats.className = "graph-nav-stats";
     stats.textContent = `${options.stats.nodes} modules · ${options.stats.edges} deps`;
-    crumbs.appendChild(stats);
+    crumbBar.appendChild(stats);
   }
 
-  const hint = document.createElement("span");
-  hint.className = "graph-nav-hint";
-  hint.textContent = "Click = details · Double-click = drill / open file";
-  hint.title =
-    "Click a module for details. Double-click a package to drill in, or a file to open it in the editor.";
-  bar.append(
-    controls,
-    layoutControls,
-    edgeStyleControl,
-    filterDropdown,
-    languageDropdown,
-    focusTool,
-    crumbs,
-    hint,
-  );
-  container.appendChild(bar);
+  stack.append(toolsBar, crumbBar);
+  container.appendChild(stack);
 
   if (options.staleImports) {
     const warn = document.createElement("div");

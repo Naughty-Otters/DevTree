@@ -17,6 +17,7 @@
   --left-width: 240px;
   --right-width: 360px;
   --toolbar-height: 44px;
+  --breadcrumb-height: 28px;
   --bottom-height: 200px;
   --left-tree-height: 50%;
   --resize-handle-size: 4px;
@@ -41,7 +42,8 @@ body {
 
 #app {
   display: grid;
-  grid-template-rows: var(--toolbar-height) 1fr;
+  /* Middle row sizes to the breadcrumb (0 when empty). Do not use display:none on the bar. */
+  grid-template-rows: var(--toolbar-height) auto 1fr;
   height: 100vh;
   width: 100vw;
 }
@@ -90,6 +92,155 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── VS Code-style breadcrumb bar (under toolbar) ── */
+.breadcrumb-bar {
+  height: var(--breadcrumb-height);
+  min-height: var(--breadcrumb-height);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--bg-panel-hover);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  z-index: 9;
+}
+
+/* Keep the bar in grid flow when empty — display:none collapses #workspace. */
+.breadcrumb-bar.is-empty {
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.breadcrumb-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.breadcrumb-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.breadcrumb-history-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.breadcrumb-history-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.breadcrumb-history-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.breadcrumb-items {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+}
+
+.breadcrumb-sep {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.breadcrumb-sep-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.breadcrumb-item {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 22px;
+  height: 22px;
+  color: var(--text-secondary);
+  padding: 0 6px;
+  border-radius: 3px;
+}
+
+.breadcrumb-item-link {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.breadcrumb-item-link:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.breadcrumb-item-current {
+  color: var(--text-primary);
+  font-weight: 400;
+}
+
+.breadcrumb-stats,
+.breadcrumb-hint {
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.breadcrumb-hint {
+  margin-left: auto;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 900px) {
+  .breadcrumb-hint {
+    display: none;
+  }
 }
 
 /* ── Buttons ── */
@@ -1941,12 +2092,19 @@ body.is-resizing-v {
   display: none;
 }
 
+.graph-nav-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .graph-nav-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 4px 10px;
   min-height: 32px;
+  border-bottom: 1px solid var(--border);
 }
 
 .graph-nav-controls {
@@ -2132,13 +2290,68 @@ body.is-resizing-v {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 0;
   min-width: 0;
+  flex: 1;
+}
+
+.graph-nav-crumb-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  min-height: 28px;
+  background: var(--bg-panel-hover);
+}
+
+.graph-nav-crumb-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.graph-nav-crumb-history-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.graph-nav-crumb-history-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.graph-nav-crumb-history-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .graph-nav-sep {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
   color: var(--text-muted);
-  font-size: 11px;
+  opacity: 0.7;
+}
+
+.graph-nav-sep-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .graph-nav-crumb {
@@ -2147,11 +2360,14 @@ body.is-resizing-v {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 22px;
+  padding: 0 6px;
+  border-radius: 3px;
 }
 
 .graph-nav-crumb-current {
-  color: var(--accent-bright);
-  font-weight: 600;
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
 .graph-nav-crumb-link {
@@ -2159,20 +2375,22 @@ body.is-resizing-v {
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
+  font: inherit;
+  text-align: left;
 }
 
 .graph-nav-crumb-link:hover {
   color: var(--text-primary);
-  background: var(--bg-panel-hover);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .graph-nav-stats {
-  margin-left: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
+  opacity: 0.85;
 }
 
 .graph-nav-hint {

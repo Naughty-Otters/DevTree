@@ -97,7 +97,7 @@ import {
 import { initTooltips } from "./ui/tooltip";
 import { hideGraphPopup, isGraphPopupOpen } from "./ui/graphPopup";
 import { createModuleDetailsPanel } from "./ui/moduleDetailsPanel";
-import { renderGraphNav } from "./ui/graphNav";
+import { renderGraphNav, renderBreadcrumbBar, clearBreadcrumbBar } from "./ui/graphNav";
 import {
   autoAdvanceSingleFolder,
   canGoBack,
@@ -218,6 +218,8 @@ export async function startApp(): Promise<void> {
     "#analysis-progress-view",
   )!;
   const graphNavContainer = document.querySelector<HTMLElement>("#graph-nav")!;
+  const breadcrumbBar = document.querySelector<HTMLElement>("#breadcrumb-bar")!;
+  clearBreadcrumbBar(breadcrumbBar);
   const viewTabs = document.querySelector<HTMLElement>("#view-tabs")!;
   const moduleDetailsPanelEl =
     document.querySelector<HTMLElement>("#module-details-panel")!;
@@ -693,6 +695,8 @@ export async function startApp(): Promise<void> {
     app.graphNavigation = rootNavigation();
     resultsPanel.setResult(result);
     showReportView();
+    // Ensure crumbs paint even if Report chrome raced with other clears.
+    refreshBreadcrumbs(result.graph);
     persist();
     persistAnalysis();
 
@@ -804,11 +808,89 @@ export async function startApp(): Promise<void> {
 
   function refreshFileNav(path: string) {
     const issues = collectFileIssues(app.analysisResult, path);
+    refreshBreadcrumbs(undefined, path);
     renderFileNav(graphNavContainer, {
       path,
       issues,
       onIssueClick: (line) => fileViewer.scrollToLine(line),
     });
+  }
+
+  function breadcrumbCallbacks() {
+    return {
+      onBack: () => {
+        hideModuleOverlays();
+        app.graphNavigation = goBack(app.graphNavigation);
+        ensureGraphChromeForNav();
+        void navigateGraph();
+      },
+      onForward: () => {
+        hideModuleOverlays();
+        app.graphNavigation = goForward(app.graphNavigation);
+        ensureGraphChromeForNav();
+        void navigateGraph();
+      },
+      onNavigate: (crumb: Parameters<typeof navigateTo>[1]) => {
+        hideModuleOverlays();
+        app.graphNavigation = navigateTo(app.graphNavigation, crumb);
+        ensureGraphChromeForNav();
+        void navigateGraph({ skipAutoAdvance: true });
+      },
+    };
+  }
+
+  /** Crumb / history actions should land on Graph (or stay on DSM). */
+  function ensureGraphChromeForNav(): void {
+    if (app.centerView === "graph" || app.centerView === "dsm") return;
+    app.centerView = "graph";
+    hideCenterViews();
+    canvas.classList.remove("hidden");
+    setActiveViewTab("graph");
+  }
+
+  /** Always keep package crumbs visible when graph or project context exists. */
+  function refreshBreadcrumbs(graph?: Graph, filePath?: string): void {
+    if (!breadcrumbBar) return;
+
+    if (filePath) {
+      renderBreadcrumbBar(
+        breadcrumbBar,
+        app.graphNavigation,
+        canGoBack(app.graphNavigation),
+        canGoForward(app.graphNavigation),
+        breadcrumbCallbacks(),
+        { filePath },
+      );
+      return;
+    }
+
+    const g = graph ?? app.analysisResult?.graph ?? null;
+    if (!app.hierarchy && !g && !app.projectPath && !app.analysisResult) {
+      clearBreadcrumbBar(breadcrumbBar);
+      return;
+    }
+
+    renderBreadcrumbBar(
+      breadcrumbBar,
+      app.graphNavigation,
+      canGoBack(app.graphNavigation),
+      canGoForward(app.graphNavigation),
+      breadcrumbCallbacks(),
+      {
+        stats: g
+          ? { nodes: g.nodes.length, edges: g.edges.length }
+          : app.renderState
+            ? {
+                nodes: app.renderState.nodes.length,
+                edges: app.renderState.edges.length,
+              }
+            : undefined,
+        hint:
+          app.centerView === "graph"
+            ? "Click = details · Double-click = drill / open file"
+            : null,
+      },
+    );
   }
 
   function collectUiState(): PersistedUiState {
@@ -877,6 +959,7 @@ export async function startApp(): Promise<void> {
     analysisReportViewEl.classList.remove("hidden");
     setActiveViewTab("report");
     graphNavContainer.innerHTML = "";
+    refreshBreadcrumbs(app.analysisResult?.graph);
     resultsPanel.refreshReport();
   }
 
@@ -888,6 +971,7 @@ export async function startApp(): Promise<void> {
     analysisProgressViewEl.classList.remove("hidden");
     setActiveViewTab("progress");
     graphNavContainer.innerHTML = "";
+    refreshBreadcrumbs(app.analysisResult?.graph);
     resultsPanel.refreshProgress();
   }
 
@@ -991,6 +1075,7 @@ export async function startApp(): Promise<void> {
       return;
     }
     if (app.renderState) {
+      refreshGraphNav(app.analysisResult?.graph);
       // Layout often finished while Report hid the canvas (0×0). Remeasure + redraw.
       requestAnimationFrame(() => {
         resize();
@@ -998,7 +1083,6 @@ export async function startApp(): Promise<void> {
           fitCameraToContent(app.renderState, canvas);
           draw();
         }
-        refreshGraphNav(app.analysisResult?.graph);
       });
       return;
     }
@@ -1057,6 +1141,7 @@ export async function startApp(): Promise<void> {
     }
     fileViewer.showGuide();
     graphNavContainer.innerHTML = "";
+    clearBreadcrumbBar(breadcrumbBar);
   }
 
   const dsmView = createDsmView(dsmViewEl, {
@@ -1380,15 +1465,16 @@ export async function startApp(): Promise<void> {
   }
 
   function refreshGraphNav(graph?: Graph) {
+    // Package crumbs stay available on Report / Progress / Graph / DSM.
+    refreshBreadcrumbs(graph);
+
     if (
       app.centerView === "report" ||
       app.centerView === "progress" ||
       app.centerView === "file"
     ) {
       // Report / Progress / File use their own chrome; keep the graph toolbar unmounted.
-      if (app.centerView === "report" || app.centerView === "progress") {
-        graphNavContainer.innerHTML = "";
-      }
+      graphNavContainer.innerHTML = "";
       return;
     }
     const g = graph ?? app.analysisResult?.graph ?? null;
@@ -1397,27 +1483,14 @@ export async function startApp(): Promise<void> {
       return;
     }
 
+    const navCallbacks = breadcrumbCallbacks();
     renderGraphNav(
       graphNavContainer,
       app.graphNavigation,
       canGoBack(app.graphNavigation),
       canGoForward(app.graphNavigation),
       {
-        onBack: () => {
-          hideModuleOverlays();
-          app.graphNavigation = goBack(app.graphNavigation);
-          void navigateGraph();
-        },
-        onForward: () => {
-          hideModuleOverlays();
-          app.graphNavigation = goForward(app.graphNavigation);
-          void navigateGraph();
-        },
-        onNavigate: (crumb) => {
-          hideModuleOverlays();
-          app.graphNavigation = navigateTo(app.graphNavigation, crumb);
-          void navigateGraph({ skipAutoAdvance: true });
-        },
+        ...navCallbacks,
         onLayoutModeChange: (mode) => {
           layoutMode = mode;
           void reorganizeVisibleLayout();
@@ -1930,6 +2003,7 @@ export async function startApp(): Promise<void> {
     resultsPanel.setResult(null);
     refreshModulesList();
     graphNavContainer.innerHTML = "";
+    clearBreadcrumbBar(breadcrumbBar);
 
     const ctx2d = canvas.getContext("2d");
     if (ctx2d) {
@@ -1967,6 +2041,7 @@ export async function startApp(): Promise<void> {
       btnRun.disabled = false;
       persist();
       await restoreAnalysisTriggers(scan.root);
+      refreshBreadcrumbs();
       return true;
     } catch (err) {
       console.error(err);

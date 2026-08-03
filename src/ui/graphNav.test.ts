@@ -1,11 +1,106 @@
 import { describe, expect, it } from "vitest";
-import { renderGraphNav } from "./graphNav";
+import {
+  clearBreadcrumbBar,
+  renderBreadcrumbBar,
+  renderGraphNav,
+} from "./graphNav";
 import { rootNavigation } from "../graph/navigation";
 import { DEFAULT_MODULE_FILTERS } from "../graph/moduleFilters";
 
 describe("ui/graphNav", () => {
-  it("exports renderGraphNav", () => {
-    expect(typeof renderGraphNav).toBe("function");
+  it("stacks tools above a dedicated crumb bar", () => {
+    const container = document.createElement("div");
+    renderGraphNav(
+      container,
+      rootNavigation(),
+      true,
+      false,
+      {
+        onBack: () => {},
+        onForward: () => {},
+        onNavigate: () => {},
+        onFocusView: () => {},
+        onModuleFiltersChange: () => {},
+      },
+      {
+        stats: { nodes: 4, edges: 3 },
+        moduleFilters: DEFAULT_MODULE_FILTERS,
+        focusEnabled: true,
+      },
+    );
+
+    const stack = container.querySelector(".graph-nav-stack");
+    const tools = container.querySelector(".graph-nav-bar");
+    const crumbs = container.querySelector(".graph-nav-crumb-bar");
+    expect(stack).toBeTruthy();
+    expect(tools).toBeTruthy();
+    expect(crumbs).toBeTruthy();
+    expect(stack?.children[0]).toBe(tools);
+    expect(stack?.children[1]).toBe(crumbs);
+    expect(crumbs?.querySelector(".graph-nav-crumb-current")?.textContent).toBe(
+      "Packages",
+    );
+    expect(crumbs?.querySelector(".graph-nav-stats")?.textContent).toContain(
+      "4 modules",
+    );
+    expect(
+      crumbs?.querySelector<HTMLButtonElement>('[aria-label="Back"]')?.disabled,
+    ).toBe(false);
+  });
+
+  it("renders VS Code-style breadcrumbs under a dedicated bar", () => {
+    const bar = document.createElement("div");
+    let navigated = false;
+    renderBreadcrumbBar(
+      bar,
+      rootNavigation(),
+      true,
+      false,
+      {
+        onBack: () => {},
+        onForward: () => {},
+        onNavigate: () => {
+          navigated = true;
+        },
+      },
+      { stats: { nodes: 3, edges: 2 } },
+    );
+
+    expect(bar.querySelector(".breadcrumb-items")).toBeTruthy();
+    expect(bar.querySelector(".breadcrumb-item-current")?.textContent).toBeTruthy();
+    expect(bar.querySelector(".breadcrumb-stats")?.textContent).toContain("3 modules");
+    expect(
+      bar.querySelector<HTMLButtonElement>('[aria-label="Back"]')?.disabled,
+    ).toBe(false);
+    expect(
+      bar.querySelector<HTMLButtonElement>('[aria-label="Forward"]')?.disabled,
+    ).toBe(true);
+
+    // Root-only nav has a single current crumb (not a link).
+    expect(navigated).toBe(false);
+    clearBreadcrumbBar(bar);
+    expect(bar.classList.contains("is-empty")).toBe(true);
+  });
+
+  it("renders file path segments in the breadcrumb bar", () => {
+    const bar = document.createElement("div");
+    renderBreadcrumbBar(
+      bar,
+      rootNavigation(),
+      false,
+      false,
+      {
+        onBack: () => {},
+        onForward: () => {},
+        onNavigate: () => {},
+      },
+      { filePath: "src/ui/graphNav.ts" },
+    );
+    const items = [...bar.querySelectorAll(".breadcrumb-item")].map(
+      (el) => el.textContent,
+    );
+    expect(items).toEqual(["src", "ui", "graphNav.ts"]);
+    expect(bar.querySelector(".breadcrumb-stats")).toBeNull();
   });
 
   it("renders layout family icon buttons and DAG flow when DAG is selected", () => {
