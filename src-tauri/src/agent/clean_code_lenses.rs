@@ -11,7 +11,32 @@ pub const CLEAN_CODE_SKILL_INSTRUCTIONS: &str =
     include_str!("../../../src/ai_validation/skills/ai-clean-code/SKILL.md");
 
 /// Clean Code principles loaded from DevTree skill rules.
+/// Based on https://www.softensity.com/blog/clean-code-cheat-sheet/
 pub const CLEAN_CODE_PRINCIPLES: &[CleanCodePrinciple] = &[
+    CleanCodePrinciple {
+        key: "clean_general",
+        label: "General rules",
+        checklist: include_str!("../../../src/ai_validation/skills/ai-clean-code/rules/general.md"),
+    },
+    CleanCodePrinciple {
+        key: "clean_design",
+        label: "Design rules",
+        checklist: include_str!("../../../src/ai_validation/skills/ai-clean-code/rules/design.md"),
+    },
+    CleanCodePrinciple {
+        key: "clean_understandability",
+        label: "Understandability",
+        checklist: include_str!(
+            "../../../src/ai_validation/skills/ai-clean-code/rules/understandability.md"
+        ),
+    },
+    CleanCodePrinciple {
+        key: "clean_code_structure",
+        label: "Source code structure",
+        checklist: include_str!(
+            "../../../src/ai_validation/skills/ai-clean-code/rules/code-structure.md"
+        ),
+    },
     CleanCodePrinciple {
         key: "clean_meaningful_names",
         label: "Meaningful names",
@@ -151,9 +176,9 @@ mod tests {
 
     #[test]
     fn selects_enabled_clean_code_principles() {
-        assert_eq!(CLEAN_CODE_PRINCIPLES.len(), 11);
+        assert_eq!(CLEAN_CODE_PRINCIPLES.len(), 15);
         let selected = selected_clean_code_principles(None);
-        assert_eq!(selected.len(), 11);
+        assert_eq!(selected.len(), 15);
         let prompt = build_clean_code_principle_prompt(None);
         assert!(prompt.contains("Selected Clean Code principles"));
         assert!(prompt.contains("clean_meaningful_names"));

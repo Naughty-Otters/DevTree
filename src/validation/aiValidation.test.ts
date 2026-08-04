@@ -91,7 +91,7 @@ describe("aiValidation LLM configuration", () => {
   it("detects clean code principle keys", () => {
     expect(isAiValidationRuleId("ai_clean_code")).toBe(true);
     expect(isCleanCodePrincipleKey("clean_dry")).toBe(true);
-    expect(cleanCodePrincipleSettingDefs()).toHaveLength(11);
+    expect(cleanCodePrincipleSettingDefs()).toHaveLength(15);
     expect(shouldShowAiRuleSetting("ai_clean_code", "clean_boy_scout")).toBe(true);
     expect(aiRuleCategoryLabel("ai")).toBe("AI Validation");
   });

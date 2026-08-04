@@ -117,7 +117,7 @@ const AI_RULES: &[AiValidationRuleDef] = &[
     AiValidationRuleDef {
         id: "ai_clean_code",
         name: "AI Clean Code Reviewer",
-        description: "Review current workspace git changes against selectable Clean Code principles (names, functions, SRP, DRY, tests, smells, etc.).",
+        description: "Review current workspace git changes against selectable Clean Code principles from the Softensity cheat sheet (general, design, naming, functions, SRP, DRY, structure, tests, smells, etc.).",
         category: "ai",
         instructions: CLEAN_CODE_SKILL_INSTRUCTIONS,
     },
@@ -753,6 +753,10 @@ mod tests {
         clean.insert("clean_dry".into(), json!(true));
         // disable other principles so only dry is selected (defaults are true)
         for principle in [
+            "clean_general",
+            "clean_design",
+            "clean_understandability",
+            "clean_code_structure",
             "clean_meaningful_names",
             "clean_functions",
             "clean_single_responsibility",

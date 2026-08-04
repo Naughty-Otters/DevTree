@@ -927,7 +927,7 @@ function mockRules(): AnalysisRule[] {
       id: "ai_clean_code",
       name: "AI Clean Code Reviewer",
       description:
-        "Review current workspace git changes against selectable Clean Code principles (names, functions, SRP, DRY, tests, smells, etc.).",
+        "Review current workspace git changes against selectable Clean Code principles from the Softensity cheat sheet (general, design, naming, functions, SRP, DRY, structure, tests, smells, etc.).",
       category: "ai",
       settings: aiCleanCodeSettings,
     },

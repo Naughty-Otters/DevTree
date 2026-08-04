@@ -217,6 +217,10 @@ export function codeReviewLensSettingDefs(): RuleSettingDef[] {
 
 /** Selectable Clean Code principles for `ai_clean_code`. */
 export const CLEAN_CODE_PRINCIPLE_KEYS = [
+  "clean_general",
+  "clean_design",
+  "clean_understandability",
+  "clean_code_structure",
   "clean_meaningful_names",
   "clean_functions",
   "clean_single_responsibility",
@@ -233,6 +237,10 @@ export const CLEAN_CODE_PRINCIPLE_KEYS = [
 export type CleanCodePrincipleKey = (typeof CLEAN_CODE_PRINCIPLE_KEYS)[number];
 
 const CLEAN_CODE_PRINCIPLE_LABELS: Record<CleanCodePrincipleKey, string> = {
+  clean_general: "General rules",
+  clean_design: "Design rules",
+  clean_understandability: "Understandability",
+  clean_code_structure: "Source code structure",
   clean_meaningful_names: "Meaningful names",
   clean_functions: "Functions",
   clean_single_responsibility: "Single responsibility",
