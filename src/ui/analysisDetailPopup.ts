@@ -7,6 +7,7 @@ import {
   showValidationDetail,
   type ValidationDetailHandlers,
 } from "./validationDetailPopup";
+import { t, type MessageKey } from "../i18n";
 
 export type AnalysisStatKind =
   | "modules"
@@ -26,12 +27,12 @@ let backdropEl: HTMLElement | null = null;
 let dialogEl: HTMLElement | null = null;
 let escapeHandler: ((e: KeyboardEvent) => void) | null = null;
 
-const STAT_TITLES: Record<AnalysisStatKind, string> = {
-  modules: "Modules",
-  dependencies: "Dependencies",
-  pass: "Passed rules",
-  warn: "Warnings",
-  fail: "Failures",
+const STAT_TITLE_KEYS: Record<AnalysisStatKind, MessageKey> = {
+  modules: "analysisDetail.modules",
+  dependencies: "analysisDetail.dependencies",
+  pass: "analysisDetail.passedRules",
+  warn: "analysisDetail.warnings",
+  fail: "analysisDetail.failures",
 };
 
 function ensureElements(): { backdrop: HTMLElement; dialog: HTMLElement } {
@@ -86,7 +87,7 @@ function renderModuleList(
   if (nodes.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No modules in the dependency graph.";
+    empty.textContent = t("analysisDetail.noModules");
     body.appendChild(empty);
     return;
   }
@@ -111,7 +112,11 @@ function renderModuleList(
 
       const detail = document.createElement("span");
       detail.className = "validation-detail-entry-detail";
-      detail.textContent = `${node.path} · ${node.loc} LOC · ${node.kind}`;
+      detail.textContent = t("analysisDetail.moduleMeta", {
+        path: node.path,
+        loc: node.loc,
+        kind: node.kind,
+      });
 
       main.append(name, detail);
 
@@ -121,7 +126,7 @@ function renderModuleList(
       const graphBtn = document.createElement("button");
       graphBtn.type = "button";
       graphBtn.className = "btn-text validation-detail-action";
-      graphBtn.textContent = "Show on graph";
+      graphBtn.textContent = t("analysisDetail.showOnGraph");
       graphBtn.addEventListener("click", () => {
         handlers.onShowModuleOnGraph?.(node.id);
       });
@@ -132,7 +137,7 @@ function renderModuleList(
         const openBtn = document.createElement("button");
         openBtn.type = "button";
         openBtn.className = "btn-text validation-detail-action";
-        openBtn.textContent = "Open file";
+        openBtn.textContent = t("analysisDetail.openFile");
         openBtn.addEventListener("click", () => {
           handlers.onOpenModuleFile?.(openable.path, openable.line);
         });
@@ -155,7 +160,7 @@ function renderDependencyList(
   if (edges.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No dependencies in the dependency graph.";
+    empty.textContent = t("analysisDetail.noDependencies");
     body.appendChild(empty);
     return;
   }
@@ -190,7 +195,7 @@ function renderDependencyList(
       const graphBtn = document.createElement("button");
       graphBtn.type = "button";
       graphBtn.className = "btn-text validation-detail-action";
-      graphBtn.textContent = "Show on graph";
+      graphBtn.textContent = t("analysisDetail.showOnGraph");
       graphBtn.addEventListener("click", () => {
         handlers.onShowDependencyOnGraph?.(edge.source, edge.target);
       });
@@ -212,7 +217,7 @@ function renderValidationRuleList(
   if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No rules in this category.";
+    empty.textContent = t("analysisDetail.noRules");
     body.appendChild(empty);
     return;
   }
@@ -254,7 +259,7 @@ function renderValidationRuleList(
       const detailsBtn = document.createElement("button");
       detailsBtn.type = "button";
       detailsBtn.className = "btn-text validation-detail-action";
-      detailsBtn.textContent = "View details";
+      detailsBtn.textContent = t("analysisDetail.viewDetails");
       detailsBtn.addEventListener("click", () => {
         hideAnalysisStatDetail();
         showValidationDetail(item, handlers.validation!);
@@ -284,7 +289,7 @@ export function showAnalysisStatDetail(
 
   const title = document.createElement("h2");
   title.className = "validation-detail-title";
-  title.textContent = STAT_TITLES[kind];
+  title.textContent = t(STAT_TITLE_KEYS[kind]);
 
   titleRow.appendChild(title);
 
@@ -297,13 +302,19 @@ export function showAnalysisStatDetail(
   switch (kind) {
     case "modules": {
       const count = result.graph.nodes.length;
-      message.textContent = `${count} module${count === 1 ? "" : "s"} in the analyzed dependency graph.`;
+      message.textContent =
+        count === 1
+          ? t("analysisDetail.modulesSummaryOne")
+          : t("analysisDetail.modulesSummary", { n: count });
       renderModuleList(body, result.graph.nodes, handlers);
       break;
     }
     case "dependencies": {
       const count = result.graph.edges.length;
-      message.textContent = `${count} dependency edge${count === 1 ? "" : "s"} between modules.`;
+      message.textContent =
+        count === 1
+          ? t("analysisDetail.depsSummaryOne")
+          : t("analysisDetail.depsSummary", { n: count });
       renderDependencyList(body, result.graph.edges, handlers);
       break;
     }
@@ -311,7 +322,10 @@ export function showAnalysisStatDetail(
     case "warn":
     case "fail": {
       const items = validationItemsForKind(result, kind);
-      message.textContent = `${items.length} validation rule${items.length === 1 ? "" : "s"} with status “${kind}”.`;
+      message.textContent =
+        items.length === 1
+          ? t("analysisDetail.rulesSummaryOne", { kind })
+          : t("analysisDetail.rulesSummary", { n: items.length, kind });
       renderValidationRuleList(body, items, handlers);
       break;
     }
@@ -320,7 +334,7 @@ export function showAnalysisStatDetail(
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "validation-detail-close";
-  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.setAttribute("aria-label", t("details.close"));
   closeBtn.textContent = "×";
   closeBtn.addEventListener("click", () => hideAnalysisStatDetail());
 

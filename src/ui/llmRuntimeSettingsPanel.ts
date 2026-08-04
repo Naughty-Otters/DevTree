@@ -5,6 +5,7 @@ import {
   RUNTIME_TOKEN_LIMITS,
   RUNTIME_TURNS_LIMITS,
 } from "../validation/aiValidation";
+import { getLocaleTag, t } from "../i18n";
 
 export interface LlmRuntimeSettingsPanelHandlers {
   onChange: (settings: AiValidationRuntimeSettings) => void;
@@ -20,12 +21,14 @@ export function createLlmRuntimeSettingsPanel(
 
   const hint = document.createElement("p");
   hint.className = "settings-hint";
-  hint.textContent =
-    "Budgets stop AI validation when either the turn or token limit is reached (whichever comes first). Each turn is one model round (often with tool calls like grep or read_files).";
+  hint.textContent = t("llm.runtimeHint");
 
   const maxTurnsInput = numberField(
-    "AI validation turn budget",
-    `Tool-call rounds for the AI validation session base (4–${RUNTIME_TURNS_LIMITS.validationMax}). Scaled up when multiple AI phases run together.`,
+    t("llm.runtime.maxTurns"),
+    t("llm.runtime.maxTurnsDesc", {
+      min: RUNTIME_TURNS_LIMITS.min,
+      max: RUNTIME_TURNS_LIMITS.validationMax,
+    }),
     RUNTIME_TURNS_LIMITS.min,
     RUNTIME_TURNS_LIMITS.validationMax,
     () => settings.maxTurns,
@@ -35,9 +38,13 @@ export function createLlmRuntimeSettingsPanel(
     },
   );
 
+  const locale = getLocaleTag();
   const maxTokensInput = numberField(
-    "AI validation token budget (0 = unlimited)",
-    `Caps billed total tokens for the AI validation session (0, or ${RUNTIME_TOKEN_LIMITS.minWhenSet.toLocaleString()}–${RUNTIME_TOKEN_LIMITS.max.toLocaleString()}).`,
+    t("llm.runtime.maxTokens"),
+    t("llm.runtime.maxTokensDesc", {
+      minWhenSet: RUNTIME_TOKEN_LIMITS.minWhenSet.toLocaleString(locale),
+      max: RUNTIME_TOKEN_LIMITS.max.toLocaleString(locale),
+    }),
     0,
     RUNTIME_TOKEN_LIMITS.max,
     () => settings.maxTokens,
@@ -48,8 +55,11 @@ export function createLlmRuntimeSettingsPanel(
   );
 
   const agentMaxTurnsInput = numberField(
-    "Agent turn budget",
-    `Tool-call rounds for interactive agent skills (4–${RUNTIME_TURNS_LIMITS.agentMax})`,
+    t("llm.runtime.agentMaxTurns"),
+    t("llm.runtime.agentMaxTurnsDesc", {
+      min: RUNTIME_TURNS_LIMITS.min,
+      max: RUNTIME_TURNS_LIMITS.agentMax,
+    }),
     RUNTIME_TURNS_LIMITS.min,
     RUNTIME_TURNS_LIMITS.agentMax,
     () => settings.agentMaxTurns,

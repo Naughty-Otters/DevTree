@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 /** Append items in pages so large lists don't freeze the UI (cumulative "Show more"). */
 export function appendPagedItems<T>(
   host: HTMLElement,
@@ -24,7 +26,10 @@ export function appendPagedItems<T>(
       moreBtn.remove();
       return;
     }
-    moreBtn.textContent = `Show more (${shown.toLocaleString()} / ${items.length.toLocaleString()})`;
+    moreBtn.textContent = t("list.showMore", {
+      shown: shown.toLocaleString(),
+      total: items.length.toLocaleString(),
+    });
     if (!moreBtn.isConnected) moreHost.appendChild(moreBtn);
   };
 
@@ -51,7 +56,7 @@ export function renderPagedGrid<T>(
   options: PagedGridOptions<T> = {},
 ): void {
   const pageSize = options.pageSize ?? 24;
-  const emptyText = options.emptyText ?? "No items";
+  const emptyText = options.emptyText ?? t("list.empty");
 
   host.replaceChildren();
   host.classList.add("paged-grid");
@@ -67,12 +72,12 @@ export function renderPagedGrid<T>(
   const prevBtn = document.createElement("button");
   prevBtn.type = "button";
   prevBtn.className = "btn btn-ghost paged-grid-nav";
-  prevBtn.textContent = "Previous";
+  prevBtn.textContent = t("list.previous");
 
   const nextBtn = document.createElement("button");
   nextBtn.type = "button";
   nextBtn.className = "btn btn-ghost paged-grid-nav";
-  nextBtn.textContent = "Next";
+  nextBtn.textContent = t("list.next");
 
   const meta = document.createElement("span");
   meta.className = "paged-grid-meta";
@@ -91,7 +96,7 @@ export function renderPagedGrid<T>(
     grid.replaceChildren();
 
     if (!hydrated) {
-      meta.textContent = "Loading…";
+      meta.textContent = t("list.loading");
       prevBtn.disabled = true;
       nextBtn.disabled = true;
       return;
@@ -102,7 +107,7 @@ export function renderPagedGrid<T>(
       empty.className = "panel-empty paged-grid-empty";
       empty.textContent = emptyText;
       grid.appendChild(empty);
-      meta.textContent = "0 items";
+      meta.textContent = t("list.zeroItems");
       prevBtn.disabled = true;
       nextBtn.disabled = true;
       return;
@@ -120,7 +125,13 @@ export function renderPagedGrid<T>(
     }
     grid.appendChild(fragment);
 
-    meta.textContent = `Page ${page + 1} / ${pages} · ${start + 1}–${end} of ${items.length.toLocaleString()}`;
+    meta.textContent = t("list.pageMeta", {
+      page: page + 1,
+      pages,
+      start: start + 1,
+      end,
+      total: items.length.toLocaleString(),
+    });
     prevBtn.disabled = page <= 0;
     nextBtn.disabled = page >= pages - 1;
   };

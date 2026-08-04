@@ -139,7 +139,16 @@ import {
   loadScoreHistory,
   scheduleSaveAnalysis,
   scheduleSaveUiState,
+  saveUiStateNow,
 } from "./state/store";
+import {
+  applyDomTranslations,
+  initLocale,
+  onLocaleChange,
+  t,
+  type Locale,
+} from "./i18n";
+import { createLanguagePanel } from "./i18n/languagePanel";
 import type { AnalysisScoreSnapshot } from "./analysis/scoreHistory";
 import {
   parsePercentileViewMode,
@@ -211,6 +220,9 @@ export async function startApp(): Promise<void> {
   const designRulesContainer = document.querySelector<HTMLElement>(
     "#design-rules-panel",
   )!;
+  const languagePanelContainer = document.querySelector<HTMLElement>(
+    "#language-panel",
+  )!;
   const graphOverlay = document.querySelector<HTMLElement>("#graph-overlay")!;
   const fileViewerEl = document.querySelector<HTMLElement>("#file-viewer")!;
   const dsmViewEl = document.querySelector<HTMLElement>("#dsm-view")!;
@@ -228,6 +240,7 @@ export async function startApp(): Promise<void> {
     document.querySelector<HTMLElement>("#module-details-panel")!;
 
   const persisted = await loadPersistedUiState();
+  let uiLocale: Locale = initLocale(persisted.uiLocale);
   applyPanelSizes(persisted.panelSizes);
 
   const initialLinterSettings = ensureLinterSettings(persisted.linterSettings);
@@ -303,9 +316,7 @@ export async function startApp(): Promise<void> {
   async function installGitleaksTool(prompt = true): Promise<boolean> {
     if (rulesState.gitleaksInstalling) return false;
     if (prompt) {
-      const ok = window.confirm(
-        "Install gitleaks? DevTree will try Homebrew, go install, or another supported package manager.",
-      );
+      const ok = window.confirm(t("boot.confirmInstallGitleaks"));
       if (!ok) return false;
     }
     rulesState.gitleaksInstalling = true;
@@ -317,20 +328,20 @@ export async function startApp(): Promise<void> {
       if (!result.ok) {
         rulesState.gitleaksInstallError = result.message;
         if (prompt) {
-          await showInstallReport("gitleaks install failed", result.message, "error");
+          await showInstallReport(t("boot.gitleaksInstallFailed"), result.message, "error");
         }
         return false;
       }
       rulesState.gitleaksInstallError = null;
       if (prompt) {
-        await showInstallReport("gitleaks installed", result.message, "success");
+        await showInstallReport(t("boot.gitleaksInstalled"), result.message, "success");
       }
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       rulesState.gitleaksInstallError = message;
       if (prompt) {
-        await showInstallReport("gitleaks install failed", message, "error");
+        await showInstallReport(t("boot.gitleaksInstallFailed"), message, "error");
       }
       return false;
     } finally {
@@ -342,9 +353,7 @@ export async function startApp(): Promise<void> {
   async function installTrufflehogTool(prompt = true): Promise<boolean> {
     if (rulesState.trufflehogInstalling) return false;
     if (prompt) {
-      const ok = window.confirm(
-        "Install TruffleHog? DevTree will try Homebrew, go install, or another supported package manager.",
-      );
+      const ok = window.confirm(t("boot.confirmInstallTrufflehog"));
       if (!ok) return false;
     }
     rulesState.trufflehogInstalling = true;
@@ -356,20 +365,20 @@ export async function startApp(): Promise<void> {
       if (!result.ok) {
         rulesState.trufflehogInstallError = result.message;
         if (prompt) {
-          await showInstallReport("trufflehog install failed", result.message, "error");
+          await showInstallReport(t("boot.trufflehogInstallFailed"), result.message, "error");
         }
         return false;
       }
       rulesState.trufflehogInstallError = null;
       if (prompt) {
-        await showInstallReport("trufflehog installed", result.message, "success");
+        await showInstallReport(t("boot.trufflehogInstalled"), result.message, "success");
       }
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       rulesState.trufflehogInstallError = message;
       if (prompt) {
-        await showInstallReport("trufflehog install failed", message, "error");
+        await showInstallReport(t("boot.trufflehogInstallFailed"), message, "error");
       }
       return false;
     } finally {
@@ -396,9 +405,7 @@ export async function startApp(): Promise<void> {
       return;
     }
     if (
-      window.confirm(
-        "gitleaks is not installed, so the secret scan could not run. Install gitleaks now?",
-      )
+      window.confirm(t("boot.offerGitleaks"))
     ) {
       void installGitleaksTool(false);
     }
@@ -414,9 +421,7 @@ export async function startApp(): Promise<void> {
       return;
     }
     if (
-      window.confirm(
-        "TruffleHog is not installed, so the secret scan could not run. Install TruffleHog now?",
-      )
+      window.confirm(t("boot.offerTrufflehog"))
     ) {
       void installTrufflehogTool(false);
     }
@@ -601,7 +606,7 @@ export async function startApp(): Promise<void> {
     },
     onRunFailed: (run) => {
       console.error(run.error);
-      alert(`Analysis failed: ${run.error}`);
+      alert(t("boot.analysisFailed", { error: String(run.error) }));
     },
   });
 
@@ -786,8 +791,8 @@ export async function startApp(): Promise<void> {
     app.hierarchyLoading = true;
     if (!opts?.silent) {
       showOverlay(
-        "Loading dependency graph…",
-        "Reading hierarchy from the analysis cache.",
+        t("overlay.loadingGraph"),
+        t("overlay.loadingGraphDetail"),
       );
     }
     refreshModulesList({ loading: true });
@@ -829,7 +834,7 @@ export async function startApp(): Promise<void> {
       if (hierarchyIsHydrated(app.hierarchy)) {
         // loadGraph / caller will hide overlay after layout.
       } else if (!app.renderState) {
-        showOverlay("Dependency graph unavailable — re-run analysis");
+        showOverlay(t("overlay.graphUnavailable"));
       }
     }
   }
@@ -915,7 +920,7 @@ export async function startApp(): Promise<void> {
             : undefined,
         hint:
           app.centerView === "graph"
-            ? "Click = details · Double-click = drill / open file"
+            ? t("boot.graphHint")
             : null,
       },
     );
@@ -948,12 +953,30 @@ export async function startApp(): Promise<void> {
       edgeStyle,
       moduleFilters: { ...moduleFilters },
       languageFilters: { ...languageFilters },
+      uiLocale,
       setupWizardCompleted,
     };
   }
 
   function persist(): void {
     scheduleSaveUiState(collectUiState());
+  }
+
+  async function persistUiNow(): Promise<void> {
+    await saveUiStateNow(collectUiState());
+  }
+
+  let languagePanelApi: ReturnType<typeof createLanguagePanel> | null = null;
+
+  function applyShellI18n(): void {
+    applyDomTranslations(document);
+    if (!app.projectPath) {
+      projectPathEl.textContent = t("app.noProject");
+      projectPathEl.removeAttribute("title");
+    }
+    mountToolbarIcons();
+    initTooltips();
+    languagePanelApi?.render();
   }
 
   function persistAnalysis(): void {
@@ -1037,7 +1060,7 @@ export async function startApp(): Promise<void> {
       onSuggestLayers: () => {
         const hierarchy = app.hierarchy ?? app.analysisResult?.hierarchy;
         if (!hierarchy) {
-          alert("Run analysis first to suggest layers from the DSM.");
+          alert(t("boot.suggestLayersFirst"));
           return;
         }
         const dsm = computeDsm(hierarchy, {
@@ -1137,7 +1160,7 @@ export async function startApp(): Promise<void> {
         refreshGraphNav(app.analysisResult.graph);
         return;
       }
-      dsmView.setLoading("Loading Design Structure Matrix…");
+      dsmView.setLoading(t("boot.loadingDsm"));
       const hierarchy = await ensureAnalysisHierarchy({ silent: true });
       if (!hierarchy) {
         dsmView.setLoading(null);
@@ -1346,6 +1369,42 @@ export async function startApp(): Promise<void> {
   };
 
   createLintersPanel(lintersContainer, lintersState, lintersHandlers);
+
+  languagePanelApi = createLanguagePanel(languagePanelContainer, (locale) => {
+    uiLocale = locale;
+    void persistUiNow();
+    refreshAllUiForLocale();
+  });
+
+  function refreshAllUiForLocale(): void {
+    applyShellI18n();
+    updateRunButtonHint();
+    renderRulesPanel();
+    createLspServersPanel(lspServersContainer, lspState, lspHandlers);
+    createLintersPanel(lintersContainer, lintersState, lintersHandlers);
+    llmProviderConfigsPanel.setConfigs(app.llmConfigurations);
+    llmRuntimeSettingsPanel.setSettings(app.aiValidationRuntime);
+    renderDesignRulesPanel();
+
+    if (!app.projectPath) {
+      renderProjectTree(treeContainer, null, { onFileOpen: handleFileOpen });
+    }
+    refreshModulesList();
+    refreshGraphNav(app.analysisResult?.graph);
+    refreshBreadcrumbs(app.analysisResult?.graph);
+    resultsPanel.setResult(app.analysisResult);
+    refreshDsmView();
+    moduleDetailsPanel.refresh();
+
+    if (!fileViewer.isOpen() && app.centerView === "file") {
+      fileViewer.showGuide();
+    }
+
+    // Only refresh empty-state CTAs — never clobber a busy layout/loading overlay.
+    if (graphOverlay.classList.contains("flow-overlay-interactive")) {
+      showGuidedOverlay();
+    }
+  }
 
   settingsApi = createSettingsPanel(settingsPanel, {
     initiallyOpen: settingsPanelOpen,
@@ -1614,8 +1673,8 @@ export async function startApp(): Promise<void> {
         await loadGraph(app.analysisResult.graph, opts);
       } else if (!app.renderState) {
         showOverlay(
-          "Dependency graph unavailable",
-          "Re-run analysis to rebuild package and file dependencies.",
+          t("overlay.graphUnavailableTitle"),
+          t("overlay.graphUnavailableDetail"),
         );
       }
       return;
@@ -1686,7 +1745,7 @@ export async function startApp(): Promise<void> {
     } catch (err) {
       console.error(err);
       fileViewer.showGuide();
-      alert(`Could not open file: ${err}`);
+      alert(t("boot.couldNotOpenFile", { error: String(err) }));
     }
   }
 
@@ -1872,19 +1931,18 @@ export async function startApp(): Promise<void> {
   function showGuidedOverlay(): void {
     if (!app.projectPath) {
       renderFlowOverlay(graphOverlay, {
-        title: "Open a project to get started",
-        detail:
-          "Browse a folder to explore dependencies, run quality rules, and review architecture health.",
+        title: t("overlay.openProjectTitle"),
+        detail: t("overlay.openProjectDetail"),
         actions: [
           {
-            label: "Open project",
+            label: t("overlay.openProject"),
             primary: true,
             onClick: () => {
               void handleOpenProject();
             },
           },
           {
-            label: "Setup guide",
+            label: t("overlay.setupGuide"),
             onClick: () => {
               void launchSetupWizard();
             },
@@ -1895,25 +1953,24 @@ export async function startApp(): Promise<void> {
     }
 
     renderFlowOverlay(graphOverlay, {
-      title: "Run analysis to map this project",
-      detail:
-        "1) Review rules in Settings · 2) Run analysis · 3) Explore Graph, DSM, and findings below.",
+      title: t("overlay.runAnalysisTitle"),
+      detail: t("overlay.runAnalysisDetail"),
       actions: [
         {
-          label: "Run analysis",
+          label: t("overlay.runAnalysis"),
           primary: true,
           onClick: () => {
             void handleRunAnalysis();
           },
         },
         {
-          label: "Configure rules",
+          label: t("overlay.configureRules"),
           onClick: () => {
             settingsApi.open("rules");
           },
         },
         {
-          label: "Setup guide",
+          label: t("overlay.setupGuide"),
           onClick: () => {
             void launchSetupWizard();
           },
@@ -1958,8 +2015,8 @@ export async function startApp(): Promise<void> {
     const showLayoutOverlay = app.centerView === "graph";
     if (showLayoutOverlay) {
       showOverlay(
-        "Computing layout…",
-        "Arranging modules for the current graph view.",
+        t("overlay.computingLayout"),
+        t("overlay.computingLayoutDetail"),
       );
     }
     refreshModulesList({ loading: true });
@@ -2046,7 +2103,7 @@ export async function startApp(): Promise<void> {
 
   async function openProjectAt(path: string): Promise<boolean> {
     try {
-      projectPathEl.textContent = "Scanning…";
+      projectPathEl.textContent = t("boot.scanning");
       const scan = await scanProject(path);
 
       // Always refresh the main panel when (re)opening a project so the
@@ -2075,7 +2132,7 @@ export async function startApp(): Promise<void> {
       return true;
     } catch (err) {
       console.error(err);
-      projectPathEl.textContent = "Failed to open project";
+      projectPathEl.textContent = t("boot.failedOpenProject");
       return false;
     }
   }
@@ -2095,7 +2152,7 @@ export async function startApp(): Promise<void> {
     } catch (err) {
       console.error(err);
       fileViewer.showGuide();
-      alert(`Could not open file: ${err}`);
+      alert(t("boot.couldNotOpenFile", { error: String(err) }));
     }
   }
 
@@ -2390,9 +2447,9 @@ export async function startApp(): Promise<void> {
   }
 
   function updateRunButtonHint(): void {
-    const parts: string[] = ["Run analysis"];
-    if (app.analysisTriggers.watchEnabled) parts.push("watching files");
-    if (app.analysisTriggers.scheduleEnabled) parts.push("scheduled");
+    const parts: string[] = [t("overlay.runAnalysis")];
+    if (app.analysisTriggers.watchEnabled) parts.push(t("boot.watchingFiles"));
+    if (app.analysisTriggers.scheduleEnabled) parts.push(t("boot.scheduled"));
     btnRun.title = parts.join(" · ");
   }
 
@@ -2440,8 +2497,8 @@ export async function startApp(): Promise<void> {
     if (app.selectedRules.size === 0) {
       settingsApi.open("rules");
       showOverlay(
-        "Select at least one analysis rule",
-        "Turn on rules in Settings → Analysis Rules, then run analysis again.",
+        t("overlay.selectRulesTitle"),
+        t("overlay.selectRulesDetail"),
       );
       return;
     }
@@ -2519,8 +2576,10 @@ export async function startApp(): Promise<void> {
 
   renderProjectTree(treeContainer, null, { onFileOpen: handleFileOpen });
   refreshModulesList();
-  mountToolbarIcons();
-  initTooltips();
+  applyShellI18n();
+  onLocaleChange((locale) => {
+    uiLocale = locale;
+  });
 
   async function launchSetupWizard(): Promise<void> {
     if (setupWizardOpen) return;
@@ -2644,7 +2703,7 @@ export async function startApp(): Promise<void> {
       void launchSetupWizard();
     }
   } else {
-    projectPathEl.textContent = "Restoring session…";
+    projectPathEl.textContent = t("boot.restoringSession");
     runWhenIdleAsync(async () => {
       const ok = await openProjectAt(persisted.projectPath!);
       if (!ok) return;

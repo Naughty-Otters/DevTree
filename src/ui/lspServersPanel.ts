@@ -3,6 +3,7 @@ import type {
   LspSettingDef,
   LspSettingsMap,
 } from "../lsp/types";
+import { t } from "../i18n";
 import { lucideIcon } from "./icons";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { ChevronDown } from "lucide";
@@ -35,11 +36,11 @@ export function createLspServersPanel(
 
   const note = document.createElement("span");
   note.className = "lsp-note";
-  note.textContent = "Optional — analysis falls back to heuristics if missing";
+  note.textContent = t("lsp.note");
 
   const refresh = document.createElement("button");
   refresh.className = "btn-text";
-  refresh.textContent = "Refresh";
+  refresh.textContent = t("lsp.refresh");
   refresh.disabled = state.loading || state.installingId != null;
   refresh.addEventListener("click", () => {
     void handlers.onRefresh();
@@ -54,14 +55,14 @@ export function createLspServersPanel(
   if (state.loading && state.servers.length === 0) {
     list.appendChild(
       createLoadingPlaceholder({
-        title: "Checking language servers…",
+        title: t("lsp.checking"),
         size: "panel",
       }),
     );
   } else if (state.servers.length === 0) {
     const empty = document.createElement("div");
     empty.className = "lsp-empty";
-    empty.textContent = "Click Refresh to check installed language servers";
+    empty.textContent = t("lsp.empty");
     list.appendChild(empty);
   } else {
     for (const server of state.servers) {
@@ -99,7 +100,9 @@ function serverRow(
   checkbox.type = "checkbox";
   checkbox.className = "lsp-server-enabled";
   checkbox.checked = enabled;
-  checkbox.title = enabled ? "Disable server" : "Enable server";
+  checkbox.title = enabled
+    ? t("lsp.disableServer")
+    : t("lsp.enableServer");
   checkbox.addEventListener("change", () => {
     if (!state.settings[server.id]) state.settings[server.id] = {};
     state.settings[server.id].enabled = checkbox.checked;
@@ -110,7 +113,7 @@ function serverRow(
   const info = document.createElement("button");
   info.type = "button";
   info.className = "lsp-server-info";
-  info.title = enabled ? "Disable server" : "Enable server";
+  info.title = enabled ? t("lsp.disableServer") : t("lsp.enableServer");
 
   const name = document.createElement("div");
   name.className = "lsp-server-name";
@@ -139,15 +142,15 @@ function serverRow(
   expandBtn.disabled = detailDefs.length === 0;
   expandBtn.title =
     detailDefs.length === 0
-      ? "No settings"
+      ? t("lsp.noSettings")
       : expanded
-        ? "Collapse settings"
-        : "Expand settings";
+        ? t("lsp.collapseSettings")
+        : t("lsp.expandSettings");
   expandBtn.setAttribute(
     "aria-label",
     detailDefs.length === 0
-      ? "No settings"
-      : `Expand or collapse settings for ${server.label}`,
+      ? t("lsp.noSettings")
+      : t("lsp.expandSettingsAria", { name: server.label }),
   );
 
   if (detailDefs.length > 0) {
@@ -175,7 +178,7 @@ function serverRow(
       ? "lsp-status lsp-status-installed"
       : "lsp-status lsp-status-missing";
   badge.textContent =
-    server.status === "installed" ? "Installed" : "Missing";
+    server.status === "installed" ? t("lsp.installed") : t("lsp.missing");
 
   top.append(checkbox, info, expandBtn, badge);
   row.appendChild(top);
@@ -188,7 +191,7 @@ function serverRow(
     install.className = "btn btn-ghost lsp-install-btn";
     const busy = state.installingId === server.id;
     install.disabled = state.installingId != null || state.loading;
-    install.textContent = busy ? "Installing…" : "Install";
+    install.textContent = busy ? t("lsp.installing") : t("lsp.install");
     install.addEventListener("click", () => {
       void handlers.onInstall(server.id);
     });

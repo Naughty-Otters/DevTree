@@ -1,3 +1,5 @@
+import { t, type MessageKey } from "../i18n";
+
 export type AnalysisRunMode = "now" | "watch" | "schedule";
 
 export interface AnalysisRunChoice {
@@ -29,20 +31,22 @@ export const WATCH_DEBOUNCE_OPTIONS_MS = [
 export function formatWatchDebounceMs(ms: number): string {
   if (ms >= 60_000 && ms % 60_000 === 0) {
     const mins = ms / 60_000;
-    return mins === 1 ? "1 min" : `${mins} mins`;
+    return mins === 1
+      ? t("analysis.debounceMin")
+      : t("analysis.debounceMins", { n: mins });
   }
   if (ms >= 1_000 && ms % 1_000 === 0) {
-    return `${ms / 1_000}s`;
+    return t("analysis.debounceSecs", { n: ms / 1_000 });
   }
-  return `${ms}ms`;
+  return t("analysis.debounceMs", { n: ms });
 }
 
-export const CRON_PRESETS: { label: string; value: string }[] = [
-  { label: "Every 15 minutes", value: "*/15 * * * *" },
-  { label: "Every 30 minutes", value: "*/30 * * * *" },
-  { label: "Every hour", value: "0 * * * *" },
-  { label: "Every day at 9:00", value: "0 9 * * *" },
-  { label: "Weekdays at 9:00", value: "0 9 * * 1-5" },
+export const CRON_PRESETS: { labelKey: MessageKey; value: string }[] = [
+  { labelKey: "analysis.cron.every15", value: "*/15 * * * *" },
+  { labelKey: "analysis.cron.every30", value: "*/30 * * * *" },
+  { labelKey: "analysis.cron.everyHour", value: "0 * * * *" },
+  { labelKey: "analysis.cron.everyDay9", value: "0 9 * * *" },
+  { labelKey: "analysis.cron.weekdays9", value: "0 9 * * 1-5" },
 ];
 
 export interface AnalysisDialogOptions {
@@ -74,14 +78,16 @@ export function showAnalysisDialog(
     const title = document.createElement("h2");
     title.id = "analysis-dialog-title";
     title.className = "modal-title";
-    title.textContent = "Run Analysis";
+    title.textContent = t("analysis.runTitle");
 
     const subtitle = document.createElement("p");
     subtitle.className = "modal-subtitle";
     subtitle.textContent =
       ruleCount === 0
-        ? "No rules selected yet. Configure the rule board, then choose how analysis should run."
-        : `${ruleCount} rule${ruleCount === 1 ? "" : "s"} selected. Choose how this analysis should run.`;
+        ? t("analysis.noRules")
+        : ruleCount === 1
+          ? t("analysis.rulesSelectedOne")
+          : t("analysis.rulesSelected", { count: ruleCount });
 
     const rulesRow = document.createElement("p");
     rulesRow.className = "run-dialog-rules-row";
@@ -89,7 +95,7 @@ export function showAnalysisDialog(
       const link = document.createElement("button");
       link.type = "button";
       link.className = "btn-text run-dialog-configure-rules";
-      link.textContent = "Configure rules in Settings";
+      link.textContent = t("analysis.configureRules");
       link.addEventListener("click", () => {
         close(null);
         options.onConfigureRules?.();
@@ -109,23 +115,23 @@ export function showAnalysisDialog(
 
     const modes: {
       id: AnalysisRunMode;
-      title: string;
-      desc: string;
+      titleKey: MessageKey;
+      descKey: MessageKey;
     }[] = [
       {
         id: "now",
-        title: "Run now",
-        desc: "Start a single analysis immediately with the current rules and settings.",
+        titleKey: "analysis.runNow",
+        descKey: "analysis.runNowDesc",
       },
       {
         id: "watch",
-        title: "On file changes",
-        desc: "Watch the project folder and re-run after source files change.",
+        titleKey: "analysis.onFileChanges",
+        descKey: "analysis.onFileChangesDesc",
       },
       {
         id: "schedule",
-        title: "On a schedule",
-        desc: "Re-run on a cron schedule while DevTree stays open.",
+        titleKey: "analysis.onSchedule",
+        descKey: "analysis.onScheduleDesc",
       },
     ];
 
@@ -151,10 +157,13 @@ export function showAnalysisDialog(
       card.type = "button";
       card.className = "run-mode-card";
       card.dataset.mode = item.id;
-      card.innerHTML = `
-        <span class="run-mode-card-title">${item.title}</span>
-        <span class="run-mode-card-desc">${item.desc}</span>
-      `;
+      const cardTitle = document.createElement("span");
+      cardTitle.className = "run-mode-card-title";
+      cardTitle.textContent = t(item.titleKey);
+      const cardDesc = document.createElement("span");
+      cardDesc.className = "run-mode-card-desc";
+      cardDesc.textContent = t(item.descKey);
+      card.append(cardTitle, cardDesc);
       card.addEventListener("click", () => {
         mode = item.id;
         syncOptionsVisibility();
@@ -166,7 +175,9 @@ export function showAnalysisDialog(
     // Watch options
     const debounceLabel = document.createElement("label");
     debounceLabel.className = "run-mode-field";
-    debounceLabel.innerHTML = `<span>Debounce after changes</span>`;
+    const debounceSpan = document.createElement("span");
+    debounceSpan.textContent = t("analysis.debounce");
+    debounceLabel.appendChild(debounceSpan);
     const debounceSelect = document.createElement("select");
     debounceSelect.className = "run-mode-select";
     const debounceOptions: number[] = [...WATCH_DEBOUNCE_OPTIONS_MS];
@@ -190,25 +201,27 @@ export function showAnalysisDialog(
     // Schedule options
     const cronLabel = document.createElement("label");
     cronLabel.className = "run-mode-field";
-    cronLabel.innerHTML = `<span>Schedule</span>`;
+    const cronSpan = document.createElement("span");
+    cronSpan.textContent = t("analysis.schedule");
+    cronLabel.appendChild(cronSpan);
     const cronSelect = document.createElement("select");
     cronSelect.className = "run-mode-select";
     for (const preset of CRON_PRESETS) {
       const opt = document.createElement("option");
       opt.value = preset.value;
-      opt.textContent = preset.label;
+      opt.textContent = t(preset.labelKey);
       if (preset.value === cron) opt.selected = true;
       cronSelect.appendChild(opt);
     }
     const customOpt = document.createElement("option");
     customOpt.value = "__custom__";
-    customOpt.textContent = "Custom cron…";
+    customOpt.textContent = t("analysis.customCron");
     cronSelect.appendChild(customOpt);
 
     const cronInput = document.createElement("input");
     cronInput.type = "text";
     cronInput.className = "run-mode-input";
-    cronInput.placeholder = "min hour day month weekday";
+    cronInput.placeholder = t("analysis.cronPlaceholder");
     cronInput.value = cron;
     cronInput.classList.add("hidden");
 
@@ -231,8 +244,7 @@ export function showAnalysisDialog(
 
     const cronHint = document.createElement("p");
     cronHint.className = "run-mode-hint";
-    cronHint.textContent =
-      "Cron uses local time (minute hour day-of-month month day-of-week).";
+    cronHint.textContent = t("analysis.cronHint");
     scheduleOptions.appendChild(cronHint);
 
     // Shared: run immediately
@@ -245,7 +257,7 @@ export function showAnalysisDialog(
       runImmediately = immediateInput.checked;
     });
     const immediateText = document.createElement("span");
-    immediateText.textContent = "Also run once now when enabling";
+    immediateText.textContent = t("analysis.runImmediately");
     immediateLabel.append(immediateInput, immediateText);
     sharedOptions.appendChild(immediateLabel);
 
@@ -258,12 +270,12 @@ export function showAnalysisDialog(
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
     cancelBtn.className = "btn btn-ghost-modal";
-    cancelBtn.textContent = "Cancel";
+    cancelBtn.textContent = t("analysis.cancel");
 
     const startBtn = document.createElement("button");
     startBtn.type = "button";
     startBtn.className = "btn btn-primary";
-    startBtn.textContent = "Start";
+    startBtn.textContent = t("analysis.start");
 
     actions.append(cancelBtn, startBtn);
     dialog.append(title, subtitle, rulesRow, body, actions);
@@ -291,7 +303,7 @@ export function showAnalysisDialog(
           ? cronInput.value.trim()
           : cronSelect.value;
         if (!expr || expr.split(/\s+/).length < 5) {
-          alert("Enter a valid 5-field cron expression.");
+          alert(t("analysis.invalidCron"));
           return;
         }
         cron = expr;

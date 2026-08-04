@@ -1,6 +1,7 @@
 import type { Graph, GraphEdge, GraphNode } from "./types";
 import type { HierarchyIndex } from "../analysis/types";
 import { HIERARCHY_VERSION } from "../analysis/types";
+import { t } from "../i18n";
 
 export type NavLevel = "packages" | "package" | "symbols";
 
@@ -18,7 +19,7 @@ export interface GraphNavigation {
 
 export function rootNavigation(): GraphNavigation {
   const crumbs: NavCrumb[] = [
-    { level: "packages", id: ".", label: "Packages" },
+    { level: "packages", id: ".", label: t("graph.packages") },
   ];
   return { crumbs, history: [crumbs], historyIndex: 0 };
 }

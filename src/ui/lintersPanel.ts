@@ -3,6 +3,7 @@ import type {
   LinterSettingsMap,
 } from "../linter/types";
 import { selectedLinterForGroup } from "../linter/types";
+import { t } from "../i18n";
 import { lucideIcon } from "./icons";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { ChevronDown } from "lucide";
@@ -36,12 +37,11 @@ export function createLintersPanel(
 
   const note = document.createElement("span");
   note.className = "linter-note";
-  note.textContent =
-    "Per-language linters for validation — pick a tool and minimum severity level";
+  note.textContent = t("linters.note");
 
   const refresh = document.createElement("button");
   refresh.className = "btn-text";
-  refresh.textContent = "Refresh";
+  refresh.textContent = t("linters.refresh");
   refresh.disabled = state.loading || state.installingKey != null;
   refresh.addEventListener("click", () => {
     void handlers.onRefresh();
@@ -56,14 +56,14 @@ export function createLintersPanel(
   if (state.loading && state.groups.length === 0) {
     list.appendChild(
       createLoadingPlaceholder({
-        title: "Checking linters…",
+        title: t("linters.checking"),
         size: "panel",
       }),
     );
   } else if (state.groups.length === 0) {
     const empty = document.createElement("div");
     empty.className = "linter-empty";
-    empty.textContent = "Click Refresh to check installed linters";
+    empty.textContent = t("linters.empty");
     list.appendChild(empty);
   } else {
     for (const group of state.groups) {
@@ -103,7 +103,9 @@ function languageRow(
   checkbox.type = "checkbox";
   checkbox.className = "linter-lang-enabled";
   checkbox.checked = enabled;
-  checkbox.title = enabled ? "Disable language linter" : "Enable language linter";
+  checkbox.title = enabled
+    ? t("linters.disableLanguage")
+    : t("linters.enableLanguage");
   checkbox.addEventListener("change", () => {
     if (!state.settings[group.id]) state.settings[group.id] = {};
     state.settings[group.id].enabled = checkbox.checked;
@@ -115,8 +117,8 @@ function languageRow(
   info.type = "button";
   info.className = "linter-lang-info";
   info.title = enabled
-    ? "Disable language linter"
-    : "Enable language linter";
+    ? t("linters.disableLanguage")
+    : t("linters.enableLanguage");
 
   const name = document.createElement("div");
   name.className = "linter-lang-name";
@@ -128,9 +130,12 @@ function languageRow(
     (state.settings[group.id]?.min_level as string | undefined) ??
     group.defaultLevel;
   if (selected?.status === "installed") {
-    meta.textContent = `${selected.label} · level ≥ ${level}`;
+    meta.textContent = t("linters.metaInstalled", {
+      label: selected.label,
+      level,
+    });
   } else if (selected) {
-    meta.textContent = `${selected.label} (not installed)`;
+    meta.textContent = t("linters.metaNotInstalled", { label: selected.label });
   } else {
     meta.textContent = group.linters.find((l) => l.isDefault)?.installHint ?? "";
   }
@@ -145,10 +150,12 @@ function languageRow(
   expandBtn.type = "button";
   expandBtn.className = "linter-lang-expand";
   expandBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
-  expandBtn.title = expanded ? "Collapse settings" : "Expand settings";
+  expandBtn.title = expanded
+    ? t("linters.collapseSettings")
+    : t("linters.expandSettings");
   expandBtn.setAttribute(
     "aria-label",
-    `Expand or collapse settings for ${group.label}`,
+    t("linters.expandSettingsAria", { name: group.label }),
   );
 
   const chevron = document.createElement("span");
@@ -174,7 +181,9 @@ function languageRow(
       ? "linter-status linter-status-installed"
       : "linter-status linter-status-missing";
   badge.textContent =
-    selected?.status === "installed" ? "Ready" : "Missing";
+    selected?.status === "installed"
+      ? t("linters.ready")
+      : t("linters.missing");
 
   top.append(checkbox, info, expandBtn, badge);
   row.appendChild(top);
@@ -195,7 +204,7 @@ function languageRow(
       numberSetting(
         group.id,
         "sample_limit",
-        "Max issues to list",
+        t("linters.sampleLimit"),
         1,
         100,
         state,
@@ -207,7 +216,7 @@ function languageRow(
     available.className = "linter-available";
     const availLabel = document.createElement("div");
     availLabel.className = "linter-available-label";
-    availLabel.textContent = "Available linters";
+    availLabel.textContent = t("linters.available");
     available.appendChild(availLabel);
 
     for (const linter of group.linters) {
@@ -217,7 +226,7 @@ function languageRow(
       const label = document.createElement("span");
       label.className = "linter-available-name";
       label.textContent = linter.isDefault
-        ? `${linter.label} (default)`
+        ? t("linters.defaultSuffix", { label: linter.label })
         : linter.label;
 
       const status = document.createElement("span");
@@ -225,7 +234,10 @@ function languageRow(
         linter.status === "installed"
           ? "linter-status linter-status-installed"
           : "linter-status linter-status-missing";
-      status.textContent = linter.status === "installed" ? "Installed" : "Missing";
+      status.textContent =
+        linter.status === "installed"
+          ? t("linters.installed")
+          : t("linters.missing");
 
       item.append(label, status);
 
@@ -235,7 +247,9 @@ function languageRow(
         const key = installKey(group.id, linter.id);
         const busy = state.installingKey === key;
         install.disabled = state.installingKey != null || state.loading;
-        install.textContent = busy ? "Installing…" : "Install";
+        install.textContent = busy
+          ? t("linters.installing")
+          : t("linters.install");
         install.addEventListener("click", () => {
           void handlers.onInstall(group.id, linter.id);
         });
@@ -243,7 +257,7 @@ function languageRow(
       } else if (linter.id !== selectedId) {
         const use = document.createElement("button");
         use.className = "btn btn-ghost linter-use-btn";
-        use.textContent = "Use";
+        use.textContent = t("linters.use");
         use.addEventListener("click", () => {
           if (!state.settings[group.id]) state.settings[group.id] = {};
           state.settings[group.id].linter_id = linter.id;
@@ -282,7 +296,7 @@ function linterSelect(
 
   const label = document.createElement("label");
   label.className = "linter-setting-label";
-  label.textContent = "Linter";
+  label.textContent = t("linters.linter");
 
   const select = document.createElement("select");
   select.className = "linter-setting-select";
@@ -296,7 +310,7 @@ function linterSelect(
     opt.textContent =
       linter.status === "installed"
         ? linter.label
-        : `${linter.label} (not installed)`;
+        : t("linters.notInstalledOption", { label: linter.label });
     opt.selected = linter.id === current;
     select.appendChild(opt);
   }
@@ -323,7 +337,7 @@ function levelSelect(
 
   const label = document.createElement("label");
   label.className = "linter-setting-label";
-  label.textContent = "Minimum level";
+  label.textContent = t("linters.minLevel");
 
   const select = document.createElement("select");
   select.className = "linter-setting-select";

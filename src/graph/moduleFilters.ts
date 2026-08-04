@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { GraphEdge, GraphNode } from "./types";
 
 /** Which module roles are shown on the graph / modules list. */
@@ -200,22 +201,38 @@ export const MODULE_FILTER_OPTIONS: {
 }[] = [
   {
     key: "withDependencies",
-    label: "With dependencies",
-    hint: "Has any dependency link — one-way or hub (both directions)",
+    get label() {
+      return t("filter.withDependencies");
+    },
+    get hint() {
+      return t("filter.withDependenciesHint");
+    },
   },
   {
     key: "independent",
-    label: "Independent",
-    hint: "No incoming or outgoing dependencies",
+    get label() {
+      return t("filter.independent");
+    },
+    get hint() {
+      return t("filter.independentHint");
+    },
   },
   {
     key: "circular",
-    label: "Circular",
-    hint: "Part of a dependency cycle",
+    get label() {
+      return t("filter.circular");
+    },
+    get hint() {
+      return t("filter.circularHint");
+    },
   },
   {
     key: "hub",
-    label: "Hubs",
-    hint: "Both depends on and depended on (both directions)",
+    get label() {
+      return t("filter.hubs");
+    },
+    get hint() {
+      return t("filter.hubsHint");
+    },
   },
 ];

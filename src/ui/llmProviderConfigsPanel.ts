@@ -8,6 +8,7 @@ import {
   setGlobalConfiguration,
 } from "../validation/aiValidation";
 import { listLlmModels } from "../project/api";
+import { t } from "../i18n";
 import { createLlmConfigFields } from "./llmConfigFields";
 import { lucideIcon } from "./icons";
 import { Plus, Trash2 } from "lucide";
@@ -40,8 +41,7 @@ export function createLlmProviderConfigsPanel(
 
   const hint = document.createElement("p");
   hint.className = "settings-hint";
-  hint.textContent =
-    "Add LLM configurations with API keys. Models are loaded from the provider after you enter a valid API key. Mark one configuration as the global default.";
+  hint.textContent = t("llm.configsHint");
 
   const list = document.createElement("div");
   list.className = "llm-provider-config-list";
@@ -52,7 +52,10 @@ export function createLlmProviderConfigsPanel(
   const addButton = document.createElement("button");
   addButton.type = "button";
   addButton.className = "btn-text";
-  addButton.append(lucideIcon(Plus), document.createTextNode(" Add configuration"));
+  addButton.append(
+    lucideIcon(Plus),
+    document.createTextNode(` ${t("llm.addConfiguration")}`),
+  );
   addButton.addEventListener("click", () => {
     const next = ensureSingleGlobal([
       ...configs,
@@ -164,7 +167,7 @@ export function createLlmProviderConfigsPanel(
     if (providers.length === 0) {
       const empty = document.createElement("p");
       empty.className = "settings-hint";
-      empty.textContent = "Loading providers…";
+      empty.textContent = t("llm.loadingProviders");
       list.appendChild(empty);
       return;
     }
@@ -172,7 +175,7 @@ export function createLlmProviderConfigsPanel(
     if (configs.length === 0) {
       const empty = document.createElement("p");
       empty.className = "settings-hint settings-hint-warn";
-      empty.textContent = "No configurations yet. Add one to enable AI validation.";
+      empty.textContent = t("llm.noConfigs");
       list.appendChild(empty);
       return;
     }
@@ -183,6 +186,12 @@ export function createLlmProviderConfigsPanel(
         scheduleModelFetch(config);
       }
     }
+  }
+
+  function readyStatus(config: LlmConfiguration): string {
+    return isLlmConfigurationReady(config)
+      ? t("llm.ready")
+      : t("llm.missingApiKey");
   }
 
   function renderConfigCard(config: LlmConfiguration): HTMLElement {
@@ -200,12 +209,12 @@ export function createLlmProviderConfigsPanel(
     status.className = `llm-provider-config-status${
       isLlmConfigurationReady(config) ? " is-configured" : ""
     }`;
-    status.textContent = isLlmConfigurationReady(config) ? "Ready" : "Missing API key";
+    status.textContent = readyStatus(config);
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "btn-icon";
-    deleteButton.title = "Remove configuration";
+    deleteButton.title = t("llm.removeConfiguration");
     deleteButton.appendChild(lucideIcon(Trash2));
     deleteButton.addEventListener("click", () => {
       const remaining = configs.filter((entry) => entry.id !== config.id);
@@ -219,7 +228,7 @@ export function createLlmProviderConfigsPanel(
     const nameInput = document.createElement("input");
     nameInput.className = "settings-input";
     nameInput.type = "text";
-    nameInput.placeholder = "Configuration name (optional)";
+    nameInput.placeholder = t("llm.namePlaceholder");
     nameInput.value = config.name;
     nameInput.addEventListener("input", () => {
       config.name = nameInput.value;
@@ -230,12 +239,12 @@ export function createLlmProviderConfigsPanel(
     const apiKeyInput = document.createElement("input");
     apiKeyInput.className = "settings-input";
     apiKeyInput.type = "password";
-    apiKeyInput.placeholder = "API key";
+    apiKeyInput.placeholder = t("llm.apiKeyPlaceholder");
     apiKeyInput.autocomplete = "off";
     apiKeyInput.value = config.apiKey;
     apiKeyInput.addEventListener("input", () => {
       config.apiKey = apiKeyInput.value;
-      status.textContent = isLlmConfigurationReady(config) ? "Ready" : "Missing API key";
+      status.textContent = readyStatus(config);
       status.classList.toggle("is-configured", isLlmConfigurationReady(config));
       handlers.onChange(configs);
       scheduleModelFetch(config);
@@ -252,7 +261,7 @@ export function createLlmProviderConfigsPanel(
       updateConfigs(setGlobalConfiguration(configs, config.id));
     });
     const globalLabel = document.createElement("span");
-    globalLabel.textContent = "Global default for AI validation";
+    globalLabel.textContent = t("llm.globalDefault");
     globalWrap.append(globalInput, globalLabel);
 
     const modelHost = document.createElement("div");
@@ -282,8 +291,8 @@ export function createLlmProviderConfigsPanel(
 
     card.append(
       header,
-      fieldWrap("Name", nameInput),
-      fieldWrap("API key", apiKeyInput),
+      fieldWrap(t("llm.name"), nameInput),
+      fieldWrap(t("llm.apiKey"), apiKeyInput),
       modelHost,
       globalWrap,
     );

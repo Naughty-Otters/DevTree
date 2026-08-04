@@ -7,6 +7,7 @@ import {
   type DsmResult,
 } from "../analysis/dsm";
 import type { GraphNavigation } from "../graph/navigation";
+import { t } from "../i18n";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 
 export interface DsmViewHandlers {
@@ -67,23 +68,31 @@ export function createDsmView(
 
   const levelLabel = document.createElement("label");
   levelLabel.className = "dsm-toolbar-field";
-  levelLabel.innerHTML = `<span>Level</span>`;
+  const levelSpan = document.createElement("span");
+  levelSpan.textContent = t("dsm.level");
   const levelSelect = document.createElement("select");
-  levelSelect.innerHTML = `
-    <option value="package">Packages</option>
-    <option value="file">Files</option>
-  `;
-  levelLabel.appendChild(levelSelect);
+  const optPackage = document.createElement("option");
+  optPackage.value = "package";
+  optPackage.textContent = t("dsm.packages");
+  const optFile = document.createElement("option");
+  optFile.value = "file";
+  optFile.textContent = t("dsm.files");
+  levelSelect.append(optPackage, optFile);
+  levelLabel.append(levelSpan, levelSelect);
 
   const orderLabel = document.createElement("label");
   orderLabel.className = "dsm-toolbar-field";
-  orderLabel.innerHTML = `<span>Order</span>`;
+  const orderSpan = document.createElement("span");
+  orderSpan.textContent = t("dsm.order");
   const orderSelect = document.createElement("select");
-  orderSelect.innerHTML = `
-    <option value="partitioned">Partitioned</option>
-    <option value="hierarchical">Hierarchical</option>
-  `;
-  orderLabel.appendChild(orderSelect);
+  const optPartitioned = document.createElement("option");
+  optPartitioned.value = "partitioned";
+  optPartitioned.textContent = t("dsm.partitioned");
+  const optHierarchical = document.createElement("option");
+  optHierarchical.value = "hierarchical";
+  optHierarchical.textContent = t("dsm.hierarchical");
+  orderSelect.append(optPartitioned, optHierarchical);
+  orderLabel.append(orderSpan, orderSelect);
 
   const scopeHint = document.createElement("span");
   scopeHint.className = "dsm-scope-hint";
@@ -94,7 +103,7 @@ export function createDsmView(
   const showGraphBtn = document.createElement("button");
   showGraphBtn.type = "button";
   showGraphBtn.className = "btn btn-ghost dsm-show-graph";
-  showGraphBtn.textContent = "Show graph";
+  showGraphBtn.textContent = t("dsm.showGraph");
   showGraphBtn.addEventListener("click", () => handlers.onShowOnGraph?.());
 
   toolbar.append(levelLabel, orderLabel, scopeHint, healthBadge, showGraphBtn);
@@ -104,8 +113,7 @@ export function createDsmView(
 
   const empty = document.createElement("div");
   empty.className = "panel-empty dsm-empty";
-  empty.textContent =
-    "Run analysis to build the Design Structure Matrix (dependency grid)";
+  empty.textContent = t("dsm.runHint");
 
   container.append(toolbar, scroll, empty);
 
@@ -144,7 +152,7 @@ export function createDsmView(
       empty.replaceChildren(
         createLoadingPlaceholder({
           title: loadingMessage,
-          detail: "Building the dependency matrix from hierarchy…",
+          detail: t("dsm.buildingDetail"),
           size: "fill",
         }),
       );
@@ -161,8 +169,8 @@ export function createDsmView(
       empty.hidden = false;
       empty.replaceChildren();
       empty.textContent = lastHierarchy
-        ? "No modules in this scope — drill out or change Level"
-        : "Run analysis to build the Design Structure Matrix (dependency grid)";
+        ? t("dsm.noModulesInScope")
+        : t("dsm.runHint");
       healthBadge.textContent = "";
       healthBadge.className = "dsm-health-badge";
       scopeHint.textContent = "";
@@ -175,33 +183,46 @@ export function createDsmView(
 
     const scope = current.scope;
     if (current.level === "file") {
-      scopeHint.textContent = scope ? `Scope: ${scope}` : "Scope: all files";
+      scopeHint.textContent = scope
+        ? t("dsm.scope", { scope })
+        : t("dsm.scopeAllFiles");
     } else if (scope) {
       scopeHint.textContent =
-        scope === "." ? "Scope: root modules" : `Scope: modules under ${scope}`;
+        scope === "."
+          ? t("dsm.scopeRoot")
+          : t("dsm.scopeUnder", { scope });
     } else {
-      scopeHint.textContent = "Scope: workspace packages";
+      scopeHint.textContent = t("dsm.scopeWorkspace");
     }
     if (current.capped) {
-      scopeHint.textContent += ` · showing top ${DSM_MAX_ELEMENTS} by connectivity`;
-      scopeHint.title =
-        `Matrix capped at ${DSM_MAX_ELEMENTS} elements for readability. Narrow the graph scope or stay on Packages.`;
+      scopeHint.textContent += t("dsm.cappedSuffix", { n: DSM_MAX_ELEMENTS });
+      scopeHint.title = t("dsm.cappedTitle", { n: DSM_MAX_ELEMENTS });
     } else {
       scopeHint.title = "";
     }
 
     const score = Math.round(current.metrics.healthScore);
     const status = healthStatus(current.metrics.healthScore);
-    healthBadge.textContent = `Health ${score}`;
+    healthBadge.textContent = t("dsm.health", { score });
     healthBadge.className = `dsm-health-badge dsm-health-${status}`;
     healthBadge.title = [
-      `Cycles: ${current.metrics.cycleCount}`,
-      `Nodes in cycles: ${current.metrics.nodesInCycles}`,
-      `Upper-triangle density: ${(current.metrics.upperTriangleDensity * 100).toFixed(1)}%`,
-      `Coupling: ${(current.metrics.couplingDensity * 100).toFixed(1)}%`,
-      `Propagation (visibility): ${(current.metrics.propagationCost * 100).toFixed(1)}%`,
-      `Clustered cost (norm): ${((current.metrics.clusteredCostNormalized ?? 0) * 100).toFixed(1)}%`,
-      `Buses: ${current.metrics.busCount ?? current.busIds?.length ?? 0}`,
+      t("dsm.metric.cycles", { n: current.metrics.cycleCount }),
+      t("dsm.metric.nodesInCycles", { n: current.metrics.nodesInCycles }),
+      t("dsm.metric.upperTriangle", {
+        pct: (current.metrics.upperTriangleDensity * 100).toFixed(1),
+      }),
+      t("dsm.metric.coupling", {
+        pct: (current.metrics.couplingDensity * 100).toFixed(1),
+      }),
+      t("dsm.metric.propagation", {
+        pct: (current.metrics.propagationCost * 100).toFixed(1),
+      }),
+      t("dsm.metric.clusteredCost", {
+        pct: ((current.metrics.clusteredCostNormalized ?? 0) * 100).toFixed(1),
+      }),
+      t("dsm.metric.buses", {
+        n: current.metrics.busCount ?? current.busIds?.length ?? 0,
+      }),
     ].join("\n");
 
     const cycleSet = new Set(current.cycleNodes);

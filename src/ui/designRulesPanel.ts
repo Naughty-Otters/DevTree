@@ -1,5 +1,6 @@
 import type { DesignRule } from "../analysis/designRules";
 import { newRuleId } from "../analysis/designRules";
+import { t } from "../i18n";
 
 export interface DesignRulesPanelHandlers {
   onChange: (rules: DesignRule[]) => void;
@@ -17,8 +18,7 @@ export function createDesignRulesPanel(
 
   const intro = document.createElement("p");
   intro.className = "design-rules-intro";
-  intro.textContent =
-    "LDM design rules capture intended architecture. Layers are ordered bottom→top; higher layers may depend on lower ones. Forbid rules block specific dependency directions.";
+  intro.textContent = t("designRules.intro");
   container.appendChild(intro);
 
   const actions = document.createElement("div");
@@ -27,7 +27,7 @@ export function createDesignRulesPanel(
   const addLayers = document.createElement("button");
   addLayers.type = "button";
   addLayers.className = "btn btn-ghost";
-  addLayers.textContent = "Add layer stack";
+  addLayers.textContent = t("designRules.addLayerStack");
   addLayers.addEventListener("click", () => {
     const pkgs = handlers.packageIds ?? [];
     handlers.onChange([
@@ -44,7 +44,7 @@ export function createDesignRulesPanel(
   const addForbid = document.createElement("button");
   addForbid.type = "button";
   addForbid.className = "btn btn-ghost";
-  addForbid.textContent = "Add forbid rule";
+  addForbid.textContent = t("designRules.addForbidRule");
   addForbid.addEventListener("click", () => {
     handlers.onChange([
       ...rules,
@@ -61,8 +61,8 @@ export function createDesignRulesPanel(
   const suggest = document.createElement("button");
   suggest.type = "button";
   suggest.className = "btn btn-ghost";
-  suggest.textContent = "Suggest layers from DSM";
-  suggest.title = "Use current partitioned DSM order (foundations → dependents)";
+  suggest.textContent = t("designRules.suggestLayers");
+  suggest.title = t("designRules.suggestLayersTitle");
   suggest.addEventListener("click", () => handlers.onSuggestLayers?.());
 
   actions.append(addLayers, addForbid, suggest);
@@ -71,7 +71,7 @@ export function createDesignRulesPanel(
   if (rules.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No design rules — architecture conformance is skipped";
+    empty.textContent = t("designRules.empty");
     container.appendChild(empty);
     return;
   }
@@ -89,7 +89,7 @@ export function createDesignRulesPanel(
     const enable = document.createElement("input");
     enable.type = "checkbox";
     enable.checked = rule.enabled;
-    enable.title = "Enabled";
+    enable.title = t("designRules.enabled");
     enable.addEventListener("change", () => {
       handlers.onChange(
         rules.map((r) =>
@@ -100,13 +100,16 @@ export function createDesignRulesPanel(
 
     const kind = document.createElement("span");
     kind.className = "design-rule-kind";
-    kind.textContent = rule.kind === "layers" ? "Layers" : "Forbid";
+    kind.textContent =
+      rule.kind === "layers"
+        ? t("designRules.kindLayers")
+        : t("designRules.kindForbid");
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "btn btn-ghost btn-icon";
     remove.textContent = "×";
-    remove.title = "Remove rule";
+    remove.title = t("designRules.remove");
     remove.addEventListener("click", () => {
       handlers.onChange(rules.filter((r) => r.id !== rule.id));
     });
@@ -117,7 +120,9 @@ export function createDesignRulesPanel(
     if (rule.kind === "layers") {
       const label = document.createElement("label");
       label.className = "design-rule-field";
-      label.innerHTML = `<span>Layers (bottom → top, one package per line)</span>`;
+      const layersSpan = document.createElement("span");
+      layersSpan.textContent = t("designRules.layersLabel");
+      label.appendChild(layersSpan);
       const ta = document.createElement("textarea");
       ta.rows = Math.min(8, Math.max(3, rule.layers.length + 1));
       ta.value = rule.layers.join("\n");
@@ -137,11 +142,13 @@ export function createDesignRulesPanel(
     } else {
       const fromField = document.createElement("label");
       fromField.className = "design-rule-field";
-      fromField.innerHTML = `<span>From (package / path prefix)</span>`;
+      const fromSpan = document.createElement("span");
+      fromSpan.textContent = t("designRules.fromLabel");
+      fromField.appendChild(fromSpan);
       const fromInput = document.createElement("input");
       fromInput.type = "text";
       fromInput.value = rule.from;
-      fromInput.placeholder = "e.g. ui";
+      fromInput.placeholder = t("designRules.fromPlaceholder");
       fromInput.addEventListener("change", () => {
         handlers.onChange(
           rules.map((r) =>
@@ -155,11 +162,13 @@ export function createDesignRulesPanel(
 
       const toField = document.createElement("label");
       toField.className = "design-rule-field";
-      toField.innerHTML = `<span>To (package / path prefix)</span>`;
+      const toSpan = document.createElement("span");
+      toSpan.textContent = t("designRules.toLabel");
+      toField.appendChild(toSpan);
       const toInput = document.createElement("input");
       toInput.type = "text";
       toInput.value = rule.to;
-      toInput.placeholder = "e.g. core";
+      toInput.placeholder = t("designRules.toPlaceholder");
       toInput.addEventListener("change", () => {
         handlers.onChange(
           rules.map((r) =>

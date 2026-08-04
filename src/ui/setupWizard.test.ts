@@ -12,9 +12,9 @@ import type { LlmConfiguration } from "../validation/aiValidation";
 describe("setupWizard helpers", () => {
   it("exposes five guided steps including secret scanners", () => {
     expect(SETUP_WIZARD_STEPS).toHaveLength(5);
-    expect(SETUP_WIZARD_STEPS[0]?.title).toMatch(/project/i);
-    expect(SETUP_WIZARD_STEPS[2]?.title).toMatch(/secret/i);
-    expect(SETUP_WIZARD_STEPS[4]?.title).toMatch(/ready/i);
+    expect(SETUP_WIZARD_STEPS[0]?.titleKey).toMatch(/project/i);
+    expect(SETUP_WIZARD_STEPS[2]?.titleKey).toMatch(/secret/i);
+    expect(SETUP_WIZARD_STEPS[4]?.titleKey).toMatch(/ready/i);
   });
 
   it("requires a project path before advancing from step 1", () => {

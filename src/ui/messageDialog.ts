@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 export interface MessageDialogOptions {
   title: string;
   /** Short summary above the scrollable body. */
@@ -16,7 +18,8 @@ export interface MessageDialogOptions {
 export function showMessageDialog(
   options: MessageDialogOptions,
 ): Promise<void> {
-  const { title, summary, body, tone = "info", okLabel = "OK" } = options;
+  const { title, summary, body, tone = "info", okLabel = t("dialog.ok") } =
+    options;
 
   return new Promise((resolve) => {
     const backdrop = document.createElement("div");

@@ -1,6 +1,7 @@
 import type { TreeEntry } from "../project/types";
 import { createChevron, createFileIcon, createFolderIcon } from "./icons";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
+import { t } from "../i18n";
 
 export interface TreeCallbacks {
   onFileOpen: (path: string) => void;
@@ -18,7 +19,7 @@ export function renderProjectTree(
   if (!tree) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No project open";
+    empty.textContent = t("app.noProject");
     container.appendChild(empty);
     return;
   }
@@ -142,7 +143,7 @@ function renderNode(
       loadingItem.className = "tree-loading-row";
       loadingItem.appendChild(
         createLoadingPlaceholder({
-          title: "Loading folder…",
+          title: t("tree.loadingFolder"),
           size: "inline",
         }),
       );

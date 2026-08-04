@@ -590,6 +590,58 @@ body.is-resizing-v {
   min-height: 0;
 }
 
+.language-panel {
+  padding: 12px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.language-panel-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.language-panel-desc {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.language-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.language-option {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.language-option:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.language-option.is-active {
+  border-color: var(--accent-bright, #58a6ff);
+  background: rgba(88, 166, 255, 0.08);
+}
+
 /* ── Modal ── */
 .modal-backdrop {
   position: fixed;

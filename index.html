@@ -12,47 +12,47 @@
     <div id="app">
       <header id="toolbar">
         <div class="toolbar-left">
-          <button id="btn-open-project" class="btn btn-icon btn-ghost" title="Open project folder"></button>
-          <button id="btn-run-analysis" class="btn btn-icon btn-ghost" disabled title="Run analysis"></button>
-          <button id="btn-stop-analysis" class="btn btn-icon btn-ghost" disabled title="Stop analysis"></button>
-          <button id="btn-save-file" class="btn btn-icon btn-ghost" disabled title="Save file"></button>
-          <button id="btn-setup-wizard" class="btn btn-icon btn-ghost" title="Setup guide"></button>
-          <button id="btn-settings" class="btn btn-icon btn-ghost" title="Settings"></button>
+          <button id="btn-open-project" class="btn btn-icon btn-ghost" data-i18n-title="toolbar.openProject" title="Open project folder"></button>
+          <button id="btn-run-analysis" class="btn btn-icon btn-ghost" disabled data-i18n-title="toolbar.runAnalysis" title="Run analysis"></button>
+          <button id="btn-stop-analysis" class="btn btn-icon btn-ghost" disabled data-i18n-title="toolbar.stopAnalysis" title="Stop analysis"></button>
+          <button id="btn-save-file" class="btn btn-icon btn-ghost" disabled data-i18n-title="toolbar.saveFile" title="Save file"></button>
+          <button id="btn-setup-wizard" class="btn btn-icon btn-ghost" data-i18n-title="toolbar.setupGuide" title="Setup guide"></button>
+          <button id="btn-settings" class="btn btn-icon btn-ghost" data-i18n-title="toolbar.settings" title="Settings"></button>
         </div>
-        <span id="app-title">DevTree</span>
+        <span id="app-title" data-i18n="app.title">DevTree</span>
         <span id="project-path" class="project-path">No project open</span>
       </header>
 
-      <div id="breadcrumb-bar" class="breadcrumb-bar is-empty" aria-label="Navigation"></div>
+      <div id="breadcrumb-bar" class="breadcrumb-bar is-empty" data-i18n-aria="app.breadcrumbNav" aria-label="Navigation"></div>
 
       <div id="workspace">
         <div id="main-row">
           <aside id="left-panel">
             <section id="left-tree-section" class="panel-section">
-              <h3 class="panel-title">Project Tree</h3>
+              <h3 class="panel-title" data-i18n="panel.projectTree">Project Tree</h3>
               <div id="project-tree" class="panel-body scrollable"></div>
             </section>
-            <div class="resize-handle resize-handle-split" data-resize="left-split" data-tooltip="Resize tree / modules split"></div>
+            <div class="resize-handle resize-handle-split" data-resize="left-split" data-i18n-tooltip="panel.resizeTreeModules" data-tooltip="Resize tree / modules split"></div>
             <section id="left-modules-section" class="panel-section">
-              <h3 class="panel-title">Modules <span class="panel-hint">Click = details · Double-click = drill in</span></h3>
+              <h3 class="panel-title"><span data-i18n="panel.modules">Modules</span> <span class="panel-hint" data-i18n="panel.modulesHint">Click = details · Double-click = drill in</span></h3>
               <div id="modules-list" class="panel-body scrollable"></div>
             </section>
           </aside>
 
-          <div class="resize-handle resize-handle-col" data-resize="left" data-tooltip="Resize left sidebar"></div>
+          <div class="resize-handle resize-handle-col" data-resize="left" data-i18n-tooltip="panel.resizeLeft" data-tooltip="Resize left sidebar"></div>
 
           <main id="center-panel">
             <div id="view-tabs">
-              <button class="view-tab" data-view="report" title="Overall analysis report — health, ratings, and key findings">Report</button>
-              <button class="view-tab" data-view="progress" title="Live analysis progress and AI stream output">Progress</button>
-              <button class="view-tab active" data-view="graph" title="Dependency graph — packages and modules">Graph</button>
-              <button class="view-tab" data-view="dsm" title="Design Structure Matrix — dependency grid and modularity health">DSM</button>
-              <button class="view-tab" data-view="file" title="Source file viewer — open from the Project Tree or double-click a graph node">File</button>
+              <button class="view-tab" data-view="report" data-i18n="tab.report" data-i18n-title="tab.reportTitle" title="Overall analysis report — health, ratings, and key findings">Report</button>
+              <button class="view-tab" data-view="progress" data-i18n="tab.progress" data-i18n-title="tab.progressTitle" title="Live analysis progress and AI stream output">Progress</button>
+              <button class="view-tab active" data-view="graph" data-i18n="tab.graph" data-i18n-title="tab.graphTitle" title="Dependency graph — packages and modules">Graph</button>
+              <button class="view-tab" data-view="dsm" data-i18n="tab.dsm" data-i18n-title="tab.dsmTitle" title="Design Structure Matrix — dependency grid and modularity health">DSM</button>
+              <button class="view-tab" data-view="file" data-i18n="tab.file" data-i18n-title="tab.fileTitle" title="Source file viewer — open from the Project Tree or double-click a graph node">File</button>
             </div>
             <div id="graph-nav" class="graph-nav"></div>
             <div id="center-content">
-              <div id="analysis-report-view" class="analysis-report-view hidden" aria-label="Analysis report"></div>
-              <div id="analysis-progress-view" class="analysis-progress-view hidden" aria-label="Analysis progress"></div>
+              <div id="analysis-report-view" class="analysis-report-view hidden" data-i18n-aria="view.report" aria-label="Analysis report"></div>
+              <div id="analysis-progress-view" class="analysis-progress-view hidden" data-i18n-aria="view.progress" aria-label="Analysis progress"></div>
               <canvas id="graph-canvas"></canvas>
               <div id="dsm-view" class="hidden"></div>
               <div id="file-viewer" class="hidden"></div>
@@ -69,25 +69,44 @@
             id="right-resize-handle"
             class="resize-handle resize-handle-col hidden"
             data-resize="right"
+            data-i18n-tooltip="panel.resizeSettings"
             data-tooltip="Resize settings panel"
           ></div>
 
           <aside id="right-panel" class="hidden" aria-hidden="true">
             <header class="settings-header">
-              <h2 id="settings-title">Settings</h2>
+              <h2 id="settings-title" data-i18n="settings.title">Settings</h2>
               <div class="settings-header-actions">
-                <button id="btn-setup-guide" type="button" class="btn-text" title="Open the setup wizard">Setup guide</button>
-                <button id="btn-close-settings" class="btn btn-icon btn-ghost" title="Close settings"></button>
+                <button id="btn-setup-guide" type="button" class="btn-text" data-i18n="settings.setupGuide" data-i18n-title="settings.setupGuideTitle" title="Open the setup wizard">Setup guide</button>
+                <button id="btn-close-settings" class="btn btn-icon btn-ghost" data-i18n-title="settings.close" title="Close settings"></button>
               </div>
             </header>
             <div class="settings-body settings-accordion">
-              <section class="settings-accordion-item is-open" data-settings-section="rules">
+              <section class="settings-accordion-item is-open" data-settings-section="general">
                 <div class="settings-accordion-header">
-                  <span class="settings-accordion-label">Analysis Rules</span>
+                  <span class="settings-accordion-label" data-i18n="settings.section.general">General</span>
                   <button
                     type="button"
                     class="settings-accordion-expand"
                     aria-expanded="true"
+                    data-i18n-aria="settings.section.generalToggle"
+                    aria-label="Expand or collapse General"
+                  >
+                    <span class="settings-accordion-chevron" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="settings-accordion-panel">
+                  <div id="language-panel" class="panel-body scrollable"></div>
+                </div>
+              </section>
+              <section class="settings-accordion-item" data-settings-section="rules">
+                <div class="settings-accordion-header">
+                  <span class="settings-accordion-label" data-i18n="settings.section.rules">Analysis Rules</span>
+                  <button
+                    type="button"
+                    class="settings-accordion-expand"
+                    aria-expanded="false"
+                    data-i18n-aria="settings.section.rulesToggle"
                     aria-label="Expand or collapse Analysis Rules"
                   >
                     <span class="settings-accordion-chevron" aria-hidden="true"></span>
@@ -99,11 +118,12 @@
               </section>
               <section class="settings-accordion-item" data-settings-section="linters">
                 <div class="settings-accordion-header">
-                  <span class="settings-accordion-label">Language Linters</span>
+                  <span class="settings-accordion-label" data-i18n="settings.section.linters">Language Linters</span>
                   <button
                     type="button"
                     class="settings-accordion-expand"
                     aria-expanded="false"
+                    data-i18n-aria="settings.section.lintersToggle"
                     aria-label="Expand or collapse Language Linters"
                   >
                     <span class="settings-accordion-chevron" aria-hidden="true"></span>
@@ -115,11 +135,12 @@
               </section>
               <section class="settings-accordion-item" data-settings-section="llm-configs">
                 <div class="settings-accordion-header">
-                  <span class="settings-accordion-label">LLM Configurations</span>
+                  <span class="settings-accordion-label" data-i18n="settings.section.llmConfigs">LLM Configurations</span>
                   <button
                     type="button"
                     class="settings-accordion-expand"
                     aria-expanded="false"
+                    data-i18n-aria="settings.section.llmConfigsToggle"
                     aria-label="Expand or collapse LLM Configurations"
                   >
                     <span class="settings-accordion-chevron" aria-hidden="true"></span>
@@ -131,11 +152,12 @@
               </section>
               <section class="settings-accordion-item" data-settings-section="llm-runtime">
                 <div class="settings-accordion-header">
-                  <span class="settings-accordion-label">LLM Runtime</span>
+                  <span class="settings-accordion-label" data-i18n="settings.section.llmRuntime">LLM Runtime</span>
                   <button
                     type="button"
                     class="settings-accordion-expand"
                     aria-expanded="false"
+                    data-i18n-aria="settings.section.llmRuntimeToggle"
                     aria-label="Expand or collapse LLM Runtime"
                   >
                     <span class="settings-accordion-chevron" aria-hidden="true"></span>
@@ -147,11 +169,12 @@
               </section>
               <section class="settings-accordion-item" data-settings-section="architecture">
                 <div class="settings-accordion-header">
-                  <span class="settings-accordion-label">Architecture / Design Rules</span>
+                  <span class="settings-accordion-label" data-i18n="settings.section.architecture">Architecture / Design Rules</span>
                   <button
                     type="button"
                     class="settings-accordion-expand"
                     aria-expanded="false"
+                    data-i18n-aria="settings.section.architectureToggle"
                     aria-label="Expand or collapse Architecture Design Rules"
                   >
                     <span class="settings-accordion-chevron" aria-hidden="true"></span>
@@ -163,11 +186,12 @@
               </section>
               <section class="settings-accordion-item" data-settings-section="lsp">
                 <div class="settings-accordion-header">
-                  <span class="settings-accordion-label">LSP Servers</span>
+                  <span class="settings-accordion-label" data-i18n="settings.section.lsp">LSP Servers</span>
                   <button
                     type="button"
                     class="settings-accordion-expand"
                     aria-expanded="false"
+                    data-i18n-aria="settings.section.lspToggle"
                     aria-label="Expand or collapse LSP Servers"
                   >
                     <span class="settings-accordion-chevron" aria-hidden="true"></span>
@@ -181,7 +205,7 @@
           </aside>
         </div>
 
-        <div class="resize-handle resize-handle-row" data-resize="bottom" data-tooltip="Resize results panel"></div>
+        <div class="resize-handle resize-handle-row" data-resize="bottom" data-i18n-tooltip="panel.resizeResults" data-tooltip="Resize results panel"></div>
 
         <footer id="bottom-panel">
           <div id="results-panel"></div>

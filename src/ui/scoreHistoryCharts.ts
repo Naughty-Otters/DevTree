@@ -1,5 +1,6 @@
 import { ARCHITECTURE_METRIC_OPTIONS } from "../analysis/architectureHealth";
 import type { AnalysisScoreSnapshot } from "../analysis/scoreHistory";
+import { t, getLocaleTag, type MessageKey } from "../i18n";
 import { lucideIcon } from "./icons";
 import { ChevronDown } from "lucide";
 
@@ -169,29 +170,33 @@ const MODULARITY_METRICS: ChartMetricDef[] = [
 
 const SECTIONS: {
   id: ScoreSectionId;
-  label: string;
+  labelKey: MessageKey;
   metrics: ChartMetricDef[];
   defaultSelected: string[];
 }[] = [
   {
     id: "overall",
-    label: "Overall",
+    labelKey: "scoreHistory.overall",
     metrics: OVERALL_METRICS,
     defaultSelected: ["score", "failures", "warnings"],
   },
   {
     id: "architecture",
-    label: "Architecture health",
+    labelKey: "scoreHistory.architecture",
     metrics: ARCHITECTURE_METRICS,
     defaultSelected: ["score", "complexity", "maintainability", "coverage"],
   },
   {
     id: "modularity",
-    label: "Modularity health",
+    labelKey: "scoreHistory.modularity",
     metrics: MODULARITY_METRICS,
     defaultSelected: ["score", "cycles", "propagationPct"],
   },
 ];
+
+function sectionLabel(section: (typeof SECTIONS)[number]): string {
+  return t(section.labelKey);
+}
 
 type SelectionMap = Record<ScoreSectionId, string[]>;
 
@@ -266,10 +271,10 @@ function applyCollapsedState(
 ): void {
   container.classList.toggle("is-collapsed", collapsed);
   toggleBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-  toggleBtn.title = collapsed ? "Show chart" : "Hide chart";
+  toggleBtn.title = collapsed ? t("scoreHistory.show") : t("scoreHistory.hide");
   toggleBtn.setAttribute(
     "aria-label",
-    collapsed ? "Show chart" : "Hide chart",
+    collapsed ? t("scoreHistory.show") : t("scoreHistory.hide"),
   );
 }
 
@@ -284,7 +289,9 @@ function renderChartHeader(
   heading.className = opts.embedded
     ? "score-history-heading score-history-heading-embedded"
     : "score-history-heading";
-  heading.textContent = `${section.label} over time`;
+  heading.textContent = t("scoreHistory.overTime", {
+    label: sectionLabel(section),
+  });
   header.appendChild(heading);
 
   const toggle = document.createElement("button");
@@ -312,12 +319,12 @@ function renderChartHeader(
 
 function formatAxisDate(ms: number): string {
   const d = new Date(ms);
-  const mon = d.toLocaleString(undefined, { month: "short" });
+  const mon = d.toLocaleString(getLocaleTag(), { month: "short" });
   return `${mon} ${d.getDate()}`;
 }
 
 function formatTooltipDate(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+  return new Date(ms).toLocaleString(getLocaleTag(), {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -615,7 +622,7 @@ function renderSectionCard(
     header.className = "score-history-card-header";
     const title = document.createElement("h4");
     title.className = "score-history-card-title";
-    title.textContent = section.label;
+    title.textContent = sectionLabel(section);
     header.appendChild(title);
     card.appendChild(header);
   }
@@ -629,7 +636,7 @@ function renderSectionCard(
   const picker = document.createElement("div");
   picker.className = "score-history-picker";
   picker.setAttribute("role", "group");
-  picker.setAttribute("aria-label", `${section.label} metrics`);
+  picker.setAttribute("aria-label", `${sectionLabel(section)} metrics`);
 
   for (const metric of available) {
     const btn = document.createElement("button");
@@ -653,7 +660,7 @@ function renderSectionCard(
   if (available.length === 0) {
     const empty = document.createElement("p");
     empty.className = "score-history-card-empty";
-    empty.textContent = "No sub-metrics recorded yet — re-run analysis.";
+    empty.textContent = t("scoreHistory.noSubMetrics");
     card.appendChild(empty);
     return card;
   }
@@ -694,7 +701,7 @@ function renderSectionCard(
   svg.setAttribute("role", "img");
   svg.setAttribute(
     "aria-label",
-    `${section.label}: ${activeMetrics.map((m) => m.label).join(", ")}`,
+    `${sectionLabel(section)}: ${activeMetrics.map((m) => m.label).join(", ")}`,
   );
 
   if (domain.scoreGuides) {
@@ -825,8 +832,8 @@ export function renderScoreHistorySection(
     empty.className = "score-history-empty";
     empty.textContent =
       points.length === 1
-        ? "One analysis recorded — run again to see trends."
-        : "Run analysis more than once to chart progress.";
+        ? t("scoreHistory.oneRecorded")
+        : t("scoreHistory.needMore");
     body.appendChild(empty);
     return;
   }
@@ -878,7 +885,7 @@ export function renderScoreHistoryCharts(
 
   const heading = document.createElement("h3");
   heading.className = "score-history-heading";
-  heading.textContent = "Health over time";
+  heading.textContent = t("scoreHistory.healthOverTime");
   container.appendChild(heading);
 
   if (points.length < 2) {
@@ -886,8 +893,8 @@ export function renderScoreHistoryCharts(
     empty.className = "score-history-empty";
     empty.textContent =
       points.length === 1
-        ? "One analysis recorded — run again to see trends."
-        : "Run analysis more than once to chart health progress.";
+        ? t("scoreHistory.oneRecorded")
+        : t("scoreHistory.needMoreHealth");
     container.appendChild(empty);
     return;
   }

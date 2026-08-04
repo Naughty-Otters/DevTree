@@ -4,6 +4,7 @@ import init, {
 } from "./wasm/devtree_core.js";
 import type { Graph } from "./graph/types";
 import type { FileSourceMetrics } from "./analysis/codeQualityMetrics";
+import { t } from "./i18n";
 
 export interface PositionedNode {
   id: string;
@@ -40,46 +41,78 @@ export const LAYOUT_FAMILIES: {
 }[] = [
   {
     value: "organic",
-    label: "Organic",
-    hint: "Force-directed (d3-force style) — natural clusters",
+    get label() {
+      return t("layout.organic");
+    },
+    get hint() {
+      return t("layout.organicHint");
+    },
   },
   {
     value: "cluster",
-    label: "Cluster",
-    hint: "Group densely linked modules; separate groups linked by a single bridge",
+    get label() {
+      return t("layout.cluster");
+    },
+    get hint() {
+      return t("layout.clusterHint");
+    },
   },
   {
     value: "dag",
-    label: "DAG / Lines",
-    hint: "Directed layered flow — Direct or Hierarchical",
+    get label() {
+      return t("layout.dag");
+    },
+    get hint() {
+      return t("layout.dagHint");
+    },
   },
   {
     value: "circular",
-    label: "Circular",
-    hint: "Nodes on a ring",
+    get label() {
+      return t("layout.circular");
+    },
+    get hint() {
+      return t("layout.circularHint");
+    },
   },
   {
     value: "radial",
-    label: "Radial",
-    hint: "Concentric rings from a root",
+    get label() {
+      return t("layout.radial");
+    },
+    get hint() {
+      return t("layout.radialHint");
+    },
   },
   {
     value: "tree",
-    label: "Tree",
-    hint: "Spanning tree from a root",
+    get label() {
+      return t("layout.tree");
+    },
+    get hint() {
+      return t("layout.treeHint");
+    },
   },
 ];
 
 export const DAG_STYLES: { value: DagStyle; label: string; hint: string }[] = [
   {
     value: "direct",
-    label: "Direct",
-    hint: "Left-to-right dependency flow",
+    get label() {
+      return t("layout.direct");
+    },
+    get hint() {
+      return t("layout.directHint");
+    },
   },
   {
     value: "hierarchical",
-    label: "Hierarchical",
-    hint: "Top-to-bottom layered DAG",
+    get label() {
+      return t("layout.hierarchical");
+    },
+    get hint() {
+      return t("layout.hierarchicalHint");
+    },
   },
 ];
 
@@ -88,18 +121,30 @@ export const LAYOUT_MODES: { value: LayoutMode; label: string; hint: string }[] 
   [
     ...LAYOUT_FAMILIES.filter((f) => f.value !== "dag").map((f) => ({
       value: f.value as LayoutMode,
-      label: f.label,
-      hint: f.hint,
+      get label() {
+        return f.label;
+      },
+      get hint() {
+        return f.hint;
+      },
     })),
     {
       value: "direct",
-      label: "Direct",
-      hint: "Left-to-right DAG — dependency flow",
+      get label() {
+        return t("layout.direct");
+      },
+      get hint() {
+        return t("layout.directModeHint");
+      },
     },
     {
       value: "hierarchical",
-      label: "Hierarchical",
-      hint: "Top-to-bottom layered DAG",
+      get label() {
+        return t("layout.hierarchical");
+      },
+      get hint() {
+        return t("layout.hierarchicalHint");
+      },
     },
   ];
 

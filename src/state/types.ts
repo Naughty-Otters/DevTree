@@ -51,6 +51,8 @@ export interface PersistedUiState {
   layoutMode?: "organic" | "direct" | "hierarchical" | "circular" | "radial" | "tree" | "cluster";
   /** Dependency edge routing: straight, orthogonal (H/V), or curved */
   edgeStyle?: "straight" | "orthogonal" | "curved";
+  /** UI locale for interface language (not programming language filters). */
+  uiLocale?: "en" | "zh-CN";
   /** Which dependency-role module groups are shown on the graph */
   moduleFilters?: {
     withDependencies: boolean;
@@ -106,6 +108,7 @@ export function defaultPersistedState(): PersistedAppState {
     percentileView: "all",
     layoutMode: "organic",
     edgeStyle: "straight",
+    uiLocale: "en",
     moduleFilters: {
       withDependencies: true,
       independent: true,

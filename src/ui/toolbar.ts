@@ -1,5 +1,6 @@
 import { lucideIcon } from "./icons";
 import { attachTooltip } from "./tooltip";
+import { t } from "../i18n";
 import { FolderOpen, ListChecks, Play, Save, Settings, Square } from "lucide";
 
 const TOOLBAR_ICON = {
@@ -17,27 +18,39 @@ export function mountToolbarIcons(): void {
   const btnSettings = document.querySelector<HTMLButtonElement>("#btn-settings");
 
   if (btnOpen) {
-    btnOpen.appendChild(lucideIcon(FolderOpen, TOOLBAR_ICON));
-    attachTooltip(btnOpen, "Open project folder");
+    if (btnOpen.childElementCount === 0) {
+      btnOpen.appendChild(lucideIcon(FolderOpen, TOOLBAR_ICON));
+    }
+    attachTooltip(btnOpen, t("toolbar.openProject"));
   }
   if (btnRun) {
-    btnRun.appendChild(lucideIcon(Play, TOOLBAR_ICON));
-    attachTooltip(btnRun, "Run analysis");
+    if (btnRun.childElementCount === 0) {
+      btnRun.appendChild(lucideIcon(Play, TOOLBAR_ICON));
+    }
+    attachTooltip(btnRun, t("toolbar.runAnalysis"));
   }
   if (btnStop) {
-    btnStop.appendChild(lucideIcon(Square, { ...TOOLBAR_ICON, size: 11 }));
-    attachTooltip(btnStop, "Stop running analysis");
+    if (btnStop.childElementCount === 0) {
+      btnStop.appendChild(lucideIcon(Square, { ...TOOLBAR_ICON, size: 11 }));
+    }
+    attachTooltip(btnStop, t("toolbar.stopAnalysis"));
   }
   if (btnSave) {
-    btnSave.appendChild(lucideIcon(Save, TOOLBAR_ICON));
-    attachTooltip(btnSave, "Save file (⌘S)");
+    if (btnSave.childElementCount === 0) {
+      btnSave.appendChild(lucideIcon(Save, TOOLBAR_ICON));
+    }
+    attachTooltip(btnSave, t("toolbar.saveFile"));
   }
   if (btnWizard) {
-    btnWizard.appendChild(lucideIcon(ListChecks, TOOLBAR_ICON));
-    attachTooltip(btnWizard, "Setup guide — project, LSP, and LLM");
+    if (btnWizard.childElementCount === 0) {
+      btnWizard.appendChild(lucideIcon(ListChecks, TOOLBAR_ICON));
+    }
+    attachTooltip(btnWizard, t("toolbar.setupGuide"));
   }
   if (btnSettings) {
-    btnSettings.appendChild(lucideIcon(Settings, TOOLBAR_ICON));
-    attachTooltip(btnSettings, "Settings");
+    if (btnSettings.childElementCount === 0) {
+      btnSettings.appendChild(lucideIcon(Settings, TOOLBAR_ICON));
+    }
+    attachTooltip(btnSettings, t("toolbar.settings"));
   }
 }

@@ -570,6 +570,15 @@ export function scheduleSaveUiState(state: PersistedUiState): void {
   }, 400);
 }
 
+/** Immediate UI prefs write (e.g. before language reload). */
+export async function saveUiStateNow(state: PersistedUiState): Promise<void> {
+  if (uiSaveTimer) {
+    clearTimeout(uiSaveTimer);
+    uiSaveTimer = null;
+  }
+  await saveRaw(UI_STATE_KEY, JSON.stringify(state));
+}
+
 /** Heavy save — meta and hierarchy stored per project root. */
 export function scheduleSaveAnalysis(
   result: AnalysisResult | null,

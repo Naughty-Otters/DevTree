@@ -15,6 +15,7 @@ import type { LlmProviderInfo } from "../agent/types";
 import type { GitleaksStatus } from "../gitleaks/types";
 import type { TrufflehogStatus } from "../trufflehog/types";
 import { effectiveLlmModel } from "../validation/llmCatalog";
+import { t } from "../i18n";
 import { createLlmConfigurationPicker } from "./llmConfigurationPicker";
 import { lucideIcon } from "./icons";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
@@ -58,7 +59,7 @@ export function createRulesPanel(
   if (state.loading) {
     container.appendChild(
       createLoadingPlaceholder({
-        title: "Loading analysis rules…",
+        title: t("rules.loading"),
         size: "panel",
       }),
     );
@@ -76,18 +77,21 @@ export function createRulesPanel(
   if (state.rules.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No analysis rules available";
+    empty.textContent = t("rules.empty");
     container.appendChild(empty);
     return;
   }
 
   const header = document.createElement("div");
   header.className = "rules-header";
-  header.innerHTML = `<span>${state.selected.size} of ${state.rules.length} selected</span>`;
+  header.innerHTML = `<span>${t("rules.selected", {
+    selected: state.selected.size,
+    total: state.rules.length,
+  })}</span>`;
 
   const selectAll = document.createElement("button");
   selectAll.className = "btn-text";
-  selectAll.textContent = "Select all";
+  selectAll.textContent = t("rules.selectAll");
   selectAll.addEventListener("click", () => {
     state.rules.forEach((r) => state.selected.add(r.id));
     onChange(new Set(state.selected), { ...state.settings });
@@ -96,7 +100,7 @@ export function createRulesPanel(
 
   const clearAll = document.createElement("button");
   clearAll.className = "btn-text";
-  clearAll.textContent = "Clear";
+  clearAll.textContent = t("rules.clear");
   clearAll.addEventListener("click", () => {
     state.selected.clear();
     onChange(new Set(state.selected), { ...state.settings });
@@ -137,7 +141,10 @@ function renderRules(
 
   const header = container.querySelector(".rules-header span");
   if (header) {
-    header.textContent = `${state.selected.size} of ${state.rules.length} selected`;
+    header.textContent = t("rules.selected", {
+      selected: state.selected.size,
+      total: state.rules.length,
+    });
   }
 }
 
@@ -175,7 +182,7 @@ function ruleItem(
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = enabled;
-  checkbox.title = enabled ? "Disable rule" : "Enable rule";
+  checkbox.title = enabled ? t("rules.disable") : t("rules.enable");
   checkbox.addEventListener("click", (e) => e.stopPropagation());
   checkbox.addEventListener("change", () => {
     if (checkbox.checked) {
@@ -190,7 +197,7 @@ function ruleItem(
   const info = document.createElement("button");
   info.type = "button";
   info.className = "rule-info";
-  info.title = enabled ? "Disable rule" : "Enable rule";
+  info.title = enabled ? t("rules.disable") : t("rules.enable");
 
   const name = document.createElement("div");
   name.className = "rule-name";
@@ -213,15 +220,15 @@ function ruleItem(
   expandBtn.disabled = settings.length === 0;
   expandBtn.title =
     settings.length === 0
-      ? "No settings"
+      ? t("rules.noSettings")
       : expanded
-        ? "Collapse settings"
-        : "Expand settings";
+        ? t("rules.collapseSettings")
+        : t("rules.expandSettings");
   expandBtn.setAttribute(
     "aria-label",
     settings.length === 0
-      ? "No settings"
-      : `Expand or collapse settings for ${rule.name}`,
+      ? t("rules.noSettings")
+      : t("rules.expandSettingsAria", { name: rule.name }),
   );
 
   if (settings.length > 0) {
@@ -393,13 +400,15 @@ function appendGitleaksTooling(
   hint.className = "rule-settings-hint";
   if (status?.status === "installed") {
     hint.textContent = status.command
-      ? `gitleaks is ready (${status.command})`
-      : "gitleaks is ready";
+      ? t("rules.gitleaksReadyCmd", { command: status.command })
+      : t("rules.gitleaksReady");
   } else if (status?.status === "missing") {
     hint.className = "rule-settings-hint settings-hint-warn";
-    hint.textContent = `gitleaks is not installed. ${status.installHint}`;
+    hint.textContent = t("rules.gitleaksMissing", {
+      hint: status.installHint,
+    });
   } else {
-    hint.textContent = "Checking gitleaks installation…";
+    hint.textContent = t("rules.checkingGitleaks");
   }
   settingsEl.appendChild(hint);
 
@@ -411,7 +420,9 @@ function appendGitleaksTooling(
     install.type = "button";
     install.className = "btn btn-ghost";
     install.disabled = Boolean(state.gitleaksInstalling);
-    install.textContent = state.gitleaksInstalling ? "Installing…" : "Install gitleaks";
+    install.textContent = state.gitleaksInstalling
+      ? t("wizard.installing")
+      : t("rules.installGitleaks");
     install.addEventListener("click", () => {
       void context.onInstallGitleaks?.();
     });
@@ -438,13 +449,15 @@ function appendTrufflehogTooling(
   hint.className = "rule-settings-hint";
   if (status?.status === "installed") {
     hint.textContent = status.command
-      ? `trufflehog is ready (${status.command})`
-      : "trufflehog is ready";
+      ? t("rules.trufflehogReadyCmd", { command: status.command })
+      : t("rules.trufflehogReady");
   } else if (status?.status === "missing") {
     hint.className = "rule-settings-hint settings-hint-warn";
-    hint.textContent = `trufflehog is not installed. ${status.installHint}`;
+    hint.textContent = t("rules.trufflehogMissing", {
+      hint: status.installHint,
+    });
   } else {
-    hint.textContent = "Checking trufflehog installation…";
+    hint.textContent = t("rules.checkingTrufflehog");
   }
   settingsEl.appendChild(hint);
 
@@ -457,8 +470,8 @@ function appendTrufflehogTooling(
     install.className = "btn btn-ghost";
     install.disabled = Boolean(state.trufflehogInstalling);
     install.textContent = state.trufflehogInstalling
-      ? "Installing…"
-      : "Install trufflehog";
+      ? t("wizard.installing")
+      : t("rules.installTrufflehog");
     install.addEventListener("click", () => {
       void context.onInstallTrufflehog?.();
     });
@@ -516,7 +529,7 @@ function settingControl(
 
     const empty = document.createElement("option");
     empty.value = "";
-    empty.textContent = "Use global";
+    empty.textContent = t("rules.useGlobal");
     select.appendChild(empty);
 
     for (const option of def.options ?? []) {

@@ -15,7 +15,6 @@ import {
   formatMetricHint,
   formatMetricPrimary,
   parsePercentileViewMode,
-  percentileViewLabel,
   PERCENTILE_VIEW_MODES,
   type PercentileViewMode,
 } from "../analysis/percentileView";
@@ -48,6 +47,48 @@ import {
 } from "./analysisDetailPopup";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { renderPagedGrid } from "./pagedList";
+import { t, type MessageKey } from "../i18n";
+
+const PIPELINE_STAGE_KEYS: Record<string, MessageKey> = {
+  scanning: "progress.stage.scanning",
+  reading: "progress.stage.reading",
+  lsp: "progress.stage.lsp",
+  analyzing: "progress.stage.analyzing",
+  validating: "progress.stage.validating",
+  quality: "progress.stage.quality",
+};
+
+function pipelineStageLabel(stageId: string, fallback: string): string {
+  const key = PIPELINE_STAGE_KEYS[stageId];
+  return key ? t(key) : fallback;
+}
+
+function percentileModeLabel(mode: PercentileViewMode): string {
+  switch (mode) {
+    case "avg":
+      return t("report.percentile.avg");
+    case "p50":
+      return t("report.percentile.p50");
+    case "p80":
+      return t("report.percentile.p80");
+    case "p90":
+      return t("report.percentile.p90");
+    case "all":
+      return t("report.percentile.all");
+  }
+}
+
+function dsmLevelLabel(level: string): string {
+  if (level === "package") return t("dsm.packages");
+  if (level === "file") return t("dsm.files");
+  return level;
+}
+
+function dsmOrderLabel(ordering: string): string {
+  if (ordering === "partitioned") return t("dsm.partitioned");
+  if (ordering === "hierarchical") return t("dsm.hierarchical");
+  return ordering;
+}
 
 type TabId = "analysis" | "validation" | "progress";
 
@@ -123,23 +164,22 @@ export function createResultsPanel(
       : [
           {
             id: "analysis" as const,
-            label: "Analysis",
-            title:
-              "Overview — architecture & modularity health, ratings, and key findings",
+            label: t("results.tab.analysis"),
+            title: t("results.tab.analysisTitle"),
           },
         ]),
     {
       id: "validation",
-      label: "Validation",
-      title: "Rule findings, design violations, and AI review results",
+      label: t("results.tab.validation"),
+      title: t("results.tab.validationTitle"),
     },
     ...(progressInMainView
       ? []
       : [
           {
             id: "progress" as const,
-            label: "Progress",
-            title: "Live run progress and AI stream output",
+            label: t("tab.progress"),
+            title: t("results.tab.progressTitle"),
           },
         ]),
   ];
@@ -194,8 +234,7 @@ export function createResultsPanel(
 
   const emptyHost = document.createElement("div");
   emptyHost.className = "panel-empty";
-  emptyHost.textContent =
-    "Run analysis to see an overview, health scores, and validation findings";
+  emptyHost.textContent = t("report.empty");
   emptyHost.hidden = true;
 
   if (progressInMainView) {
@@ -252,10 +291,10 @@ export function createResultsPanel(
   }
 
   function statusLabelText(status: RuleTaskProgress["status"]): string {
-    if (status === "running") return "Running";
-    if (status === "done") return "Done";
-    if (status === "failed") return "Failed";
-    return "Waiting";
+    if (status === "running") return t("progress.running");
+    if (status === "done") return t("progress.done");
+    if (status === "failed") return t("progress.failed");
+    return t("progress.waiting");
   }
 
   function createTaskBar(label: string, key: string): TaskBarRefs {
@@ -276,7 +315,7 @@ export function createResultsPanel(
 
     const statusLabel = document.createElement("span");
     statusLabel.className = "analysis-rule-task-status";
-    statusLabel.textContent = "Waiting";
+    statusLabel.textContent = t("progress.waiting");
 
     header.append(icon, name, statusLabel);
 
@@ -325,7 +364,7 @@ export function createResultsPanel(
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "btn btn-ghost analysis-run-toggle";
-    toggleBtn.setAttribute("aria-label", "Expand or collapse run");
+    toggleBtn.setAttribute("aria-label", t("progress.expandCollapse"));
 
     const titleBlock = document.createElement("div");
     titleBlock.className = "analysis-run-title-block";
@@ -368,14 +407,17 @@ export function createResultsPanel(
 
     const pipelineHeading = document.createElement("div");
     pipelineHeading.className = "analysis-pipeline-label";
-    pipelineHeading.textContent = "Pipeline";
+    pipelineHeading.textContent = t("progress.pipeline");
 
     const pipelineList = document.createElement("div");
     pipelineList.className = "analysis-rule-tasks analysis-pipeline-tasks";
 
     const pipelineBars = new Map<string, TaskBarRefs>();
     for (const stage of getPipelineStages()) {
-      const bar = createTaskBar(stage.label, stage.id);
+      const bar = createTaskBar(
+        pipelineStageLabel(stage.id, stage.label),
+        stage.id,
+      );
       pipelineBars.set(stage.id, bar);
       pipelineList.appendChild(bar.row);
     }
@@ -436,18 +478,23 @@ export function createResultsPanel(
     refs.root.classList.toggle("is-collapsed", collapsed);
     refs.body.hidden = collapsed;
     refs.toggleBtn.textContent = collapsed ? "▸" : "▾";
-    refs.toggleBtn.title = collapsed ? "Expand run details" : "Collapse run details";
+    refs.toggleBtn.title = collapsed
+      ? t("progress.expand")
+      : t("progress.collapse");
     refs.summary.hidden = !collapsed;
   }
 
   function runStatusSummary(run: AnalysisRun): string {
     if (run.status === "running") {
       const pct = overallProgressPercent(run.progress);
-      return `${run.progress?.message ?? "Running…"} · ${pct}%`;
+      return t("progress.runningSummary", {
+        message: run.progress?.message ?? t("progress.runningEllipsis"),
+        pct,
+      });
     }
-    if (run.status === "completed") return "Complete · 100%";
-    if (run.status === "cancelled") return "Cancelled";
-    if (run.status === "failed") return run.error ?? "Failed";
+    if (run.status === "completed") return t("progress.completePct");
+    if (run.status === "cancelled") return t("progress.cancelled");
+    if (run.status === "failed") return run.error ?? t("progress.failed");
     return run.status;
   }
 
@@ -460,7 +507,7 @@ export function createResultsPanel(
       const cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
       cancelBtn.className = "btn btn-ghost analysis-run-cancel";
-      cancelBtn.textContent = "Cancel";
+      cancelBtn.textContent = t("analysis.cancel");
       cancelBtn.addEventListener("click", () => handlers.onCancelRun?.(run.id));
       refs.actions.appendChild(cancelBtn);
       return;
@@ -469,9 +516,8 @@ export function createResultsPanel(
       const applyBtn = document.createElement("button");
       applyBtn.type = "button";
       applyBtn.className = "btn btn-ghost analysis-run-apply";
-      applyBtn.textContent = "Show in workspace";
-      applyBtn.title =
-        "Load this run into the graph, Analysis / Health / Validation tabs, and module list";
+      applyBtn.textContent = t("progress.showInWorkspace");
+      applyBtn.title = t("progress.showInWorkspaceTitle");
       applyBtn.addEventListener("click", () => handlers.onApplyRun?.(run.id));
       refs.actions.appendChild(applyBtn);
     }
@@ -518,8 +564,15 @@ export function createResultsPanel(
     ).length;
     refs.rulesHeading.textContent =
       currentStage === "validating" || runningCount > 0
-        ? `Rules (${runningCount} running in parallel · ${doneCount}/${ruleTasks.length} done)`
-        : `Rules (${doneCount}/${ruleTasks.length} done)`;
+        ? t("progress.rulesRunning", {
+            running: runningCount,
+            done: doneCount,
+            total: ruleTasks.length,
+          })
+        : t("progress.rulesDone", {
+            done: doneCount,
+            total: ruleTasks.length,
+          });
 
     for (const task of ruleTasks) {
       let bar = refs.ruleBars.get(task.ruleId);
@@ -552,11 +605,11 @@ export function createResultsPanel(
         : (progress?.ruleTasks ?? []);
 
     if (run.status === "failed") {
-      refs.message.textContent = run.error ?? "Analysis failed";
+      refs.message.textContent = run.error ?? t("progress.analysisFailed");
     } else if (run.status === "cancelled") {
-      refs.message.textContent = "Cancelled";
+      refs.message.textContent = t("progress.cancelled");
     } else {
-      refs.message.textContent = progress?.message ?? "Preparing…";
+      refs.message.textContent = progress?.message ?? t("progress.preparing");
     }
 
     const pipelineFinished =
@@ -576,14 +629,14 @@ export function createResultsPanel(
     if (run.status === "running" && progress?.stage === "done") {
       refs.overallMeta.textContent =
         progress.percent < 100 || /saving/i.test(progress.message)
-          ? "Finalizing results… · 100%"
-          : "Complete · transferring… · 100%";
+          ? t("progress.finalizing")
+          : t("progress.transferring");
       refs.overallMeta.hidden = false;
     } else if (run.status === "running" && progress) {
       refs.overallMeta.textContent = overallProgressMeta(progress);
       refs.overallMeta.hidden = false;
     } else if (run.status === "completed") {
-      refs.overallMeta.textContent = "Complete · 100%";
+      refs.overallMeta.textContent = t("progress.completePct");
       refs.overallMeta.hidden = false;
     } else {
       refs.overallMeta.hidden = true;
@@ -647,7 +700,7 @@ export function createResultsPanel(
       if (!progressEmptyEl) {
         progressEmptyEl = document.createElement("div");
         progressEmptyEl.className = "panel-empty";
-        progressEmptyEl.textContent = "Run analysis to see progress";
+        progressEmptyEl.textContent = t("progress.empty");
       }
       if (!progressHost.contains(progressEmptyEl)) {
         progressHost.replaceChildren(progressEmptyEl);
@@ -675,11 +728,17 @@ export function createResultsPanel(
     const finishedCount = orderedRuns.length - runningCount;
     if (runningCount > 0) {
       runsHeadingText!.textContent =
-        `${runningCount} run${runningCount === 1 ? "" : "s"} in progress` +
-        (finishedCount > 0 ? ` · ${finishedCount} finished` : "");
+        (runningCount === 1
+          ? t("progress.runsInProgressOne", { n: runningCount })
+          : t("progress.runsInProgress", { n: runningCount })) +
+        (finishedCount > 0
+          ? t("progress.finishedSuffix", { n: finishedCount })
+          : "");
     } else {
       runsHeadingText!.textContent =
-        `${orderedRuns.length} completed run${orderedRuns.length === 1 ? "" : "s"}`;
+        orderedRuns.length === 1
+          ? t("progress.completedRunsOne", { n: orderedRuns.length })
+          : t("progress.completedRuns", { n: orderedRuns.length });
     }
 
     if (runningCount > 1) {
@@ -687,7 +746,7 @@ export function createResultsPanel(
         cancelAllBtn = document.createElement("button");
         cancelAllBtn.type = "button";
         cancelAllBtn.className = "btn btn-ghost analysis-runs-cancel-all";
-        cancelAllBtn.textContent = "Cancel all";
+        cancelAllBtn.textContent = t("progress.cancelAll");
         cancelAllBtn.addEventListener("click", () => handlers.onCancelAllRuns?.());
         runsHeadingEl.appendChild(cancelAllBtn);
       }
@@ -761,8 +820,8 @@ export function createResultsPanel(
       const empty = document.createElement("div");
       empty.className = "analysis-report-empty";
       empty.innerHTML = `
-        <h2 class="analysis-report-title">Analysis report</h2>
-        <p class="panel-empty">Run analysis to generate an overall project report — packages, rules, architecture health, and modularity.</p>
+        <h2 class="analysis-report-title">${t("view.report")}</h2>
+        <p class="panel-empty">${t("report.emptyBody")}</p>
       `;
       reportHost.appendChild(empty);
       return;
@@ -932,7 +991,7 @@ function renderAnalysisTab(
   if (opts.asReport) {
     const title = document.createElement("h2");
     title.className = "analysis-report-title";
-    title.textContent = "Analysis report";
+    title.textContent = t("view.report");
     root.appendChild(title);
   }
 
@@ -956,51 +1015,51 @@ function renderAnalysisTab(
   const statDefs: StatDef[] = [
     {
       value: counts.packages,
-      label: "Packages",
+      label: t("report.stat.packages"),
       className: "stat",
       kind: "modules",
-      title: "View packages / modules in the dependency graph",
+      title: t("report.stat.packagesTitle"),
     },
     {
       value: counts.files,
-      label: "Source files",
+      label: t("report.stat.sourceFiles"),
       className: "stat",
-      title: "Source files included in the last analysis",
+      title: t("report.stat.sourceFilesTitle"),
     },
     {
       value: counts.rules,
-      label: "Rules",
+      label: t("report.stat.rules"),
       className: "stat",
-      title: "Validation rules in the last analysis",
+      title: t("report.stat.rulesTitle"),
     },
     {
       value: counts.passed,
-      label: "Passed",
+      label: t("report.stat.passed"),
       className: "stat stat-pass",
       kind: "pass",
     },
     {
       value: counts.warnings,
-      label: "Warnings",
+      label: t("report.stat.warnings"),
       className: "stat stat-warn",
       kind: "warn",
     },
     {
       value: counts.failures,
-      label: "Failures",
+      label: t("report.stat.failures"),
       className: "stat stat-fail",
       kind: "fail",
     },
     {
       value: counts.modularityHealth,
-      label: "Modularity health",
+      label: t("scoreHistory.modularity"),
       className: "stat",
       onClick: () => {
         root
           .querySelector("#modularity-health-section")
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       },
-      title: "Jump to Modularity health section",
+      title: t("report.stat.jumpModularity"),
     },
   ];
 
@@ -1024,7 +1083,9 @@ function renderAnalysisTab(
     card.className = clickable ? `${def.className} stat-clickable` : def.className;
     card.title =
       def.title ??
-      (def.kind ? `View ${def.label.toLowerCase()} details` : def.label);
+      (def.kind
+        ? t("report.stat.viewDetails", { label: def.label.toLowerCase() })
+        : def.label);
 
     const value = document.createElement("span");
     value.className = "stat-value";
@@ -1058,7 +1119,7 @@ function renderAnalysisTab(
     overallSection.className = "arch-health overall-health";
     const heading = document.createElement("h3");
     heading.className = "arch-health-heading";
-    heading.textContent = "Overall";
+    heading.textContent = t("scoreHistory.overall");
     overallSection.appendChild(heading);
     const overallChart = document.createElement("div");
     overallSection.appendChild(overallChart);
@@ -1122,8 +1183,7 @@ function renderAnalysisTab(
   } else {
     const empty = document.createElement("div");
     empty.className = "panel-empty arch-health-empty";
-    empty.textContent =
-      "Architecture quality metrics unavailable — re-run analysis to precompute them.";
+    empty.textContent = t("report.architectureUnavailable");
     root.appendChild(empty);
   }
 
@@ -1154,20 +1214,20 @@ function renderPercentileViewSwitch(
   const wrap = document.createElement("div");
   wrap.className = "percentile-view-switch";
   wrap.setAttribute("role", "group");
-  wrap.setAttribute("aria-label", "Percentile view");
+  wrap.setAttribute("aria-label", t("details.percentileView"));
 
   for (const option of PERCENTILE_VIEW_MODES) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "percentile-view-btn";
     btn.classList.toggle("active", option === mode);
-    btn.textContent = percentileViewLabel(option);
+    btn.textContent = percentileModeLabel(option);
     btn.title =
       option === "all"
-        ? "Show p50 / p80 / p90 together"
+        ? t("report.percentile.allTitle")
         : option === "avg"
-          ? "Show project/package average"
-          : `Show ${option} only`;
+          ? t("report.percentile.avgTitle")
+          : t("report.percentile.modeTitle", { mode: option });
     btn.addEventListener("click", () => {
       if (option !== mode) onChange(option);
     });
@@ -1214,7 +1274,7 @@ function renderArchitectureHealthSection(
 
   const heading = document.createElement("h3");
   heading.className = "arch-health-heading";
-  heading.textContent = "Architecture health";
+  heading.textContent = t("scoreHistory.architecture");
   headingRow.appendChild(heading);
 
   headingRow.appendChild(
@@ -1231,24 +1291,26 @@ function renderArchitectureHealthSection(
 
   const viewLabel =
     percentileView === "all"
-      ? "Architecture"
-      : `Architecture · ${percentileViewLabel(percentileView)}`;
+      ? t("report.architectureLabel")
+      : t("report.architectureWithView", {
+          view: percentileModeLabel(percentileView),
+        });
   const scoreEl = document.createElement("div");
   scoreEl.className = "health-score";
-  scoreEl.innerHTML = `<span class="health-score-value">${arch.rating}</span><span class="health-score-label">/ 100 · ${viewLabel}</span>`;
+  scoreEl.innerHTML = `<span class="health-score-value">${arch.rating}</span><span class="health-score-label">${t("report.scoreOutOf", { label: viewLabel })}</span>`;
 
   const statusEl = document.createElement("div");
   statusEl.className = "health-status-label";
   const modBit =
     arch.modularityScore != null
-      ? ` · DSM modularity ${arch.modularityScore}/100`
+      ? t("report.health.modularityBit", { score: arch.modularityScore })
       : "";
   statusEl.textContent =
     status === "healthy"
-      ? `Healthy relative quality across ${arch.packageCount} packages${modBit}`
+      ? t("report.health.healthy", { n: arch.packageCount, mod: modBit })
       : status === "fair"
-        ? `Fair — several modules above peer percentiles${modBit}`
-        : `Poor — high complexity / issues vs project peers${modBit}`;
+        ? t("report.health.fair", { mod: modBit })
+        : t("report.health.poor", { mod: modBit });
 
   scorecard.append(scoreEl, statusEl);
   section.appendChild(scorecard);
@@ -1261,7 +1323,10 @@ function renderArchitectureHealthSection(
 
   const meta = document.createElement("div");
   meta.className = "arch-health-meta";
-  meta.textContent = `${arch.fileCount.toLocaleString()} files · ${arch.totalLoc.toLocaleString()} LOC · ratings are percentile-based within this project`;
+  meta.textContent = t("report.archMeta", {
+    files: arch.fileCount.toLocaleString(),
+    loc: arch.totalLoc.toLocaleString(),
+  });
   section.appendChild(meta);
 
   const metrics = document.createElement("div");
@@ -1336,12 +1401,12 @@ function renderRatingsSubtabs(
   const tabs = document.createElement("div");
   tabs.className = "arch-ratings-subtabs";
   tabs.setAttribute("role", "tablist");
-  tabs.setAttribute("aria-label", "Ratings");
+  tabs.setAttribute("aria-label", t("report.ratings"));
 
   const sortSwitch = document.createElement("div");
   sortSwitch.className = "arch-ratings-sort";
   sortSwitch.setAttribute("role", "group");
-  sortSwitch.setAttribute("aria-label", "Sort ratings");
+  sortSwitch.setAttribute("aria-label", t("report.ratingsSort"));
 
   const panel = document.createElement("div");
   panel.className = "arch-ratings-panel";
@@ -1380,8 +1445,8 @@ function renderRatingsSubtabs(
         fileRatingsState.onNeedQualityFiles?.();
       }
       const loading = createLoadingPlaceholder({
-        title: "Loading file ratings…",
-        detail: "Fetching per-file quality from the analysis cache.",
+        title: t("report.loadingFileRatings"),
+        detail: t("report.loadingFileRatingsDetail"),
         size: "fill",
       });
       loading.classList.add("arch-ratings-loading");
@@ -1396,8 +1461,8 @@ function renderRatingsSubtabs(
     if (id === "files" && fileRatingsState.filesHydrated) {
       host.appendChild(
         createLoadingPlaceholder({
-          title: "Computing file ratings…",
-          detail: "Scoring files against project peers.",
+          title: t("report.computingFileRatings"),
+          detail: t("report.computingFileRatingsDetail"),
           size: "fill",
         }),
       );
@@ -1410,7 +1475,7 @@ function renderRatingsSubtabs(
           (item) => renderRatingGridCard(item, handlers),
           {
             pageSize: 24,
-            emptyText: "No file ratings",
+            emptyText: t("report.noFileRatings"),
             className: "arch-ratings-grid",
           },
         );
@@ -1424,15 +1489,22 @@ function renderRatingsSubtabs(
       (item) => renderRatingGridCard(item, handlers),
       {
         pageSize: 24,
-        emptyText: id === "packages" ? "No package ratings" : "No file ratings",
+        emptyText:
+          id === "packages"
+            ? t("report.noPackageRatings")
+            : t("report.noFileRatings"),
         className: "arch-ratings-grid",
       },
     );
   };
 
   const defs: Array<{ id: RatingsSubtab; label: string; count: number }> = [
-    { id: "packages", label: "Package ratings", count: arch.packageCount },
-    { id: "files", label: "File ratings", count: arch.fileCount },
+    {
+      id: "packages",
+      label: t("report.packageRatings"),
+      count: arch.packageCount,
+    },
+    { id: "files", label: t("report.fileRatings"), count: arch.fileCount },
   ];
 
   for (const def of defs) {
@@ -1440,7 +1512,10 @@ function renderRatingsSubtabs(
     btn.type = "button";
     btn.className = "arch-ratings-subtab";
     btn.setAttribute("role", "tab");
-    btn.textContent = `${def.label} (${def.count.toLocaleString()})`;
+    btn.textContent = t("report.ratingsCount", {
+      label: def.label,
+      count: def.count.toLocaleString(),
+    });
     btn.addEventListener("click", () => {
       if (active !== def.id) paintTab(def.id);
     });
@@ -1451,13 +1526,13 @@ function renderRatingsSubtabs(
   const sortDefs: Array<{ id: RatingsSort; label: string; title: string }> = [
     {
       id: "best-first",
-      label: "Good → worse",
-      title: "Sort highest rating first",
+      label: t("report.sort.bestFirst"),
+      title: t("report.sort.bestFirstTitle"),
     },
     {
       id: "worst-first",
-      label: "Worse → good",
-      title: "Sort lowest rating first",
+      label: t("report.sort.worstFirst"),
+      title: t("report.sort.worstFirstTitle"),
     },
   ];
 
@@ -1493,8 +1568,8 @@ function renderRatingGridCard(
   card.className = `arch-rating-card arch-rating-${item.band}`;
   const opensFile = item.kind === "file";
   card.title = opensFile
-    ? `Show ${item.path} on graph`
-    : `Show ${item.path} on graph and open details`;
+    ? t("report.showOnGraph", { path: item.path })
+    : t("report.showOnGraphDetails", { path: item.path });
 
   const score = document.createElement("span");
   score.className = "arch-rating-card-score";
@@ -1538,7 +1613,7 @@ function renderModularityHealthSection(
 
   const heading = document.createElement("h3");
   heading.className = "arch-health-heading";
-  heading.textContent = "Modularity health";
+  heading.textContent = t("scoreHistory.modularity");
   headingRow.appendChild(heading);
   section.appendChild(headingRow);
 
@@ -1546,8 +1621,7 @@ function renderModularityHealthSection(
   if (!dsm || dsm.elements.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty arch-health-empty";
-    empty.textContent =
-      "No modularity health yet. Run analysis to compute Design Structure Matrix scores.";
+    empty.textContent = t("report.modularityEmpty");
     section.appendChild(empty);
 
     if (chartOpts?.mountHistory) {
@@ -1559,8 +1633,8 @@ function renderModularityHealthSection(
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.className = "btn btn-ghost";
-    openBtn.textContent = "Open DSM matrix";
-    openBtn.title = "Open the Design Structure Matrix dependency grid";
+    openBtn.textContent = t("report.openDsm");
+    openBtn.title = t("report.openDsmTitle");
     openBtn.addEventListener("click", () => handlers.onShowDsm?.());
     section.appendChild(openBtn);
     return section;
@@ -1574,16 +1648,16 @@ function renderModularityHealthSection(
 
   const scoreEl = document.createElement("div");
   scoreEl.className = "health-score";
-  scoreEl.innerHTML = `<span class="health-score-value">${score}</span><span class="health-score-label">/ 100 · DSM modularity</span>`;
+  scoreEl.innerHTML = `<span class="health-score-value">${score}</span><span class="health-score-label">${t("report.scoreOutOf", { label: t("report.dsmModularity") })}</span>`;
 
   const statusEl = document.createElement("div");
   statusEl.className = "health-status-label";
   statusEl.textContent =
     status === "healthy"
-      ? "Healthy structure"
+      ? t("report.modHealthy")
       : status === "fair"
-        ? "Fair — some coupling or layering issues"
-        : "Poor — cycles or dense upward dependencies";
+        ? t("report.modFair")
+        : t("report.modPoor");
 
   scorecard.append(scoreEl, statusEl);
   section.appendChild(scorecard);
@@ -1596,7 +1670,11 @@ function renderModularityHealthSection(
 
   const meta = document.createElement("div");
   meta.className = "arch-health-meta";
-  meta.textContent = `${dsm.elements.length} × ${dsm.elements.length} ${dsm.level}-level matrix · ${dsm.ordering} order`;
+  meta.textContent = t("report.matrixMeta", {
+    n: dsm.elements.length,
+    level: dsmLevelLabel(dsm.level),
+    order: dsmOrderLabel(dsm.ordering),
+  });
   section.appendChild(meta);
 
   const metrics = document.createElement("div");
@@ -1604,34 +1682,36 @@ function renderModularityHealthSection(
 
   const metricRows: { label: string; value: string; hint: string }[] = [
     {
-      label: "Cycles",
+      label: t("report.metric.cycles"),
       value: String(dsm.metrics.cycleCount),
-      hint: `${dsm.metrics.nodesInCycles} nodes in cycles`,
+      hint: t("report.metric.cyclesHint", { n: dsm.metrics.nodesInCycles }),
     },
     {
-      label: "Upper-triangle density",
+      label: t("report.metric.upperTriangle"),
       value: `${(dsm.metrics.upperTriangleDensity * 100).toFixed(1)}%`,
-      hint: "Backward / upward deps after partitioning",
+      hint: t("report.metric.upperTriangleHint"),
     },
     {
-      label: "Coupling density",
+      label: t("report.metric.coupling"),
       value: `${(dsm.metrics.couplingDensity * 100).toFixed(1)}%`,
-      hint: "Nonzero off-diagonal cells",
+      hint: t("report.metric.couplingHint"),
     },
     {
-      label: "Propagation cost",
+      label: t("report.metric.propagation"),
       value: `${(dsm.metrics.propagationCost * 100).toFixed(1)}%`,
-      hint: "MacCormack visibility density (change blast radius)",
+      hint: t("report.metric.propagationHint"),
     },
     {
-      label: "Clustered cost",
+      label: t("report.metric.clustered"),
       value: `${(dsm.metrics.clusteredCostNormalized * 100).toFixed(1)}%`,
-      hint: `MacCormack normalized (λ=2) · abs ${Math.round(dsm.metrics.clusteredCost ?? 0)}`,
+      hint: t("report.metric.clusteredHint", {
+        abs: Math.round(dsm.metrics.clusteredCost ?? 0),
+      }),
     },
     {
-      label: "Vertical buses",
+      label: t("report.metric.buses"),
       value: String(dsm.metrics.busCount ?? dsm.busIds?.length ?? 0),
-      hint: "High fan-in shared modules (≥10% callers)",
+      hint: t("report.metric.busesHint"),
     },
   ];
 
@@ -1651,14 +1731,14 @@ function renderModularityHealthSection(
   if (violations.length > 0) {
     const conf = document.createElement("div");
     conf.className = "health-conformance";
-    conf.innerHTML = `<strong>LDM conformance:</strong> ${violations.length} violation(s)`;
+    conf.innerHTML = `<strong>${t("report.ldmConformance")}:</strong> ${t("report.violationsCount", { n: violations.length })}`;
     section.appendChild(conf);
   } else if (
     result.validation.some((v) => v.rule_id === "architecture_conformance")
   ) {
     const conf = document.createElement("div");
     conf.className = "health-conformance health-conformance-ok";
-    conf.textContent = "LDM conformance: no design-rule violations";
+    conf.textContent = t("report.ldmOk");
     section.appendChild(conf);
   }
 
@@ -1668,7 +1748,7 @@ function renderModularityHealthSection(
   const showDsmBtn = document.createElement("button");
   showDsmBtn.type = "button";
   showDsmBtn.className = "btn btn-ghost";
-  showDsmBtn.textContent = "Show in DSM";
+  showDsmBtn.textContent = t("report.showInDsm");
   showDsmBtn.addEventListener("click", () =>
     handlers.onShowDsm?.(dsm.cycleNodes),
   );
@@ -1678,7 +1758,7 @@ function renderModularityHealthSection(
     const showViol = document.createElement("button");
     showViol.type = "button";
     showViol.className = "btn btn-ghost";
-    showViol.textContent = "Show violations in DSM";
+    showViol.textContent = t("report.showViolationsInDsm");
     const ids = [...new Set(violations.flatMap((v) => [v.from, v.to]))];
     showViol.addEventListener("click", () => handlers.onShowDsm?.(ids));
     actions.appendChild(showViol);
@@ -1693,7 +1773,7 @@ function renderModularityHealthSection(
       kind: dsm.level === "file" ? "file_imports" : "package_imports",
       nodes: dsm.cycleNodes.slice(0, 16),
       path: dsm.cycleNodes.slice(0, 16),
-      label: "DSM cycles",
+      label: t("report.dsmCycles"),
       node_count: dsm.cycleNodes.length,
     });
   }
@@ -1702,7 +1782,7 @@ function renderModularityHealthSection(
     const showCycleBtn = document.createElement("button");
     showCycleBtn.type = "button";
     showCycleBtn.className = "btn btn-ghost";
-    showCycleBtn.textContent = "Show cycles on graph";
+    showCycleBtn.textContent = t("report.showCyclesOnGraph");
     showCycleBtn.addEventListener("click", () => {
       handlers.onShowCycleOnGraph?.(cycles[0]!);
     });
@@ -1721,7 +1801,7 @@ function renderValidationTab(
   if (result.validation.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No validation rules were run";
+    empty.textContent = t("validation.empty");
     container.appendChild(empty);
     return;
   }
@@ -1755,15 +1835,21 @@ function renderValidationTab(
       const affected = document.createElement("div");
       affected.className = "validation-affected";
       if (cycleGroups.length > 0) {
-        affected.textContent = `${cycleGroups.length} cycle group${cycleGroups.length === 1 ? "" : "s"} — click to view on graph`;
+        affected.textContent =
+          cycleGroups.length === 1
+            ? t("validation.cycleGroupsOne")
+            : t("validation.cycleGroups", { n: cycleGroups.length });
       } else {
         const fileCount = new Set(
           item.affected.map((a) => a.split(":")[0]),
         ).size;
         affected.textContent =
           fileCount === 1
-            ? `1 file · ${item.affected.length} issue(s) — click to view`
-            : `${fileCount} files · ${item.affected.length} issue(s) — click to view`;
+            ? t("validation.issuesOneFile", { n: item.affected.length })
+            : t("validation.issuesFiles", {
+                files: fileCount,
+                n: item.affected.length,
+              });
       }
       body.appendChild(affected);
     }

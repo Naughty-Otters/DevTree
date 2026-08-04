@@ -1,6 +1,7 @@
 import type { LlmProviderInfo } from "../agent/types";
 import type { LlmConfiguration } from "../validation/aiValidation";
 import { configurationLabel } from "../validation/aiValidation";
+import { t } from "../i18n";
 
 export interface LlmConfigurationPickerOptions {
   configurations: LlmConfiguration[];
@@ -22,14 +23,14 @@ export function createLlmConfigurationPicker(
   const select = document.createElement("select");
   select.className = `${prefix}-input ${prefix}-select`;
 
-  root.append(fieldWrap("Configuration", select, prefix));
+  root.append(fieldWrap(t("llm.configuration"), select, prefix));
 
   function render(): void {
     select.replaceChildren();
     if (state.allowGlobal) {
       const global = document.createElement("option");
       global.value = "";
-      global.textContent = "Use global default";
+      global.textContent = t("llm.useGlobalDefault");
       select.appendChild(global);
     }
 

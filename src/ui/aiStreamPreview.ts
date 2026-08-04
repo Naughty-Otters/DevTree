@@ -1,4 +1,5 @@
 import type { AiValidationStream } from "../analysis/types";
+import { t } from "../i18n";
 
 function ensureChild(parent: HTMLElement, selector: string, tag: string, className: string): HTMLElement {
   let el = parent.querySelector<HTMLElement>(selector);
@@ -88,7 +89,13 @@ export function renderAiStreamPreview(
   }
 
   const header = ensureChild(wrap, ".ai-stream-preview-header", "div", "ai-stream-preview-header");
-  header.textContent = `${stream.ruleName} · ${stream.status === "running" ? "streaming…" : stream.status}`;
+  const statusLabel =
+    stream.status === "running"
+      ? t("llm.stream.streaming")
+      : stream.status === "done"
+        ? t("llm.stream.done")
+        : t("llm.stream.failed");
+  header.textContent = `${stream.ruleName} · ${statusLabel}`;
 
   const body = ensureChild(wrap, ".ai-stream-preview-body", "div", "ai-stream-preview-body");
   const meta = ensureChild(body, ".ai-stream-meta", "div", "ai-stream-meta");
@@ -117,7 +124,7 @@ export function renderAiStreamPreview(
   if (toolLog) {
     const toolsPane = ensureChild(panes, ".ai-stream-tools-pane", "div", "ai-stream-tools-pane");
     ensureChild(toolsPane, ".ai-stream-tools-label", "div", "ai-stream-section-label ai-stream-tools-label")
-      .textContent = "Tool output";
+      .textContent = t("llm.stream.toolOutput");
     const tools = ensureChild(toolsPane, ".ai-stream-tools", "pre", "ai-stream-tools");
     const toolsChanged = tools.textContent !== toolLog;
     if (toolsChanged) {
@@ -135,7 +142,7 @@ export function renderAiStreamPreview(
 
   if (stream.thinking.trim()) {
     ensureChild(modelPane, ".ai-stream-thinking-label", "div", "ai-stream-section-label ai-stream-thinking-label")
-      .textContent = "Reasoning";
+      .textContent = t("llm.stream.reasoning");
     const thinking = ensureChild(modelPane, ".ai-stream-thinking", "pre", "ai-stream-thinking");
     if (thinking.textContent !== stream.thinking) {
       thinking.textContent = stream.thinking;
@@ -148,7 +155,7 @@ export function renderAiStreamPreview(
 
   if (stream.text.trim()) {
     ensureChild(modelPane, ".ai-stream-text-label", "div", "ai-stream-section-label ai-stream-text-label")
-      .textContent = "Output";
+      .textContent = t("llm.stream.output");
     const text = ensureChild(modelPane, ".ai-stream-text", "pre", "ai-stream-text");
     if (text.textContent !== stream.text) {
       text.textContent = stream.text;
@@ -161,7 +168,7 @@ export function renderAiStreamPreview(
 
   if (!stream.thinking.trim() && !stream.text.trim() && !stream.activity && !toolLog && !stream.budget) {
     const waiting = ensureChild(modelPane, ".ai-stream-waiting", "div", "ai-stream-waiting");
-    const waitingText = "Waiting for model response…";
+    const waitingText = t("llm.stream.waiting");
     if (waiting.textContent !== waitingText) {
       waiting.textContent = waitingText;
       modelChanged = true;

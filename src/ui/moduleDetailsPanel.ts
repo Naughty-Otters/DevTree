@@ -30,6 +30,7 @@ import {
 } from "../graph/navigation";
 import { openableSourceForNode } from "../graph/openSource";
 import type { GraphEdge, GraphNode } from "../graph/types";
+import { t } from "../i18n";
 import { lucideIcon } from "./icons";
 import { relatedModules } from "./graphPopup";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
@@ -67,6 +68,8 @@ export interface ModuleDetailsPanelApi {
     qualityLoading?: boolean;
   }) => void;
   hide: () => void;
+  /** Re-render the open panel (e.g. after locale change). */
+  refresh: () => void;
   isOpen: () => boolean;
   currentNodeId: () => string | null;
 }
@@ -220,7 +223,7 @@ function renderPercentileViewSwitch(
   const wrap = document.createElement("div");
   wrap.className = "percentile-view-switch";
   wrap.setAttribute("role", "group");
-  wrap.setAttribute("aria-label", "Percentile view");
+  wrap.setAttribute("aria-label", t("details.percentileView"));
 
   for (const option of PERCENTILE_VIEW_MODES) {
     const btn = document.createElement("button");
@@ -251,8 +254,7 @@ function renderQualitySection(
 
   const title = document.createElement("h3");
   title.className = "module-details-section-title";
-  title.innerHTML =
-    'Quality metrics <span class="module-details-count">Per-module scores</span>';
+  title.innerHTML = `${escapeHtml(t("details.qualityTitle"))} <span class="module-details-count">${escapeHtml(t("details.qualitySubtitle"))}</span>`;
   titleRow.appendChild(title);
 
   if (report?.kind === "package" && onPercentileViewChange) {
@@ -264,8 +266,8 @@ function renderQualitySection(
 
   if (qualityLoading && !report) {
     const loading = createLoadingPlaceholder({
-      title: "Loading quality metrics…",
-      detail: "Fetching per-file scores from the analysis cache.",
+      title: t("details.qualityLoading"),
+      detail: t("details.qualityLoadingDetail"),
       size: "panel",
     });
     loading.classList.add("module-details-loading");
@@ -276,7 +278,7 @@ function renderQualitySection(
   if (!report) {
     const empty = document.createElement("div");
     empty.className = "module-details-empty";
-    empty.textContent = "Run analysis to compute quality metrics";
+    empty.textContent = t("details.qualityEmpty");
     section.appendChild(empty);
     return section;
   }
@@ -294,8 +296,8 @@ function renderQualitySection(
   note.className = "module-details-metrics-note";
   note.textContent =
     report.kind === "package"
-      ? "Package values follow the selected view (avg or percentile)."
-      : "Coverage is test-file presence; complexity uses structure (or keywords when loaded).";
+      ? t("details.qualityNotePackage")
+      : t("details.qualityNoteFile");
   section.appendChild(note);
 
   return section;
@@ -359,7 +361,7 @@ export function createModuleDetailsPanel(
         li.className = "module-details-item";
         const openable = openableSourceForNode(item);
         li.title = openable
-          ? `Show ${openable.path} on graph`
+          ? t("details.showOnGraph", { path: openable.path })
           : item.path;
 
         const dot = document.createElement("span");
@@ -472,8 +474,8 @@ export function createModuleDetailsPanel(
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "btn btn-icon btn-ghost module-details-close";
-    closeBtn.title = "Close";
-    closeBtn.setAttribute("aria-label", "Close module details");
+    closeBtn.title = t("details.close");
+    closeBtn.setAttribute("aria-label", t("details.closeAria"));
     closeBtn.appendChild(lucideIcon(X, { size: 14, class: "lucide-icon" }));
     closeBtn.addEventListener("click", hide);
 
@@ -490,26 +492,26 @@ export function createModuleDetailsPanel(
       pathRow.className = "module-details-row";
       const pathLabel = document.createElement("span");
       pathLabel.className = "module-details-label";
-      pathLabel.textContent = "Path";
+      pathLabel.textContent = t("details.path");
       const pathBtn = document.createElement("button");
       pathBtn.type = "button";
       pathBtn.className = "btn-text module-details-value module-details-path-link";
       pathBtn.textContent = node.path;
-      pathBtn.title = `Open ${selfOpenable.path}`;
+      pathBtn.title = t("details.openPath", { path: selfOpenable.path });
       pathBtn.addEventListener("click", () => {
         handlers.onOpenSource?.(selfOpenable.path, selfOpenable.line);
       });
       pathRow.append(pathLabel, pathBtn);
       meta.appendChild(pathRow);
     } else {
-      appendMetaRow(meta, "Path", node.path, { title: node.path });
+      appendMetaRow(meta, t("details.path"), node.path, { title: node.path });
     }
     if (report?.kind === "package") {
-      appendMetaRow(meta, "Files", formatInt(report.fileCount));
+      appendMetaRow(meta, t("details.files"), formatInt(report.fileCount));
     } else if (node.line && node.line > 0) {
-      appendMetaRow(meta, "Line", formatInt(node.line));
+      appendMetaRow(meta, t("details.line"), formatInt(node.line));
     } else {
-      appendMetaRow(meta, "Lines", formatInt(node.loc));
+      appendMetaRow(meta, t("details.lines"), formatInt(node.loc));
     }
 
     const rating = ratingForQualityPath(
@@ -519,9 +521,8 @@ export function createModuleDetailsPanel(
     );
     if (rating != null) {
       const band = ratingBand(rating);
-      appendMetaRow(meta, "Rating", "", {
-        title:
-          "Percentile-based score vs peers in this project (100 = best relative quality)",
+      appendMetaRow(meta, t("details.rating"), "", {
+        title: t("details.ratingTitle"),
         valueHtml: `<span class="module-details-health module-details-health-${band}">${rating}/100</span>`,
       });
     }
@@ -546,7 +547,9 @@ export function createModuleDetailsPanel(
       openBtn.type = "button";
       openBtn.className = "btn btn-ghost module-details-open-file";
       openBtn.textContent =
-        selfOpenable.line != null ? "Open at line" : "Open file";
+        selfOpenable.line != null
+          ? t("details.openAtLine")
+          : t("details.openFile");
       openBtn.addEventListener("click", () => {
         handlers.onOpenSource?.(selfOpenable.path, selfOpenable.line);
       });
@@ -558,8 +561,8 @@ export function createModuleDetailsPanel(
       drill.className = "btn btn-ghost module-details-drill";
       drill.textContent =
         node.kind === "file" || node.kind === "module"
-          ? "Open symbols on graph"
-          : "Open contents on graph";
+          ? t("details.openSymbols")
+          : t("details.openContents");
       drill.addEventListener("click", () => handlers.onDrillInto?.(node.id));
       actions.appendChild(drill);
     }
@@ -567,18 +570,18 @@ export function createModuleDetailsPanel(
 
     const depsSection = document.createElement("section");
     depsSection.className = "module-details-section";
-    depsSection.innerHTML = `<h3 class="module-details-section-title">Depends on <span class="module-details-count">${dependsOn.length}</span></h3>`;
+    depsSection.innerHTML = `<h3 class="module-details-section-title">${escapeHtml(t("details.dependsOn"))} <span class="module-details-count">${dependsOn.length}</span></h3>`;
     depsSection.appendChild(
-      renderList(dependsOn, "No outgoing dependencies", (id) =>
+      renderList(dependsOn, t("details.noOutgoing"), (id) =>
         handlers.onSelectRelated?.(id),
       ),
     );
 
     const usedSection = document.createElement("section");
     usedSection.className = "module-details-section";
-    usedSection.innerHTML = `<h3 class="module-details-section-title">Used by <span class="module-details-count">${usedBy.length}</span></h3>`;
+    usedSection.innerHTML = `<h3 class="module-details-section-title">${escapeHtml(t("details.usedBy"))} <span class="module-details-count">${usedBy.length}</span></h3>`;
     usedSection.appendChild(
-      renderList(usedBy, "No incoming dependents", (id) =>
+      renderList(usedBy, t("details.noIncoming"), (id) =>
         handlers.onSelectRelated?.(id),
       ),
     );
@@ -586,14 +589,16 @@ export function createModuleDetailsPanel(
     const contentsSection = document.createElement("section");
     contentsSection.className = "module-details-section";
     const contentsTitle =
-      node.kind === "file" || node.kind === "module" ? "Symbols" : "Contents";
-    contentsSection.innerHTML = `<h3 class="module-details-section-title">${contentsTitle} <span class="module-details-count">${contents.length}</span></h3>`;
+      node.kind === "file" || node.kind === "module"
+        ? t("details.symbols")
+        : t("details.contents");
+    contentsSection.innerHTML = `<h3 class="module-details-section-title">${escapeHtml(contentsTitle)} <span class="module-details-count">${contents.length}</span></h3>`;
     contentsSection.appendChild(
       renderList(
         contents,
         hierarchy
-          ? "Nothing inside this module"
-          : "Run analysis to load module contents",
+          ? t("details.nothingInside")
+          : t("details.runForContents"),
         (id) => handlers.onOpenContent?.(id),
       ),
     );
@@ -637,6 +642,9 @@ export function createModuleDetailsPanel(
     show,
     updateQuality,
     hide,
+    refresh() {
+      if (open && lastData) show(lastData);
+    },
     isOpen: () => open,
     currentNodeId: () => currentId,
   };

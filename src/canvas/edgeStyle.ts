@@ -1,20 +1,34 @@
+import { t } from "../i18n";
+
 export type EdgeStyle = "straight" | "orthogonal" | "curved";
 
 export const EDGE_STYLES: { value: EdgeStyle; label: string; hint: string }[] = [
   {
     value: "straight",
-    label: "Straight",
-    hint: "Direct line between modules",
+    get label() {
+      return t("edge.straight");
+    },
+    get hint() {
+      return t("edge.straightHint");
+    },
   },
   {
     value: "orthogonal",
-    label: "Orthogonal",
-    hint: "Horizontal and vertical segments only",
+    get label() {
+      return t("edge.orthogonal");
+    },
+    get hint() {
+      return t("edge.orthogonalHint");
+    },
   },
   {
     value: "curved",
-    label: "Curved",
-    hint: "Smooth bezier curve between modules",
+    get label() {
+      return t("edge.curved");
+    },
+    get hint() {
+      return t("edge.curvedHint");
+    },
   },
 ];
 

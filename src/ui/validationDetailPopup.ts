@@ -8,6 +8,7 @@ import {
 import { cycleGroupsFromValidation, cycleKindLabel } from "../validation/cycles";
 import { isGitleaksMissingMessage } from "../gitleaks/types";
 import { isTrufflehogMissingMessage } from "../trufflehog/types";
+import { t } from "../i18n";
 
 export interface ValidationNavTarget {
   file: string;
@@ -58,18 +59,18 @@ function entryLabel(
     return `${symbol.kind} ${symbol.label}`;
   }
   if (entry.line != null && entry.line > 0) {
-    return `Line ${entry.line}`;
+    return t("validation.line", { n: entry.line });
   }
   if (entry.message && entry.message !== entry.file) {
     return entry.message;
   }
-  return "Issue";
+  return t("validation.issue");
 }
 
 function entryDetail(entry: ValidationAffectedEntry, symbol?: SymbolInfo): string {
   const parts: string[] = [];
   if (entry.line != null && entry.line > 0) {
-    parts.push(`line ${entry.line}`);
+    parts.push(t("validation.lineLower", { n: entry.line }));
   }
   if (symbol) {
     parts.push(symbol.kind);
@@ -113,7 +114,7 @@ export function showValidationDetail(
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "validation-detail-close";
-  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.setAttribute("aria-label", t("details.close"));
   closeBtn.textContent = "×";
   closeBtn.addEventListener("click", () => hideValidationDetail());
 
@@ -128,7 +129,7 @@ export function showValidationDetail(
     const installBtn = document.createElement("button");
     installBtn.type = "button";
     installBtn.className = "btn btn-ghost";
-    installBtn.textContent = "Install gitleaks";
+    installBtn.textContent = t("rules.installGitleaks");
     installBtn.addEventListener("click", () => {
       void handlers.onInstallGitleaks?.();
     });
@@ -145,7 +146,7 @@ export function showValidationDetail(
     const installBtn = document.createElement("button");
     installBtn.type = "button";
     installBtn.className = "btn btn-ghost";
-    installBtn.textContent = "Install trufflehog";
+    installBtn.textContent = t("rules.installTrufflehog");
     installBtn.addEventListener("click", () => {
       void handlers.onInstallTrufflehog?.();
     });
@@ -161,8 +162,7 @@ export function showValidationDetail(
   if (cycles.length > 0) {
     const intro = document.createElement("p");
     intro.className = "validation-detail-cycle-intro";
-    intro.textContent =
-      "Each group is a circular dependency. Use “Show on graph” to highlight the cycle on the dependency diagram.";
+    intro.textContent = t("validation.cycleIntro");
     body.appendChild(intro);
 
     const list = document.createElement("ul");
@@ -183,8 +183,10 @@ export function showValidationDetail(
       count.className = "validation-detail-cycle-count";
       count.textContent =
         cycle.node_count != null && cycle.node_count > cycle.nodes.length
-          ? `${cycle.node_count} nodes`
-          : `${cycle.nodes.length} node${cycle.nodes.length === 1 ? "" : "s"}`;
+          ? t("validation.nodesTotal", { n: cycle.node_count })
+          : cycle.nodes.length === 1
+            ? t("validation.nodesOne")
+            : t("validation.nodes", { n: cycle.nodes.length });
 
       header.append(kind, count);
 
@@ -198,7 +200,7 @@ export function showValidationDetail(
       const graphBtn = document.createElement("button");
       graphBtn.type = "button";
       graphBtn.className = "btn-text validation-detail-action";
-      graphBtn.textContent = "Show on graph";
+      graphBtn.textContent = t("validation.showOnGraph");
       graphBtn.addEventListener("click", () => {
         handlers.onShowCycleOnGraph?.(cycle);
       });
@@ -212,7 +214,7 @@ export function showValidationDetail(
   } else if (groups.size === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = "No file or symbol details for this rule.";
+    empty.textContent = t("validation.noDetails");
     body.appendChild(empty);
   } else {
     for (const [file, entries] of groups) {
@@ -227,7 +229,7 @@ export function showValidationDetail(
       filePath.className = "validation-detail-file-path";
       filePath.textContent = file;
       filePath.title = isOpenableValidationPath(file)
-        ? "Show file on graph"
+        ? t("validation.showFileOnGraph")
         : file;
       if (isOpenableValidationPath(file)) {
         filePath.addEventListener("click", () => {
@@ -241,7 +243,7 @@ export function showValidationDetail(
       const graphFileBtn = document.createElement("button");
       graphFileBtn.type = "button";
       graphFileBtn.className = "btn-text validation-detail-action";
-      graphFileBtn.textContent = "Show file on graph";
+      graphFileBtn.textContent = t("validation.showFileOnGraph");
       if (isOpenableValidationPath(file)) {
         graphFileBtn.addEventListener("click", () => {
           handlers.onShowOnGraph({ file });
@@ -284,7 +286,7 @@ export function showValidationDetail(
         const openBtn = document.createElement("button");
         openBtn.type = "button";
         openBtn.className = "btn-text validation-detail-action";
-        openBtn.textContent = "Open";
+        openBtn.textContent = t("validation.open");
         openBtn.addEventListener("click", () => {
           handlers.onOpenFile({
             file,
@@ -296,7 +298,9 @@ export function showValidationDetail(
         const graphBtn = document.createElement("button");
         graphBtn.type = "button";
         graphBtn.className = "btn-text validation-detail-action";
-        graphBtn.textContent = symbol ? "Go to symbol" : "Show on graph";
+        graphBtn.textContent = symbol
+          ? t("validation.goToSymbol")
+          : t("validation.showOnGraph");
         graphBtn.addEventListener("click", () => {
           handlers.onShowOnGraph({
             file,

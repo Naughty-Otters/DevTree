@@ -2,6 +2,7 @@ import type { GraphNode } from "../graph/types";
 import { openableSourceForNode } from "../graph/openSource";
 import { createNodeKindShapeWrap, nodeKindLabel } from "../canvas/nodeIcons";
 import { nodeColor } from "../canvas/colors";
+import { t } from "../i18n";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { appendPagedItems } from "./pagedList";
 import { attachTooltip } from "./tooltip";
@@ -43,7 +44,7 @@ export function renderModulesList(
   const searchInput = document.createElement("input");
   searchInput.type = "search";
   searchInput.className = "modules-search-input";
-  searchInput.placeholder = "Search modules…";
+  searchInput.placeholder = t("modules.search");
   searchInput.value = state.searchQuery;
   searchInput.autocomplete = "off";
   searchInput.spellcheck = false;
@@ -61,7 +62,7 @@ export function renderModulesList(
 
   const showAll = document.createElement("button");
   showAll.className = "btn-text";
-  showAll.textContent = "Show all";
+  showAll.textContent = t("modules.showAll");
   showAll.addEventListener("click", () => {
     for (const node of state.graphNodes) {
       state.visibleIds.add(node.id);
@@ -72,7 +73,7 @@ export function renderModulesList(
 
   const hideAll = document.createElement("button");
   hideAll.className = "btn-text";
-  hideAll.textContent = "Hide all";
+  hideAll.textContent = t("modules.hideAll");
   hideAll.addEventListener("click", () => {
     state.visibleIds.clear();
     callbacks.onVisibilityChange(new Set());
@@ -86,16 +87,15 @@ export function renderModulesList(
     if (state.loading) {
       container.appendChild(
         createLoadingPlaceholder({
-          title: "Loading modules…",
-          detail: "Waiting for the dependency graph layout.",
+          title: t("modules.loading"),
+          detail: t("modules.loadingDetail"),
           size: "panel",
         }),
       );
     } else {
       const empty = document.createElement("div");
       empty.className = "panel-empty";
-      empty.textContent =
-        "After you run analysis, modules from the current graph view appear here";
+      empty.textContent = t("modules.empty");
       container.appendChild(empty);
     }
     restoreSearchFocus(container, searchHadFocus, searchCursor);
@@ -118,15 +118,19 @@ export function renderModulesList(
     count.className = "modules-search-count";
     count.textContent =
       filtered.length === 0
-        ? "No matches"
-        : `${filtered.length} of ${sorted.length} module${sorted.length === 1 ? "" : "s"}`;
+        ? t("modules.noMatches")
+        : t(sorted.length === 1 ? "modules.countOne" : "modules.count", {
+            filtered: filtered.length,
+            total: sorted.length,
+          });
     container.appendChild(count);
   }
 
   if (filtered.length === 0) {
     const empty = document.createElement("div");
     empty.className = "panel-empty";
-    empty.textContent = query.length > 0 ? "No modules match your search" : "No modules";
+    empty.textContent =
+      query.length > 0 ? t("modules.noSearchMatches") : t("modules.none");
     container.appendChild(empty);
     restoreSearchFocus(container, searchHadFocus, searchCursor);
     return;
@@ -204,7 +208,7 @@ function moduleRow(
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.className = "module-visibility";
-  checkbox.title = "Show/hide on graph";
+  checkbox.title = t("modules.visibilityToggle");
   checkbox.checked = state.visibleIds.has(node.id);
   checkbox.addEventListener("click", (e) => e.stopPropagation());
   checkbox.addEventListener("change", () => {
@@ -224,7 +228,10 @@ function moduleRow(
 
   attachTooltip(
     icon,
-    `${node.label}\n${node.path}\n${node.loc} lines · ${nodeKindLabel(node.kind || "symbol")}`,
+    `${node.label}\n${node.path}\n${t("modules.tooltipMeta", {
+      loc: node.loc,
+      kind: nodeKindLabel(node.kind || "symbol"),
+    })}`,
   );
   icon.style.cursor = "pointer";
   icon.addEventListener("click", (e) => {

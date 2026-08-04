@@ -16,6 +16,7 @@ import ini from "highlight.js/lib/languages/ini";
 import "highlight.js/styles/github-dark.css";
 import { highlightLanguage } from "./icons";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
+import { t } from "../i18n";
 import type { FileLineIssue } from "../validation/fileIssues";
 import { issuesByLine } from "../validation/fileIssues";
 
@@ -93,9 +94,9 @@ export function createFileViewer(
   const closeBtn = document.createElement("button");
   closeBtn.className = "btn-text file-viewer-close";
   closeBtn.textContent = "✕";
-  closeBtn.title = "Close";
+  closeBtn.title = t("file.close");
   closeBtn.addEventListener("click", () => {
-    if (isDirty() && !confirm("Discard unsaved changes?")) {
+    if (isDirty() && !confirm(t("file.discardChanges"))) {
       return;
     }
     close();
@@ -130,11 +131,10 @@ export function createFileViewer(
   empty.hidden = true;
   const emptyTitle = document.createElement("p");
   emptyTitle.className = "file-viewer-empty-title";
-  emptyTitle.textContent = "No file open";
+  emptyTitle.textContent = t("file.noneOpen");
   const emptyDetail = document.createElement("p");
   emptyDetail.className = "file-viewer-empty-detail";
-  emptyDetail.textContent =
-    "Open a file from the Project Tree, or double-click a file or symbol on the Graph.";
+  emptyDetail.textContent = t("file.openHint");
   empty.append(emptyTitle, emptyDetail);
 
   container.append(header, editorWrap, empty);
@@ -179,9 +179,8 @@ export function createFileViewer(
     textarea.value = "";
     rowsEl.innerHTML = "";
     empty.replaceChildren();
-    emptyTitle.textContent = "No file open";
-    emptyDetail.textContent =
-      "Open a file from the Project Tree, or double-click a file or symbol on the Graph.";
+    emptyTitle.textContent = t("file.noneOpen");
+    emptyDetail.textContent = t("file.openHint");
     empty.append(emptyTitle, emptyDetail);
     empty.hidden = false;
     header.hidden = true;
@@ -199,8 +198,8 @@ export function createFileViewer(
     rowsEl.innerHTML = "";
     empty.replaceChildren(
       createLoadingPlaceholder({
-        title: path ? `Opening ${path}…` : "Opening file…",
-        detail: "Reading from the project folder.",
+        title: path ? t("file.openingPath", { path }) : t("file.opening"),
+        detail: t("file.openingDetail"),
         size: "fill",
       }),
     );

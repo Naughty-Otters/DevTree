@@ -1,4 +1,5 @@
 import type { LlmProviderId, LlmProviderInfo } from "../agent/types";
+import { t } from "../i18n";
 import { formatModelLabel } from "../validation/llmCatalog";
 
 export interface LlmConfigFieldsValue {
@@ -40,17 +41,19 @@ export function createLlmConfigFields(
   const apiKeyInput = document.createElement("input");
   apiKeyInput.className = `${prefix}-input`;
   apiKeyInput.type = "password";
-  apiKeyInput.placeholder = state.allowGlobal ? "Use global" : "API key";
+  apiKeyInput.placeholder = state.allowGlobal
+    ? t("llm.useGlobal")
+    : t("llm.apiKeyPlaceholder");
   apiKeyInput.autocomplete = "off";
 
   root.append(
-    fieldWrap("Provider", providerSelect, prefix),
-    fieldWrap("Model", modelSelect, prefix),
+    fieldWrap(t("llm.provider"), providerSelect, prefix),
+    fieldWrap(t("llm.model"), modelSelect, prefix),
     modelHint,
   );
 
   if (state.showApiKey === true) {
-    root.append(fieldWrap("API key", apiKeyInput, prefix));
+    root.append(fieldWrap(t("llm.apiKey"), apiKeyInput, prefix));
   }
 
   function persist(): void {
@@ -66,7 +69,7 @@ export function createLlmConfigFields(
     if (state.allowGlobal) {
       const global = document.createElement("option");
       global.value = "";
-      global.textContent = "Use global";
+      global.textContent = t("llm.useGlobal");
       providerSelect.appendChild(global);
     }
     for (const provider of state.providers) {
@@ -85,7 +88,7 @@ export function createLlmConfigFields(
       if (state.allowGlobal) {
         const global = document.createElement("option");
         global.value = "";
-        global.textContent = "Use global";
+        global.textContent = t("llm.useGlobal");
         modelSelect.appendChild(global);
       }
       modelSelect.value = state.value.model || "";
@@ -97,17 +100,17 @@ export function createLlmConfigFields(
     if (state.modelsLoading) {
       const loading = document.createElement("option");
       loading.value = "";
-      loading.textContent = "Loading models…";
+      loading.textContent = t("llm.loadingModels");
       modelSelect.appendChild(loading);
       modelSelect.disabled = true;
-      modelHint.textContent = "Fetching models from provider…";
+      modelHint.textContent = t("llm.fetchingModels");
       return;
     }
 
     if (state.modelsError) {
       const error = document.createElement("option");
       error.value = "";
-      error.textContent = "Could not load models";
+      error.textContent = t("llm.couldNotLoadModels");
       modelSelect.appendChild(error);
       modelSelect.disabled = true;
       modelHint.textContent = state.modelsError;
@@ -120,15 +123,17 @@ export function createLlmConfigFields(
     if (state.models.length === 0) {
       const empty = document.createElement("option");
       empty.value = "";
-      empty.textContent = "Enter API key to load models";
+      empty.textContent = t("llm.enterApiKeyToLoad");
       modelSelect.appendChild(empty);
       modelSelect.disabled = true;
-      modelHint.textContent = "Add a valid API key above to load available models.";
+      modelHint.textContent = t("llm.addApiKeyHint");
       return;
     }
 
     modelSelect.disabled = Boolean(state.disabled);
-    modelHint.textContent = `${state.models.length} models available`;
+    modelHint.textContent = t("llm.modelsAvailable", {
+      n: state.models.length,
+    });
 
     for (const model of state.models) {
       const option = document.createElement("option");

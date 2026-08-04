@@ -1,4 +1,5 @@
 import type { HierarchyIndex } from "../analysis/types";
+import { t } from "../i18n";
 import type { GraphNode } from "./types";
 
 /** Languages DevTree analyzes (mirrors Rust LSP/linter extension maps). */
@@ -35,33 +36,57 @@ export const LANGUAGE_FILTER_OPTIONS: {
 }[] = [
   {
     key: "typescript",
-    label: "TypeScript / JavaScript",
-    hint: ".ts .tsx .js .jsx .mjs .cjs",
+    get label() {
+      return t("lang.typescript");
+    },
+    get hint() {
+      return t("lang.typescriptHint");
+    },
   },
   {
     key: "rust",
-    label: "Rust",
-    hint: ".rs",
+    get label() {
+      return t("lang.rust");
+    },
+    get hint() {
+      return t("lang.rustHint");
+    },
   },
   {
     key: "python",
-    label: "Python",
-    hint: ".py",
+    get label() {
+      return t("lang.python");
+    },
+    get hint() {
+      return t("lang.pythonHint");
+    },
   },
   {
     key: "go",
-    label: "Go",
-    hint: ".go",
+    get label() {
+      return t("lang.go");
+    },
+    get hint() {
+      return t("lang.goHint");
+    },
   },
   {
     key: "java",
-    label: "Java",
-    hint: ".java",
+    get label() {
+      return t("lang.java");
+    },
+    get hint() {
+      return t("lang.javaHint");
+    },
   },
   {
     key: "other",
-    label: "Other / unknown",
-    hint: "Unrecognized extensions or modules with no source files yet",
+    get label() {
+      return t("lang.other");
+    },
+    get hint() {
+      return t("lang.otherHint");
+    },
   },
 ];
 

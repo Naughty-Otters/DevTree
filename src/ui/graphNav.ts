@@ -28,6 +28,7 @@ import {
   type GraphLanguageId,
   type LanguageFilterFlags,
 } from "../graph/languages";
+import { t } from "../i18n";
 import { lucideIcon } from "./icons";
 import {
   DAG_STYLES,
@@ -100,8 +101,8 @@ export function renderBreadcrumbBar(
   const backBtn = document.createElement("button");
   backBtn.type = "button";
   backBtn.className = "breadcrumb-history-btn";
-  backBtn.title = "Back";
-  backBtn.setAttribute("aria-label", "Back");
+  backBtn.title = t("graph.back");
+  backBtn.setAttribute("aria-label", t("graph.back"));
   backBtn.disabled = !canBack;
   backBtn.textContent = "←";
   backBtn.addEventListener("click", callbacks.onBack);
@@ -109,8 +110,8 @@ export function renderBreadcrumbBar(
   const forwardBtn = document.createElement("button");
   forwardBtn.type = "button";
   forwardBtn.className = "breadcrumb-history-btn";
-  forwardBtn.title = "Forward";
-  forwardBtn.setAttribute("aria-label", "Forward");
+  forwardBtn.title = t("graph.forward");
+  forwardBtn.setAttribute("aria-label", t("graph.forward"));
   forwardBtn.disabled = !canForward;
   forwardBtn.textContent = "→";
   forwardBtn.addEventListener("click", callbacks.onForward);
@@ -119,7 +120,7 @@ export function renderBreadcrumbBar(
 
   const crumbs = document.createElement("nav");
   crumbs.className = "breadcrumb-items";
-  crumbs.setAttribute("aria-label", "Location");
+  crumbs.setAttribute("aria-label", t("graph.location"));
 
   if (options.filePath) {
     appendFilePathCrumbs(crumbs, options.filePath);
@@ -152,7 +153,10 @@ export function renderBreadcrumbBar(
   if (options.stats && !options.filePath) {
     const stats = document.createElement("span");
     stats.className = "breadcrumb-stats";
-    stats.textContent = `${options.stats.nodes} modules · ${options.stats.edges} deps`;
+    stats.textContent = t("graph.modulesDeps", {
+      modules: options.stats.nodes,
+      deps: options.stats.edges,
+    });
     bar.appendChild(stats);
   }
 
@@ -243,13 +247,13 @@ function renderFilterDropdown(
 
   const summary = document.createElement("summary");
   summary.className = "graph-nav-filter-summary";
-  summary.textContent = "Filter";
-  summary.title = "Show or hide modules by dependency role";
+  summary.textContent = t("graph.filter");
+  summary.title = t("graph.filterTitle");
 
   const menu = document.createElement("div");
   menu.className = "graph-nav-filter-menu";
   menu.setAttribute("role", "group");
-  menu.setAttribute("aria-label", "Module filters");
+  menu.setAttribute("aria-label", t("graph.moduleFilters"));
 
   const current = { ...flags };
 
@@ -305,13 +309,13 @@ function renderLanguageFilterDropdown(
 
   const summary = document.createElement("summary");
   summary.className = "graph-nav-filter-summary";
-  summary.textContent = "Language";
-  summary.title = "Show or hide modules by programming language";
+  summary.textContent = t("graph.language");
+  summary.title = t("graph.languageTitle");
 
   const menu = document.createElement("div");
   menu.className = "graph-nav-filter-menu";
   menu.setAttribute("role", "group");
-  menu.setAttribute("aria-label", "Language filters");
+  menu.setAttribute("aria-label", t("graph.languageFilters"));
 
   const current = { ...flags };
   const options =
@@ -322,7 +326,7 @@ function renderLanguageFilterDropdown(
   if (options.length === 0) {
     const empty = document.createElement("div");
     empty.className = "graph-nav-filter-empty";
-    empty.textContent = "No languages detected yet";
+    empty.textContent = t("graph.noLanguages");
     menu.appendChild(empty);
   } else {
     for (const opt of options) {
@@ -429,11 +433,13 @@ function renderLayoutControls(
   let dagStyle = dagStyleFromLayoutMode(currentMode);
 
   const familyTool = renderIconButtonGroup<LayoutFamily>({
-    label: "Layout",
-    ariaLabel: "Graph layout",
-    title: "Change how modules are arranged on the graph",
+    label: t("graph.layout"),
+    ariaLabel: t("graph.layoutAria"),
+    title: t("graph.layoutTitle"),
     items: LAYOUT_FAMILIES.map((mode) => ({
-      ...mode,
+      value: mode.value,
+      label: mode.label,
+      hint: mode.hint,
       icon: LAYOUT_ICONS[mode.value],
     })),
     current: family,
@@ -445,11 +451,13 @@ function renderLayoutControls(
   });
 
   const flowTool = renderIconButtonGroup<DagStyle>({
-    label: "Flow",
-    ariaLabel: "DAG flow style",
-    title: "DAG flow direction",
+    label: t("graph.flow"),
+    ariaLabel: t("graph.flowAria"),
+    title: t("graph.flowTitle"),
     items: DAG_STYLES.map((style) => ({
-      ...style,
+      value: style.value,
+      label: style.label,
+      hint: style.hint,
       icon: DAG_ICONS[style.value],
     })),
     current: dagStyle,
@@ -470,11 +478,13 @@ function renderEdgeStyleControl(
   onChange: (style: EdgeStyle) => void,
 ): HTMLElement {
   return renderIconButtonGroup<EdgeStyle>({
-    label: "Edges",
-    ariaLabel: "Edge style",
-    title: "How dependency lines are drawn",
+    label: t("graph.edges"),
+    ariaLabel: t("graph.edgesAria"),
+    title: t("graph.edgesTitle"),
     items: EDGE_STYLES.map((style) => ({
-      ...style,
+      value: style.value,
+      label: style.label,
+      hint: style.hint,
       icon: EDGE_ICONS[style.value],
     })),
     current,
@@ -538,15 +548,15 @@ export function renderGraphNav(
   focusTool.className = "graph-nav-tool";
   const focusLabel = document.createElement("span");
   focusLabel.className = "graph-nav-tool-label";
-  focusLabel.textContent = "View";
+  focusLabel.textContent = t("graph.view");
   const focusList = document.createElement("div");
   focusList.className = "graph-nav-icon-list";
-  focusList.setAttribute("aria-label", "Graph view actions");
+  focusList.setAttribute("aria-label", t("graph.viewAria"));
   const focusBtn = document.createElement("button");
   focusBtn.type = "button";
   focusBtn.className = "graph-nav-icon-btn";
-  focusBtn.setAttribute("aria-label", "Focus");
-  focusBtn.title = "Focus — relayout visible modules and fit view";
+  focusBtn.setAttribute("aria-label", t("graph.focus"));
+  focusBtn.title = t("graph.focusTitle");
   focusBtn.disabled = options.focusEnabled === false;
   focusBtn.appendChild(lucideIcon(Crosshair, TOOL_ICON));
   focusBtn.addEventListener("click", () => callbacks.onFocusView?.());
@@ -570,8 +580,8 @@ export function renderGraphNav(
   const backBtn = document.createElement("button");
   backBtn.type = "button";
   backBtn.className = "graph-nav-crumb-history-btn";
-  backBtn.title = "Back";
-  backBtn.setAttribute("aria-label", "Back");
+  backBtn.title = t("graph.back");
+  backBtn.setAttribute("aria-label", t("graph.back"));
   backBtn.disabled = !canBack;
   backBtn.textContent = "←";
   backBtn.addEventListener("click", callbacks.onBack);
@@ -579,8 +589,8 @@ export function renderGraphNav(
   const forwardBtn = document.createElement("button");
   forwardBtn.type = "button";
   forwardBtn.className = "graph-nav-crumb-history-btn";
-  forwardBtn.title = "Forward";
-  forwardBtn.setAttribute("aria-label", "Forward");
+  forwardBtn.title = t("graph.forward");
+  forwardBtn.setAttribute("aria-label", t("graph.forward"));
   forwardBtn.disabled = !canForward;
   forwardBtn.textContent = "→";
   forwardBtn.addEventListener("click", callbacks.onForward);
@@ -589,7 +599,7 @@ export function renderGraphNav(
 
   const crumbs = document.createElement("nav");
   crumbs.className = "graph-nav-crumbs";
-  crumbs.setAttribute("aria-label", "Graph location");
+  crumbs.setAttribute("aria-label", t("graph.graphLocation"));
   nav.crumbs.forEach((crumb, i) => {
     if (i > 0) {
       const sep = document.createElement("span");
@@ -626,7 +636,10 @@ export function renderGraphNav(
   if (options.stats) {
     const stats = document.createElement("span");
     stats.className = "graph-nav-stats";
-    stats.textContent = `${options.stats.nodes} modules · ${options.stats.edges} deps`;
+    stats.textContent = t("graph.modulesDeps", {
+      modules: options.stats.nodes,
+      deps: options.stats.edges,
+    });
     crumbBar.appendChild(stats);
   }
 
@@ -638,14 +651,13 @@ export function renderGraphNav(
     warn.className = "graph-nav-warning";
     const text = document.createElement("p");
     text.className = "graph-nav-warning-text";
-    text.textContent =
-      "Import data looks outdated — run analysis again to refresh file and package dependencies.";
+    text.textContent = t("graph.staleImports");
     warn.appendChild(text);
     if (callbacks.onRunAnalysis) {
       const runBtn = document.createElement("button");
       runBtn.type = "button";
       runBtn.className = "btn btn-ghost";
-      runBtn.textContent = "Run analysis";
+      runBtn.textContent = t("toolbar.runAnalysis");
       runBtn.addEventListener("click", () => callbacks.onRunAnalysis?.());
       warn.appendChild(runBtn);
     }

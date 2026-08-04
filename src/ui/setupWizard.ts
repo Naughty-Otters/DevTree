@@ -14,6 +14,7 @@ import {
 } from "../validation/aiValidation";
 import { createLlmConfigFields } from "./llmConfigFields";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
+import { t, type MessageKey } from "../i18n";
 
 export type SetupWizardStep = 0 | 1 | 2 | 3 | 4;
 
@@ -51,17 +52,37 @@ export interface SetupWizardDeps {
   setLlmConfigurations: (configs: LlmConfiguration[]) => void;
 }
 
-export const SETUP_WIZARD_STEPS = [
-  { id: 0 as const, title: "Open a project", subtitle: "Choose the folder DevTree should analyze." },
-  { id: 1 as const, title: "Language servers", subtitle: "Optional — analysis falls back to heuristics if missing." },
+export const SETUP_WIZARD_STEPS: {
+  id: SetupWizardStep;
+  titleKey: MessageKey;
+  subtitleKey: MessageKey;
+}[] = [
   {
-    id: 2 as const,
-    title: "Secret scanners",
-    subtitle: "Optional — install gitleaks and TruffleHog for secret scanning rules.",
+    id: 0,
+    titleKey: "wizard.openProject",
+    subtitleKey: "wizard.openProjectSubtitle",
   },
-  { id: 3 as const, title: "LLM configuration", subtitle: "Optional — needed only for AI validation rules." },
-  { id: 4 as const, title: "You're ready", subtitle: "Review setup, then run analysis or finish." },
-] as const;
+  {
+    id: 1,
+    titleKey: "wizard.lsp",
+    subtitleKey: "wizard.lspSubtitle",
+  },
+  {
+    id: 2,
+    titleKey: "wizard.secrets",
+    subtitleKey: "wizard.secretsSubtitle",
+  },
+  {
+    id: 3,
+    titleKey: "wizard.llm",
+    subtitleKey: "wizard.llmSubtitle",
+  },
+  {
+    id: 4,
+    titleKey: "wizard.ready",
+    subtitleKey: "wizard.readySubtitle",
+  },
+];
 
 type SecretScannerId = "gitleaks" | "trufflehog";
 
@@ -153,17 +174,17 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
     const backBtn = document.createElement("button");
     backBtn.type = "button";
     backBtn.className = "btn btn-ghost";
-    backBtn.textContent = "Back";
+    backBtn.textContent = t("wizard.back");
 
     const skipBtn = document.createElement("button");
     skipBtn.type = "button";
     skipBtn.className = "btn btn-ghost";
-    skipBtn.textContent = "Skip";
+    skipBtn.textContent = t("wizard.skip");
 
     const nextBtn = document.createElement("button");
     nextBtn.type = "button";
     nextBtn.className = "btn btn-primary";
-    nextBtn.textContent = "Next";
+    nextBtn.textContent = t("wizard.next");
 
     actions.append(backBtn, skipBtn, nextBtn);
     dialog.append(stepsEl, title, subtitle, body, actions);
@@ -337,23 +358,23 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
         {
           id: "gitleaks",
           label: "gitleaks",
-          description: "Fast local secret scan (Secret Scan · gitleaks)",
+          description: t("wizard.gitleaksDesc"),
           status: gitleaksStatus?.status ?? "unknown",
           detail:
             gitleaksStatus?.status === "installed"
-              ? gitleaksStatus.command || "Installed"
-              : gitleaksStatus?.installHint || "Not checked yet",
+              ? gitleaksStatus.command || t("wizard.installed")
+              : gitleaksStatus?.installHint || t("wizard.notCheckedYet"),
           error: secretErrors.gitleaks,
         },
         {
           id: "trufflehog",
           label: "TruffleHog",
-          description: "Deep secret detection (Secret Scan · TruffleHog)",
+          description: t("wizard.trufflehogDesc"),
           status: trufflehogStatus?.status ?? "unknown",
           detail:
             trufflehogStatus?.status === "installed"
-              ? trufflehogStatus.command || "Installed"
-              : trufflehogStatus?.installHint || "Not checked yet",
+              ? trufflehogStatus.command || t("wizard.installed")
+              : trufflehogStatus?.installHint || t("wizard.notCheckedYet"),
           error: secretErrors.trufflehog,
         },
       ];
@@ -392,7 +413,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
         num.textContent = String(s.id + 1);
         const label = document.createElement("span");
         label.className = "setup-wizard-step-label";
-        label.textContent = s.title;
+        label.textContent = t(s.titleKey);
         dot.append(num, label);
         stepsEl.appendChild(dot);
       }
@@ -400,32 +421,34 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
 
     function updateChrome(): void {
       const meta = SETUP_WIZARD_STEPS[step]!;
-      title.textContent = meta.title;
-      subtitle.textContent = meta.subtitle;
+      title.textContent = t(meta.titleKey);
+      subtitle.textContent = t(meta.subtitleKey);
       backBtn.disabled = step === 0;
       backBtn.classList.toggle("hidden", step === 0);
 
       if (step === 0) {
-        skipBtn.textContent = "Skip setup";
+        skipBtn.textContent = t("wizard.skipSetup");
         skipBtn.classList.remove("hidden");
-        nextBtn.textContent = "Next";
+        nextBtn.textContent = t("wizard.next");
         nextBtn.dataset.action = "next";
         nextBtn.disabled = !canAdvanceFromProject(deps.getProjectPath());
       } else if (step === 4) {
         const hasProject = canAdvanceFromProject(deps.getProjectPath());
-        nextBtn.textContent = hasProject ? "Run analysis" : "Done";
+        nextBtn.textContent = hasProject
+          ? t("wizard.runAnalysis")
+          : t("wizard.done");
         nextBtn.dataset.action = hasProject ? "run" : "done";
         nextBtn.disabled = false;
         if (hasProject) {
-          skipBtn.textContent = "Done";
+          skipBtn.textContent = t("wizard.done");
           skipBtn.classList.remove("hidden");
         } else {
           skipBtn.classList.add("hidden");
         }
       } else {
-        skipBtn.textContent = "Skip";
+        skipBtn.textContent = t("wizard.skip");
         skipBtn.classList.remove("hidden");
-        nextBtn.textContent = "Next";
+        nextBtn.textContent = t("wizard.next");
         nextBtn.dataset.action = "next";
         nextBtn.disabled = false;
       }
@@ -444,19 +467,20 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
     function renderProjectStep(): void {
       const copy = document.createElement("p");
       copy.className = "setup-wizard-copy";
-      copy.textContent =
-        "DevTree builds a dependency graph and runs architecture checks on a local project folder.";
+      copy.textContent = t("wizard.projectCopy");
 
       const pathBox = document.createElement("div");
       pathBox.className = "setup-wizard-path";
       const path = deps.getProjectPath();
-      pathBox.textContent = path ?? "No project selected";
+      pathBox.textContent = path ?? t("wizard.noProjectSelected");
       if (!path) pathBox.classList.add("is-empty");
 
       const choose = document.createElement("button");
       choose.type = "button";
       choose.className = "btn btn-primary";
-      choose.textContent = path ? "Change folder…" : "Choose folder…";
+      choose.textContent = path
+        ? t("wizard.changeFolder")
+        : t("wizard.chooseFolder");
       choose.addEventListener("click", () => {
         void (async () => {
           choose.disabled = true;
@@ -479,13 +503,12 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
 
       const note = document.createElement("p");
       note.className = "setup-wizard-copy";
-      note.textContent =
-        "Install language servers for richer diagnostics. You can skip this and configure later in Settings.";
+      note.textContent = t("wizard.lspCopy");
 
       const refresh = document.createElement("button");
       refresh.type = "button";
       refresh.className = "btn-text";
-      refresh.textContent = "Refresh";
+      refresh.textContent = t("wizard.refresh");
       refresh.disabled = lspLoading || installingId != null;
       refresh.addEventListener("click", () => {
         void loadLsp();
@@ -507,14 +530,14 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       if (lspLoading && servers.length === 0) {
         list.appendChild(
           createLoadingPlaceholder({
-            title: "Checking language servers…",
+            title: t("wizard.checkingLsp"),
             size: "panel",
           }),
         );
       } else if (servers.length === 0) {
         const empty = document.createElement("div");
         empty.className = "setup-wizard-empty";
-        empty.textContent = "Click Refresh to check installed language servers.";
+        empty.textContent = t("wizard.lspEmpty");
         list.appendChild(empty);
       } else {
         for (const server of servers) {
@@ -537,8 +560,8 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       meta.className = "setup-wizard-lsp-meta";
       meta.textContent =
         server.status === "installed"
-          ? server.command || "Installed"
-          : server.installHint || "Not installed";
+          ? server.command || t("wizard.installed")
+          : server.installHint || t("wizard.notInstalled");
       info.append(name, meta);
 
       if (lspErrors[server.id]) {
@@ -552,10 +575,13 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       action.type = "button";
       action.className = "btn btn-ghost";
       if (server.status === "installed") {
-        action.textContent = "Installed";
+        action.textContent = t("wizard.installed");
         action.disabled = true;
       } else {
-        action.textContent = installingId === server.id ? "Installing…" : "Install";
+        action.textContent =
+          installingId === server.id
+            ? t("wizard.installing")
+            : t("wizard.install");
         action.disabled = installingId != null || lspLoading;
         action.addEventListener("click", () => {
           void installServer(server.id);
@@ -572,8 +598,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
 
       const note = document.createElement("p");
       note.className = "setup-wizard-copy";
-      note.textContent =
-        "Install secret scanners used by Security rules. DevTree will try Homebrew, go install, or another supported package manager.";
+      note.textContent = t("wizard.secretsCopy");
 
       const actionsRow = document.createElement("div");
       actionsRow.className = "setup-wizard-secret-actions";
@@ -581,7 +606,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       const refresh = document.createElement("button");
       refresh.type = "button";
       refresh.className = "btn-text";
-      refresh.textContent = "Refresh";
+      refresh.textContent = t("wizard.refresh");
       refresh.disabled = secretsLoading || installingId != null;
       refresh.addEventListener("click", () => {
         void loadSecretScanners();
@@ -594,7 +619,9 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
         (row) => row.status !== "installed",
       ).length;
       installAll.textContent =
-        installingId != null ? "Installing…" : "Install missing";
+        installingId != null
+          ? t("wizard.installing")
+          : t("wizard.installMissing");
       installAll.disabled =
         secretsLoading || installingId != null || missingCount === 0;
       installAll.addEventListener("click", () => {
@@ -618,7 +645,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       if (secretsLoading && !secretsLoaded) {
         list.appendChild(
           createLoadingPlaceholder({
-            title: "Checking secret scanners…",
+            title: t("wizard.checkingSecrets"),
             size: "panel",
           }),
         );
@@ -655,11 +682,13 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       action.type = "button";
       action.className = "btn btn-ghost";
       if (scanner.status === "installed") {
-        action.textContent = "Installed";
+        action.textContent = t("wizard.installed");
         action.disabled = true;
       } else {
         action.textContent =
-          installingId === scanner.id ? "Installing…" : "Install";
+          installingId === scanner.id
+            ? t("wizard.installing")
+            : t("wizard.install");
         action.disabled = installingId != null || secretsLoading;
         action.addEventListener("click", () => {
           void installSecretScanner(scanner.id);
@@ -673,8 +702,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
     function renderLlmStep(): void {
       const copy = document.createElement("p");
       copy.className = "setup-wizard-copy";
-      copy.textContent =
-        "Add one LLM configuration for AI rules (architecture, security, clean code). Skip if you only need graph and deterministic checks.";
+      copy.textContent = t("wizard.llmCopy");
 
       const fieldsRoot = document.createElement("div");
       fieldsRoot.className = "setup-wizard-llm-fields";
@@ -682,9 +710,9 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       const warn = document.createElement("p");
       warn.className = "setup-wizard-hint";
       if (!isLlmConfigurationReady(draftConfig)) {
-        warn.textContent = "No API key yet — AI validation rules will stay unavailable until configured.";
+        warn.textContent = t("wizard.llmNoKey");
       } else {
-        warn.textContent = "This configuration will be saved as your global default.";
+        warn.textContent = t("wizard.llmSavedGlobal");
       }
 
       body.append(copy, fieldsRoot, warn);
@@ -710,14 +738,14 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
             model: value.model,
             apiKey: value.apiKey ?? draftConfig.apiKey,
             isGlobal: true,
-            name: draftConfig.name || "Default",
+            name: draftConfig.name || t("wizard.defaultLlmName"),
           };
           if (providerChanged || value.apiKey !== undefined) {
             void refreshModels();
           }
           warn.textContent = isLlmConfigurationReady(draftConfig)
-            ? "This configuration will be saved as your global default."
-            : "No API key yet — AI validation rules will stay unavailable until configured.";
+            ? t("wizard.llmSavedGlobal")
+            : t("wizard.llmNoKey");
         },
         onProviderChange: () => {
           void refreshModels();
@@ -741,43 +769,49 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       list.appendChild(
         checklistItem(
           Boolean(summary.projectPath),
-          "Project",
-          summary.projectPath ?? "Not selected",
+          t("wizard.checkProject"),
+          summary.projectPath ?? t("wizard.notSelected"),
         ),
       );
       list.appendChild(
         checklistItem(
           summary.lspTotal === 0 || summary.lspInstalled > 0,
-          "Language servers",
+          t("wizard.checkLsp"),
           summary.lspTotal === 0
-            ? "Not checked yet (optional)"
-            : `${summary.lspInstalled} of ${summary.lspTotal} installed`,
+            ? t("wizard.notCheckedOptional")
+            : t("wizard.installedOf", {
+                installed: summary.lspInstalled,
+                total: summary.lspTotal,
+              }),
         ),
       );
       list.appendChild(
         checklistItem(
           summary.secretScannersInstalled > 0 || !secretsLoaded,
-          "Secret scanners",
+          t("wizard.checkSecrets"),
           !secretsLoaded
-            ? "Not checked yet (optional)"
-            : `${summary.secretScannersInstalled} of ${summary.secretScannersTotal} installed`,
+            ? t("wizard.notCheckedOptional")
+            : t("wizard.installedOf", {
+                installed: summary.secretScannersInstalled,
+                total: summary.secretScannersTotal,
+              }),
         ),
       );
       list.appendChild(
         checklistItem(
           summary.llmReady,
-          "LLM",
+          t("wizard.checkLlm"),
           summary.llmReady
-            ? summary.llmLabel ?? "Configured"
-            : "Not configured (AI rules skipped)",
+            ? summary.llmLabel ?? t("wizard.llmConfigured")
+            : t("wizard.llmNotConfigured"),
         ),
       );
 
       const tip = document.createElement("p");
       tip.className = "setup-wizard-copy";
       tip.textContent = summary.projectPath
-        ? "You can change LSP, secret scanners, and LLM settings anytime from the Settings panel."
-        : "Open a project from the toolbar when you are ready to analyze code.";
+        ? t("wizard.summaryTipReady")
+        : t("wizard.summaryTipNoProject");
 
       body.append(list, tip);
     }
@@ -791,7 +825,7 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       li.className = `setup-wizard-check${ok ? " is-ok" : " is-warn"}`;
       const status = document.createElement("span");
       status.className = "setup-wizard-check-status";
-      status.textContent = ok ? "OK" : "—";
+      status.textContent = ok ? t("wizard.checkOk") : t("wizard.checkPending");
       const text = document.createElement("div");
       const titleEl = document.createElement("div");
       titleEl.className = "setup-wizard-check-label";
@@ -829,5 +863,5 @@ function ensureWizardConfig(configs: LlmConfiguration[]): LlmConfiguration {
   const global = configs.find((c) => c.isGlobal);
   if (global) return { ...global, isGlobal: true };
   if (configs[0]) return { ...configs[0], isGlobal: true };
-  return createLlmConfiguration({ name: "Default", isGlobal: true });
+  return createLlmConfiguration({ name: t("wizard.defaultLlmName"), isGlobal: true });
 }
