@@ -1,14 +1,19 @@
-import type { GraphNode } from "../graph/types";
+import type { GraphEdge, GraphNode } from "../graph/types";
 import { openableSourceForNode } from "../graph/openSource";
+import { dependencyNeighborhood } from "../canvas/highlights";
 import { createNodeKindShapeWrap, nodeKindLabel } from "../canvas/nodeIcons";
 import { nodeColor } from "../canvas/colors";
 import { t } from "../i18n";
+import { lucideIcon } from "./icons";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { appendPagedItems } from "./pagedList";
 import { attachTooltip } from "./tooltip";
+import { MoreHorizontal } from "lucide";
 
 export interface ModulesListState {
   graphNodes: GraphNode[];
+  /** Edges for the current graph view (related select/deselect). */
+  graphEdges: GraphEdge[];
   visibleIds: Set<string>;
   searchQuery: string;
   /** True while graph/hierarchy is hydrating. */
@@ -142,7 +147,7 @@ export function renderModulesList(
   appendPagedItems(
     pageHost,
     filtered,
-    (node) => moduleRow(node, state, callbacks, query),
+    (node) => moduleRow(node, state, callbacks, query, container),
     100,
   );
 
@@ -194,11 +199,111 @@ function highlightMatch(text: string, query: string): DocumentFragment {
   return fragment;
 }
 
+function closeModuleActionsMenus(): void {
+  document.querySelectorAll(".module-actions-menu").forEach((el) => el.remove());
+  document.querySelectorAll(".module-row-menu-btn.is-open").forEach((el) => {
+    el.classList.remove("is-open");
+    el.setAttribute("aria-expanded", "false");
+  });
+}
+
+function relatedIdsInView(nodeId: string, state: ModulesListState): string[] {
+  const known = new Set(state.graphNodes.map((n) => n.id));
+  const related = dependencyNeighborhood(nodeId, state.graphEdges);
+  return [...related].filter((id) => known.has(id));
+}
+
+function openModuleActionsMenu(
+  anchor: HTMLElement,
+  node: GraphNode,
+  state: ModulesListState,
+  callbacks: ModulesListCallbacks,
+  rerender: () => void,
+): void {
+  const alreadyOpen = anchor.classList.contains("is-open");
+  closeModuleActionsMenus();
+  if (alreadyOpen) return;
+
+  const menu = document.createElement("div");
+  menu.className = "module-actions-menu";
+  menu.setAttribute("role", "menu");
+
+  const selectRelated = document.createElement("button");
+  selectRelated.type = "button";
+  selectRelated.className = "module-actions-item";
+  selectRelated.setAttribute("role", "menuitem");
+  selectRelated.textContent = t("modules.selectRelated");
+  selectRelated.addEventListener("click", (e) => {
+    e.stopPropagation();
+    // Keep only this module and its direct dependents/dependencies visible.
+    const related = new Set(relatedIdsInView(node.id, state));
+    state.visibleIds = related;
+    callbacks.onVisibilityChange(new Set(state.visibleIds));
+    closeModuleActionsMenus();
+    rerender();
+  });
+
+  const deselectRelated = document.createElement("button");
+  deselectRelated.type = "button";
+  deselectRelated.className = "module-actions-item";
+  deselectRelated.setAttribute("role", "menuitem");
+  deselectRelated.textContent = t("modules.deselectRelated");
+  deselectRelated.addEventListener("click", (e) => {
+    e.stopPropagation();
+    for (const id of relatedIdsInView(node.id, state)) {
+      state.visibleIds.delete(id);
+    }
+    callbacks.onVisibilityChange(new Set(state.visibleIds));
+    closeModuleActionsMenus();
+    rerender();
+  });
+
+  menu.append(selectRelated, deselectRelated);
+  document.body.appendChild(menu);
+
+  const rect = anchor.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  let left = rect.right - menuRect.width;
+  let top = rect.bottom + 4;
+  if (left < 8) left = 8;
+  if (left + menuRect.width > window.innerWidth - 8) {
+    left = Math.max(8, window.innerWidth - menuRect.width - 8);
+  }
+  if (top + menuRect.height > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - menuRect.height - 4);
+  }
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  anchor.classList.add("is-open");
+  anchor.setAttribute("aria-expanded", "true");
+
+  const onDocPointer = (ev: Event) => {
+    const target = ev.target as Node | null;
+    if (menu.contains(target) || anchor.contains(target)) return;
+    closeModuleActionsMenus();
+    cleanup();
+  };
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape") {
+      closeModuleActionsMenus();
+      cleanup();
+    }
+  };
+  const cleanup = () => {
+    document.removeEventListener("pointerdown", onDocPointer, true);
+    document.removeEventListener("keydown", onKey, true);
+  };
+  document.addEventListener("pointerdown", onDocPointer, true);
+  document.addEventListener("keydown", onKey, true);
+}
+
 function moduleRow(
   node: GraphNode,
   state: ModulesListState,
   callbacks: ModulesListCallbacks,
   searchQuery = "",
+  listContainer: HTMLElement,
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = "module-row";
@@ -245,7 +350,28 @@ function moduleRow(
   name.appendChild(highlightMatch(node.label, searchQuery));
   name.title = node.path;
 
-  row.append(checkbox, colorDot, icon, name);
+  const menuBtn = document.createElement("button");
+  menuBtn.type = "button";
+  menuBtn.className = "module-row-menu-btn";
+  menuBtn.setAttribute("aria-label", t("modules.actions"));
+  menuBtn.setAttribute("aria-haspopup", "menu");
+  menuBtn.setAttribute("aria-expanded", "false");
+  menuBtn.title = t("modules.actions");
+  menuBtn.appendChild(
+    lucideIcon(MoreHorizontal, {
+      size: 14,
+      class: "lucide-icon",
+      "stroke-width": 2,
+    }),
+  );
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openModuleActionsMenu(menuBtn, node, state, callbacks, () => {
+      renderModulesList(listContainer, state, callbacks);
+    });
+  });
+
+  row.append(checkbox, colorDot, icon, name, menuBtn);
 
   row.addEventListener("mouseenter", () => {
     row.classList.add("module-row-hover");
@@ -275,3 +401,4 @@ function moduleRow(
 
   return row;
 }
+

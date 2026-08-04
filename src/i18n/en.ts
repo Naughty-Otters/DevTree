@@ -90,6 +90,9 @@ export const en = {
   "modules.none": "No modules",
   "modules.visibilityToggle": "Show/hide on graph",
   "modules.tooltipMeta": "{loc} lines · {kind}",
+  "modules.actions": "Module actions",
+  "modules.selectRelated": "Show only related modules",
+  "modules.deselectRelated": "Deselect related modules",
 
   // File viewer
   "file.close": "Close",

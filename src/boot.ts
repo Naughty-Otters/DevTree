@@ -456,6 +456,7 @@ export async function startApp(): Promise<void> {
     renderState: null,
     modulesListState: {
       graphNodes: [],
+      graphEdges: [],
       visibleIds: new Set(),
       searchQuery: "",
     },
@@ -1904,9 +1905,17 @@ export async function startApp(): Promise<void> {
         app.modulesListState.visibleIds = visibleIds;
         syncHiddenFromVisible();
       },
-      // List hover stays local — canvas highlight only on click (avoids hangs on large graphs).
       onHighlight: (nodeId) => {
         setModuleRowActive(nodeId);
+        // Highlight on the graph only when the module is currently shown there.
+        if (
+          nodeId != null &&
+          app.modulesListState.visibleIds.has(nodeId)
+        ) {
+          setHighlight(nodeId);
+        } else {
+          setHighlight(null);
+        }
       },
       onShowDetails: (nodeId) => {
         showGraphView();
@@ -2032,6 +2041,7 @@ export async function startApp(): Promise<void> {
         ? new Set(opts.visibleIds.filter((id) => filterVisible.has(id)))
         : filterVisible;
     app.modulesListState.graphNodes = graph.nodes;
+    app.modulesListState.graphEdges = graph.edges;
     app.modulesListState.visibleIds = visible;
 
     const allIds = new Set(graph.nodes.map((n) => n.id));
@@ -2082,6 +2092,7 @@ export async function startApp(): Promise<void> {
     scoreHistoryProject = null;
     app.modulesListState = {
       graphNodes: [],
+      graphEdges: [],
       visibleIds: new Set(),
       searchQuery: app.modulesListState.searchQuery,
       loading: false,

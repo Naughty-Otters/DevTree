@@ -84,6 +84,9 @@ export const zhCN: MessageCatalog = {
   "modules.none": "暂无模块",
   "modules.visibilityToggle": "在图谱中显示/隐藏",
   "modules.tooltipMeta": "{loc} 行 · {kind}",
+  "modules.actions": "模块操作",
+  "modules.selectRelated": "仅显示相关模块",
+  "modules.deselectRelated": "取消选中相关模块",
 
   "file.close": "关闭",
   "file.noneOpen": "未打开文件",
