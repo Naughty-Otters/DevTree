@@ -1,5 +1,7 @@
 # DevTree
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 [![CI](https://img.shields.io/github/actions/workflow/status/Naughty-Otters/DevTree/ci.yml?branch=main&label=CI&logo=github)](https://github.com/Naughty-Otters/DevTree/actions/workflows/ci.yml?query=branch%3Amain)
 [![Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/.github/badges/version.json)](https://github.com/Naughty-Otters/DevTree/releases)
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Naughty-Otters/DevTree/main/.github/badges/coverage.json)](https://github.com/Naughty-Otters/DevTree/actions/workflows/ci.yml?query=branch%3Amain)
@@ -9,6 +11,8 @@
 **Bridge vibe-coding demo quality → production quality. Guardrail everything you continuously deliver.**
 
 DevTree is a desktop watchdog for AI-assisted development — architecture graph, DSM health, deterministic rules, linters/LSP, and AI review lenses (security, performance, clean code) in one place. Point it at a repo, run (or watch/schedule) analysis, and see what the vibes missed before it ships.
+
+In-app UI language: **Settings → General** (English / 简体中文).
 
 <p align="center">
   <img src="media/video/video_run_app.gif" alt="Open a project and run analysis in DevTree" width="720" />
