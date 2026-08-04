@@ -9,6 +9,9 @@ pub fn list_providers() -> Vec<LlmProviderInfo> {
         provider(LP::Openai, "OpenAI"),
         provider(LP::Anthropic, "Anthropic"),
         provider(LP::Grok, "Grok (xAI)"),
+        provider(LP::ClaudeCode, "Claude Code (CLI)"),
+        provider(LP::Codex, "Codex (CLI)"),
+        provider(LP::GeminiCli, "Gemini CLI"),
     ]
 }
 
@@ -27,6 +30,9 @@ fn default_model_for_provider(provider: &LlmProvider) -> String {
         LlmProvider::Openai => "gpt-4o-mini".into(),
         LlmProvider::Anthropic => "claude-sonnet-4-6".into(),
         LlmProvider::Grok => "grok-3".into(),
+        LlmProvider::ClaudeCode => "claude-code".into(),
+        LlmProvider::Codex => "codex".into(),
+        LlmProvider::GeminiCli => "gemini".into(),
     }
 }
 
@@ -67,6 +73,13 @@ macro_rules! run_with_client {
 }
 
 pub async fn run_provider(config: ProviderRunConfig<'_>) -> Result<String, String> {
+    if config.provider.is_cli_backend() {
+        return Err(
+            "Claude Code / Codex / Gemini CLI backends are supported for AI validation only in this version"
+                .into(),
+        );
+    }
+
     if config.api_key.trim().is_empty() {
         return Err("API key is required".into());
     }
@@ -101,6 +114,9 @@ pub async fn run_provider(config: ProviderRunConfig<'_>) -> Result<String, Strin
             use rig_core::providers::xai;
             let client = xai::Client::new(config.api_key).map_err(|e| e.to_string())?;
             run_with_client!(client, config)
+        }
+        LlmProvider::ClaudeCode | LlmProvider::Codex | LlmProvider::GeminiCli => {
+            unreachable!("CLI backends rejected above")
         }
     }
 }
@@ -149,6 +165,19 @@ pub struct ValidationProviderStreamConfig<'a> {
 pub async fn run_validation_provider_stream(
     config: ValidationProviderStreamConfig<'_>,
 ) -> Result<String, String> {
+    if config.provider.is_cli_backend() {
+        return super::cli_backends::run_cli_validation(super::cli_backends::CliValidationConfig {
+            provider: config.provider.clone(),
+            preamble: config.preamble,
+            prompt: config.prompt,
+            workspace: &config.workspace,
+            max_turns: config.max_turns,
+            cancel: config.cancel,
+            on_event: config.on_event,
+        })
+        .await;
+    }
+
     if config.api_key.trim().is_empty() {
         return Err("API key is required".into());
     }
@@ -232,15 +261,23 @@ pub async fn run_validation_provider_stream(
                 config
             )
         }
+        LlmProvider::ClaudeCode | LlmProvider::Codex | LlmProvider::GeminiCli => {
+            unreachable!("CLI backends handled above")
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::list_providers;
+    use crate::agent::types::LlmProvider;
 
     #[test]
     fn lists_llm_providers() {
-        assert!(!list_providers().is_empty());
+        let providers = list_providers();
+        assert!(!providers.is_empty());
+        assert!(providers.iter().any(|p| p.id == LlmProvider::ClaudeCode));
+        assert!(providers.iter().any(|p| p.id == LlmProvider::Codex));
+        assert!(providers.iter().any(|p| p.id == LlmProvider::GeminiCli));
     }
 }

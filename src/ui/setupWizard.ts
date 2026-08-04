@@ -1,4 +1,5 @@
 import type { LlmProviderId, LlmProviderInfo } from "../agent/types";
+import { isCliLlmProvider } from "../agent/types";
 import type { LspInstallResult, LspServerStatus, LspSettingsMap } from "../lsp/types";
 import type { GitleaksInstallResult, GitleaksStatus } from "../gitleaks/types";
 import type {
@@ -12,6 +13,7 @@ import {
   ensureSingleGlobal,
   isLlmConfigurationReady,
 } from "../validation/aiValidation";
+import type { CliLlmBackendProbe } from "../project/api";
 import { createLlmConfigFields } from "./llmConfigFields";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { t, type MessageKey } from "../i18n";
@@ -48,6 +50,7 @@ export interface SetupWizardDeps {
   onSecretScannerInstalled?: (id: "gitleaks" | "trufflehog") => void;
   getLlmProviders: () => LlmProviderInfo[];
   listLlmModels: (provider: LlmProviderId, apiKey: string) => Promise<string[]>;
+  probeCliLlmBackend?: (provider: LlmProviderId) => Promise<CliLlmBackendProbe>;
   getLlmConfigurations: () => LlmConfiguration[];
   setLlmConfigurations: (configs: LlmConfiguration[]) => void;
 }
@@ -381,7 +384,8 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
     }
 
     async function refreshModels(): Promise<void> {
-      if (!draftConfig.provider || !draftConfig.apiKey.trim()) {
+      const isCli = isCliLlmProvider(draftConfig.provider);
+      if (!draftConfig.provider || (!isCli && !draftConfig.apiKey.trim())) {
         models = [];
         modelsError = null;
         modelsLoading = false;
@@ -398,6 +402,17 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       } finally {
         modelsLoading = false;
         renderBody();
+      }
+    }
+
+    async function refreshCliProbe(): Promise<CliLlmBackendProbe | null> {
+      if (!isCliLlmProvider(draftConfig.provider) || !deps.probeCliLlmBackend) {
+        return null;
+      }
+      try {
+        return await deps.probeCliLlmBackend(draftConfig.provider);
+      } catch {
+        return null;
       }
     }
 
@@ -709,8 +724,21 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
 
       const warn = document.createElement("p");
       warn.className = "setup-wizard-hint";
+      const isCli = isCliLlmProvider(draftConfig.provider);
       if (!isLlmConfigurationReady(draftConfig)) {
         warn.textContent = t("wizard.llmNoKey");
+      } else if (isCli) {
+        warn.textContent = t("wizard.llmCliChecking");
+        void refreshCliProbe().then((probe) => {
+          if (!probe) {
+            warn.textContent = t("wizard.llmSavedGlobal");
+            return;
+          }
+          warn.textContent = probe.found
+            ? t("wizard.llmSavedGlobal")
+            : probe.hint || t("wizard.llmCliMissing");
+          warn.classList.toggle("settings-hint-warn", !probe.found);
+        });
       } else {
         warn.textContent = t("wizard.llmSavedGlobal");
       }
@@ -722,9 +750,10 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
         models,
         modelsLoading,
         modelsError,
-        showApiKey: true,
+        showApiKey: !isCli,
         allowGlobal: false,
         classPrefix: "settings",
+        emptyModelsHint: isCli ? t("llm.cliModelsHint") : undefined,
         value: {
           provider: draftConfig.provider,
           model: draftConfig.model,
@@ -742,10 +771,28 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
           };
           if (providerChanged || value.apiKey !== undefined) {
             void refreshModels();
+            if (providerChanged) {
+              renderBody();
+              return;
+            }
           }
-          warn.textContent = isLlmConfigurationReady(draftConfig)
+          const ready = isLlmConfigurationReady(draftConfig);
+          warn.textContent = ready
             ? t("wizard.llmSavedGlobal")
             : t("wizard.llmNoKey");
+          if (ready && isCliLlmProvider(draftConfig.provider)) {
+            warn.textContent = t("wizard.llmCliChecking");
+            void refreshCliProbe().then((probe) => {
+              if (!probe) {
+                warn.textContent = t("wizard.llmSavedGlobal");
+                return;
+              }
+              warn.textContent = probe.found
+                ? t("wizard.llmSavedGlobal")
+                : probe.hint || t("wizard.llmCliMissing");
+              warn.classList.toggle("settings-hint-warn", !probe.found);
+            });
+          }
         },
         onProviderChange: () => {
           void refreshModels();
@@ -847,7 +894,12 @@ export function showSetupWizard(deps: SetupWizardDeps): Promise<SetupWizardResul
       if (step === 2 && !secretsLoaded && !secretsLoading) {
         await loadSecretScanners();
       }
-      if (step === 3 && draftConfig.apiKey.trim() && models.length === 0 && !modelsLoading) {
+      if (
+        step === 3 &&
+        (isCliLlmProvider(draftConfig.provider) || draftConfig.apiKey.trim()) &&
+        models.length === 0 &&
+        !modelsLoading
+      ) {
         await refreshModels();
       }
       requestAnimationFrame(() => nextBtn.focus());

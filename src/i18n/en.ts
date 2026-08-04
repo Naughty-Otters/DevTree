@@ -305,11 +305,14 @@ export const en = {
   "wizard.trufflehogDesc": "Deep secret detection (Secret Scan · TruffleHog)",
   "wizard.notCheckedYet": "Not checked yet",
   "wizard.llmCopy":
-    "Add one LLM configuration for AI rules (architecture, security, clean code). Skip if you only need graph and deterministic checks.",
+    "Add one LLM configuration for AI rules (architecture, security, clean code). Use an API key provider, or Claude Code / Codex / Gemini CLI if already installed. Skip if you only need graph and deterministic checks.",
   "wizard.llmNoKey":
-    "No API key yet — AI validation rules will stay unavailable until configured.",
+    "No API key yet — AI validation rules will stay unavailable until configured (or pick a local CLI provider).",
   "wizard.llmSavedGlobal":
     "This configuration will be saved as your global default.",
+  "wizard.llmCliChecking": "Checking that the CLI is installed on PATH…",
+  "wizard.llmCliMissing":
+    "CLI binary not found on PATH. Install it and ensure your shell PATH is visible to DevTree.",
   "wizard.defaultLlmName": "Default",
   "wizard.checkProject": "Project",
   "wizard.checkLsp": "Language servers",
@@ -717,13 +720,16 @@ export const en = {
 
   // LLM configurations / runtime / stream chrome
   "llm.configsHint":
-    "Add LLM configurations with API keys. Models are loaded from the provider after you enter a valid API key. Mark one configuration as the global default.",
+    "Add LLM configurations (API keys or a local Claude Code / Codex / Gemini CLI). Models load from the provider after you enter a valid API key, or instantly for CLI backends. Mark one configuration as the global default.",
   "llm.addConfiguration": "Add configuration",
   "llm.loadingProviders": "Loading providers…",
   "llm.noConfigs":
     "No configurations yet. Add one to enable AI validation.",
   "llm.ready": "Ready",
   "llm.missingApiKey": "Missing API key",
+  "llm.cliProbing": "Checking CLI…",
+  "llm.cliBinaryMissing": "CLI not found",
+  "llm.cliModelsHint": "CLI backends use the installed tool’s default model.",
   "llm.removeConfiguration": "Remove configuration",
   "llm.namePlaceholder": "Configuration name (optional)",
   "llm.apiKeyPlaceholder": "API key",

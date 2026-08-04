@@ -46,6 +46,7 @@ import {
   listLspServers as fetchLspServers,
   installLspServer as runInstallLspServer,
   listLlmModels,
+  probeCliLlmBackend,
   listLanguageLinters,
   installLinter,
   getGitleaksStatus,
@@ -2704,6 +2705,7 @@ export async function startApp(): Promise<void> {
         },
         getLlmProviders: () => app.llmProviders,
         listLlmModels: (provider, apiKey) => listLlmModels(provider, apiKey),
+        probeCliLlmBackend: (provider) => probeCliLlmBackend(provider),
         getLlmConfigurations: () => app.llmConfigurations,
         setLlmConfigurations: (configs) => {
           app.llmConfigurations = configs;

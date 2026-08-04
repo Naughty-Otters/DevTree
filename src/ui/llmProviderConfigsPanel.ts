@@ -1,4 +1,5 @@
 import type { LlmProviderInfo } from "../agent/types";
+import { isCliLlmProvider } from "../agent/types";
 import type { LlmConfiguration } from "../validation/aiValidation";
 import {
   configurationLabel,
@@ -7,7 +8,8 @@ import {
   isLlmConfigurationReady,
   setGlobalConfiguration,
 } from "../validation/aiValidation";
-import { listLlmModels } from "../project/api";
+import { listLlmModels, probeCliLlmBackend } from "../project/api";
+import type { CliLlmBackendProbe } from "../project/api";
 import { t } from "../i18n";
 import { createLlmConfigFields } from "./llmConfigFields";
 import { lucideIcon } from "./icons";
@@ -33,6 +35,7 @@ export function createLlmProviderConfigsPanel(
   let providers: LlmProviderInfo[] = [];
   let configs: LlmConfiguration[] = [];
   const modelsByConfigId = new Map<string, ModelState>();
+  const probeByConfigId = new Map<string, CliLlmBackendProbe | null>();
   const fieldUpdaters = new Map<
     string,
     ReturnType<typeof createLlmConfigFields>
@@ -94,6 +97,9 @@ export function createLlmProviderConfigsPanel(
       modelsLoading: state.loading,
       modelsError: state.error,
       value: { provider: config.provider, model: config.model },
+      emptyModelsHint: isCliLlmProvider(config.provider)
+        ? t("llm.cliModelsHint")
+        : undefined,
     });
   }
 
@@ -101,7 +107,7 @@ export function createLlmProviderConfigsPanel(
     const existing = fetchTimers.get(config.id);
     if (existing) clearTimeout(existing);
 
-    if (!config.apiKey.trim()) {
+    if (!isCliLlmProvider(config.provider) && !config.apiKey.trim()) {
       modelsByConfigId.set(config.id, {
         models: [],
         loading: false,
@@ -126,7 +132,7 @@ export function createLlmProviderConfigsPanel(
   }
 
   async function fetchModels(config: LlmConfiguration): Promise<void> {
-    if (!config.apiKey.trim()) return;
+    if (!isCliLlmProvider(config.provider) && !config.apiKey.trim()) return;
 
     modelsByConfigId.set(config.id, {
       models: [],
@@ -160,6 +166,25 @@ export function createLlmProviderConfigsPanel(
     updateModelFields(config);
   }
 
+  async function refreshCliProbe(config: LlmConfiguration): Promise<void> {
+    if (!isCliLlmProvider(config.provider)) {
+      probeByConfigId.delete(config.id);
+      return;
+    }
+    try {
+      const probe = await probeCliLlmBackend(config.provider);
+      probeByConfigId.set(config.id, probe);
+    } catch (error) {
+      probeByConfigId.set(config.id, {
+        provider: config.provider,
+        binaryName: config.provider,
+        found: false,
+        path: null,
+        hint: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   function render(): void {
     list.replaceChildren();
     fieldUpdaters.clear();
@@ -182,13 +207,46 @@ export function createLlmProviderConfigsPanel(
 
     for (const config of configs) {
       list.appendChild(renderConfigCard(config));
-      if (config.apiKey.trim() && modelStateFor(config.id).models.length === 0) {
+      const needsModels =
+        isCliLlmProvider(config.provider) || Boolean(config.apiKey.trim());
+      if (needsModels && modelStateFor(config.id).models.length === 0) {
         scheduleModelFetch(config);
+      }
+      if (isCliLlmProvider(config.provider)) {
+        void refreshCliProbe(config).then(() => {
+          const statusEl = list.querySelector(
+            `[data-config-id="${CSS.escape(config.id)}"] .llm-provider-config-status`,
+          );
+          const probeEl = list.querySelector(
+            `[data-config-id="${CSS.escape(config.id)}"] .llm-cli-probe`,
+          );
+          if (statusEl) {
+            const probe = probeByConfigId.get(config.id);
+            statusEl.textContent = readyStatus(config);
+            statusEl.classList.toggle(
+              "is-configured",
+              Boolean(probe?.found),
+            );
+          }
+          if (probeEl) {
+            const probe = probeByConfigId.get(config.id);
+            probeEl.textContent = probe?.hint ?? t("llm.cliProbing");
+            probeEl.classList.toggle(
+              "settings-hint-warn",
+              Boolean(probe && !probe.found),
+            );
+          }
+        });
       }
     }
   }
 
   function readyStatus(config: LlmConfiguration): string {
+    if (isCliLlmProvider(config.provider)) {
+      const probe = probeByConfigId.get(config.id);
+      if (!probe) return t("llm.cliProbing");
+      return probe.found ? t("llm.ready") : t("llm.cliBinaryMissing");
+    }
     return isLlmConfigurationReady(config)
       ? t("llm.ready")
       : t("llm.missingApiKey");
@@ -197,6 +255,8 @@ export function createLlmProviderConfigsPanel(
   function renderConfigCard(config: LlmConfiguration): HTMLElement {
     const card = document.createElement("div");
     card.className = "llm-provider-config-card";
+    card.dataset.configId = config.id;
+    const isCli = isCliLlmProvider(config.provider);
 
     const header = document.createElement("div");
     header.className = "llm-provider-config-card-header";
@@ -206,8 +266,12 @@ export function createLlmProviderConfigsPanel(
     title.textContent = configurationLabel(config, providers);
 
     const status = document.createElement("span");
+    const probe = probeByConfigId.get(config.id);
+    const configured = isCli
+      ? Boolean(probe?.found)
+      : isLlmConfigurationReady(config);
     status.className = `llm-provider-config-status${
-      isLlmConfigurationReady(config) ? " is-configured" : ""
+      configured ? " is-configured" : ""
     }`;
     status.textContent = readyStatus(config);
 
@@ -219,6 +283,7 @@ export function createLlmProviderConfigsPanel(
     deleteButton.addEventListener("click", () => {
       const remaining = configs.filter((entry) => entry.id !== config.id);
       modelsByConfigId.delete(config.id);
+      probeByConfigId.delete(config.id);
       fieldUpdaters.delete(config.id);
       updateConfigs(remaining);
     });
@@ -275,12 +340,17 @@ export function createLlmProviderConfigsPanel(
       value: { provider: config.provider, model: config.model },
       showApiKey: false,
       classPrefix: "settings",
+      emptyModelsHint: isCli ? t("llm.cliModelsHint") : undefined,
       onChange: (value) => {
         if (!value.provider) return;
+        const providerChanged = value.provider !== config.provider;
         config.provider = value.provider;
         config.model = value.model;
         title.textContent = configurationLabel(config, providers);
         handlers.onChange(configs);
+        if (providerChanged) {
+          render();
+        }
       },
       onProviderChange: () => {
         config.model = "";
@@ -289,13 +359,19 @@ export function createLlmProviderConfigsPanel(
     });
     fieldUpdaters.set(config.id, fields);
 
-    card.append(
-      header,
-      fieldWrap(t("llm.name"), nameInput),
-      fieldWrap(t("llm.apiKey"), apiKeyInput),
-      modelHost,
-      globalWrap,
-    );
+    card.append(header, fieldWrap(t("llm.name"), nameInput));
+    if (!isCli) {
+      card.append(fieldWrap(t("llm.apiKey"), apiKeyInput));
+    } else {
+      const probeHint = document.createElement("p");
+      probeHint.className = "settings-hint llm-cli-probe";
+      probeHint.textContent = probe?.hint ?? t("llm.cliProbing");
+      if (probe && !probe.found) {
+        probeHint.classList.add("settings-hint-warn");
+      }
+      card.append(probeHint);
+    }
+    card.append(modelHost, globalWrap);
     return card;
   }
 

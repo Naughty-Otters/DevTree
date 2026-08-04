@@ -2,6 +2,7 @@ pub mod ai_output_parse;
 pub mod ai_validation;
 pub mod architecture_assessments;
 pub mod clean_code_lenses;
+pub mod cli_backends;
 pub mod code_review_lenses;
 pub mod model_listing;
 pub mod providers;

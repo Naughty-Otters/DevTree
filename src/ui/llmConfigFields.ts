@@ -18,6 +18,8 @@ export interface LlmConfigFieldsOptions {
   allowGlobal?: boolean;
   showApiKey?: boolean;
   classPrefix?: "settings" | "rule-setting";
+  /** Override hint when models list is empty (e.g. CLI backends). */
+  emptyModelsHint?: string;
   onChange: (value: LlmConfigFieldsValue) => void;
   onProviderChange?: (providerId: LlmProviderId) => void;
 }
@@ -123,10 +125,13 @@ export function createLlmConfigFields(
     if (state.models.length === 0) {
       const empty = document.createElement("option");
       empty.value = "";
-      empty.textContent = t("llm.enterApiKeyToLoad");
+      empty.textContent = state.emptyModelsHint
+        ? t("llm.loadingModels")
+        : t("llm.enterApiKeyToLoad");
       modelSelect.appendChild(empty);
       modelSelect.disabled = true;
-      modelHint.textContent = t("llm.addApiKeyHint");
+      modelHint.textContent =
+        state.emptyModelsHint ?? t("llm.addApiKeyHint");
       return;
     }
 

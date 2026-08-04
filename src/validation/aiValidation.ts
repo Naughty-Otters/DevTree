@@ -1,5 +1,5 @@
 import type { LlmProviderId, LlmProviderInfo } from "../agent/types";
-import { DEFAULT_LLM_PROVIDER } from "../agent/types";
+import { DEFAULT_LLM_PROVIDER, isCliLlmProvider } from "../agent/types";
 import type { RuleSettingDef, RuleSettingsMap } from "../analysis/types";
 
 /** Runtime limits for LLM agent loops (tool-call rounds + token budget). */
@@ -299,6 +299,9 @@ export function createLlmConfiguration(
 }
 
 export function isLlmConfigurationReady(config: LlmConfiguration): boolean {
+  if (isCliLlmProvider(config.provider)) {
+    return true;
+  }
   return Boolean(config.apiKey.trim());
 }
 

@@ -11,6 +11,7 @@ import type {
   LlmProviderId,
   LlmProviderInfo,
 } from "../agent/types";
+import { isCliLlmProvider } from "../agent/types";
 import { mockLlmProviders } from "../validation/llmCatalog";
 import type { LspInstallResult, LspServerStatus, LspSettingsMap } from "../lsp/types";
 import type {
@@ -355,6 +356,18 @@ export async function listLlmModels(
   provider: LlmProviderId,
   apiKey: string,
 ): Promise<string[]> {
+  if (isCliLlmProvider(provider)) {
+    if (isTauri()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke<string[]>("list_llm_models", { provider, apiKey: "" });
+    }
+    const defaults: Record<string, string> = {
+      claude_code: "claude-code",
+      codex: "codex",
+      gemini_cli: "gemini",
+    };
+    return [defaults[provider] ?? provider];
+  }
   if (!apiKey.trim()) {
     return [];
   }
@@ -363,6 +376,33 @@ export async function listLlmModels(
     return invoke<string[]>("list_llm_models", { provider, apiKey });
   }
   return [];
+}
+
+export interface CliLlmBackendProbe {
+  provider: LlmProviderId;
+  binaryName: string;
+  found: boolean;
+  path?: string | null;
+  hint: string;
+}
+
+export async function probeCliLlmBackend(
+  provider: LlmProviderId,
+): Promise<CliLlmBackendProbe> {
+  if (!isCliLlmProvider(provider)) {
+    throw new Error("Not a CLI LLM backend");
+  }
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<CliLlmBackendProbe>("probe_cli_llm_backend", { provider });
+  }
+  return {
+    provider,
+    binaryName: provider,
+    found: false,
+    path: null,
+    hint: "CLI probe requires the desktop app",
+  };
 }
 
 export interface GitFileChurn {

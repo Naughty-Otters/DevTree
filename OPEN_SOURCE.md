@@ -59,6 +59,6 @@ Primary downloads are **GitHub Releases**. Release automation also updates **npm
 
 ## Known limitations for contributors
 
-- LLM validation rules require user API keys; CI does not run live LLM calls.
+- LLM validation rules require a user API key **or** an installed local coding-agent CLI (Claude Code, Codex, or Gemini CLI). CI does not run live LLM calls.
 - Some Rust integration tests are marked `#[ignore]` and are intended for local scripts only.
 - WASM bindings are generated at build time and are gitignored under `src/wasm/`.

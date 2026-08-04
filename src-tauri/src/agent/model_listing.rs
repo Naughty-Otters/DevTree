@@ -5,6 +5,10 @@ pub async fn list_provider_models(
     provider: LlmProvider,
     api_key: &str,
 ) -> Result<Vec<String>, String> {
+    if provider.is_cli_backend() {
+        return Ok(cli_static_models(&provider));
+    }
+
     if api_key.trim().is_empty() {
         return Err("API key is required".into());
     }
@@ -34,6 +38,9 @@ pub async fn list_provider_models(
         LlmProvider::Grok => {
             list_openai_compatible_models("https://api.x.ai/v1/models", api_key).await?
         }
+        LlmProvider::ClaudeCode | LlmProvider::Codex | LlmProvider::GeminiCli => {
+            unreachable!("CLI backends handled above")
+        }
     };
 
     if models.is_empty() {
@@ -41,6 +48,10 @@ pub async fn list_provider_models(
     }
 
     Ok(models)
+}
+
+fn cli_static_models(provider: &LlmProvider) -> Vec<String> {
+    vec![crate::agent::providers::default_model(provider)]
 }
 
 async fn list_rig_models<C>(client: &C) -> Result<Vec<String>, String>
@@ -123,10 +134,23 @@ fn is_likely_chat_model(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::is_likely_chat_model;
+    use crate::agent::types::LlmProvider;
 
     #[test]
     fn filters_embedding_models() {
         assert!(!is_likely_chat_model("text-embedding-3-small"));
         assert!(is_likely_chat_model("gpt-4o-mini"));
+    }
+
+    #[tokio::test]
+    async fn cli_backends_list_static_models_without_api_key() {
+        for provider in [
+            LlmProvider::ClaudeCode,
+            LlmProvider::Codex,
+            LlmProvider::GeminiCli,
+        ] {
+            let models = super::list_provider_models(provider, "").await.unwrap();
+            assert_eq!(models.len(), 1);
+        }
     }
 }

@@ -162,9 +162,8 @@ Rules:
 const WORKFLOW_HEADER: &str = r#"You run ONE multi-phase AI validation session for DevTree.
 Complete phases in order. Finish each phase before starting the next.
 Reuse tool results and project context across phases.
-Do not modify project files. Prefer evidence from read_files / grep / shell.
-`read_files` accepts bare paths or editor locations (`path:line`, `path:start-end`); do not invent OS `timeout` — the shell tool already enforces a ~90s limit.
-Do NOT run full test suites or long installs (pytest/cargo test/npm test of the whole repo). Prefer reading failing test files and sampling small commands; shell times out after ~90s.
+Do not modify project files. Prefer read-only exploration (read, search/grep, limited shell).
+Do NOT run full test suites or long installs (pytest/cargo test/npm test of the whole repo). Prefer reading failing test files and sampling small commands; keep shell commands short.
 When all phases are done, output the final JSON only (see contract below).
 "#;
 
@@ -230,19 +229,34 @@ fn llm_from_configuration(config: &LlmConfiguration) -> AiValidationLlmSettings 
     }
 }
 
-/// Unified session uses the global LLM (or first configured key). Per-rule overrides are ignored.
+fn configuration_is_ready(config: &LlmConfiguration) -> bool {
+    if config.provider.is_cli_backend() {
+        true
+    } else {
+        !config.api_key.trim().is_empty()
+    }
+}
+
+/// Unified session uses the global LLM (or first ready config). Per-rule overrides are ignored.
 fn resolve_session_llm(configurations: &[LlmConfiguration]) -> AiValidationLlmSettings {
     if let Some(global) = global_configuration(configurations) {
-        let llm = llm_from_configuration(global);
-        if !llm.api_key.trim().is_empty() {
-            return llm;
+        if configuration_is_ready(global) {
+            return llm_from_configuration(global);
         }
     }
     configurations
         .iter()
-        .find(|config| !config.api_key.trim().is_empty())
+        .find(|config| configuration_is_ready(config))
         .map(llm_from_configuration)
         .unwrap_or_default()
+}
+
+fn session_llm_is_ready(llm: &AiValidationLlmSettings) -> bool {
+    if llm.provider.is_cli_backend() {
+        crate::agent::cli_backends::resolve_cli_binary(&llm.provider).is_ok()
+    } else {
+        !llm.api_key.trim().is_empty()
+    }
 }
 
 fn rule_def(rule_id: &str) -> Option<&'static AiValidationRuleDef> {
@@ -542,8 +556,17 @@ pub fn run_ai_validation_rules(
     };
 
     let llm = resolve_session_llm(llm_configurations);
-    if llm.api_key.trim().is_empty() {
-        results.extend(phases.iter().map(|phase| missing_llm_item(phase.rule)));
+    if !session_llm_is_ready(&llm) {
+        results.extend(phases.iter().map(|phase| {
+            if llm.provider.is_cli_backend() {
+                match crate::agent::cli_backends::resolve_cli_binary(&llm.provider) {
+                    Err(err) => error_item(phase.rule, err),
+                    Ok(_) => missing_llm_item(phase.rule),
+                }
+            } else {
+                missing_llm_item(phase.rule)
+            }
+        }));
         return results;
     }
 
@@ -575,9 +598,14 @@ pub fn run_ai_validation_rules(
         return results;
     }
 
-    let preamble_base = "You are DevTree's automated AI validation engine. Work only inside the opened project workspace. \
+    let preamble_base = if llm.provider.is_cli_backend() {
+        crate::agent::cli_backends::cli_validation_preamble_base().to_string()
+    } else {
+        "You are DevTree's automated AI validation engine. Work only inside the opened project workspace. \
 Use only these workspace tools: `read_files`, `edit_files`, `grep`, and `shell`. \
-All paths and commands must stay within the current project root.\n\n";
+All paths and commands must stay within the current project root.\n\n"
+            .to_string()
+    };
     let preamble = format!("{preamble_base}{}", build_workflow_preamble(&phases));
     let prompt = build_validation_prompt(root, hierarchy, prior_validation);
     let max_turns = session_turns(llm_runtime.max_turns, phases.len());
@@ -852,5 +880,30 @@ mod tests {
         let llm = resolve_session_llm(&configs);
         assert_eq!(llm.api_key, "sk-global");
         assert_eq!(llm.model, "claude");
+    }
+
+    #[test]
+    fn resolve_session_llm_accepts_cli_global_without_api_key() {
+        let configs = vec![
+            LlmConfiguration {
+                id: "cli".into(),
+                name: "Claude Code".into(),
+                provider: LlmProvider::ClaudeCode,
+                api_key: String::new(),
+                model: "claude-code".into(),
+                is_global: true,
+            },
+            LlmConfiguration {
+                id: "api".into(),
+                name: "OpenAI".into(),
+                provider: LlmProvider::Openai,
+                api_key: "sk-test".into(),
+                model: "gpt-4o".into(),
+                is_global: false,
+            },
+        ];
+        let llm = resolve_session_llm(&configs);
+        assert_eq!(llm.provider, LlmProvider::ClaudeCode);
+        assert!(llm.api_key.is_empty());
     }
 }

@@ -9,6 +9,22 @@ pub enum LlmProvider {
     Openai,
     Anthropic,
     Grok,
+    /// Local Claude Code CLI (`claude`), reuses machine login.
+    ClaudeCode,
+    /// Local OpenAI Codex CLI (`codex`), reuses machine login.
+    Codex,
+    /// Local Gemini CLI (`gemini`), reuses machine login.
+    GeminiCli,
+}
+
+impl LlmProvider {
+    /// Providers that spawn a local coding-agent CLI instead of using an API key + Rig.
+    pub fn is_cli_backend(&self) -> bool {
+        matches!(
+            self,
+            LlmProvider::ClaudeCode | LlmProvider::Codex | LlmProvider::GeminiCli
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

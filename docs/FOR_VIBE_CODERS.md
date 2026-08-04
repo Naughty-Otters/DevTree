@@ -64,6 +64,8 @@ Error and warning tracking while a run is in flight:
 
 Stop bouncing between “ask the agent again,” a separate linter, and a security checklist. DevTree stacks **deterministic rules**, **tooling (LSP/linters)**, **design rules (LDM)**, and **AI validation** so demo → production is one continuous bar.
 
+AI validation can use a cloud API key **or** an already-installed **Claude Code / Codex / Gemini CLI** (DevTree spawns a headless run with your local login — it does not join an open terminal session).
+
 | Pillar | Guardrails in DevTree |
 | --- | --- |
 | **Architecture** | Graph, DSM, modularity health, cycles, depth, LDM design rules, AI architecture assessments |

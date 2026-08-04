@@ -279,9 +279,13 @@ export const zhCN: MessageCatalog = {
   "wizard.trufflehogDesc": "深度密钥检测（密钥扫描 · TruffleHog）",
   "wizard.notCheckedYet": "尚未检查",
   "wizard.llmCopy":
-    "添加一个 LLM 配置以启用 AI 规则（架构、安全、整洁代码）。若只需依赖图与确定性检查，可跳过。",
-  "wizard.llmNoKey": "尚未填写 API 密钥 — 配置完成前 AI 校验规则将不可用。",
+    "添加一个 LLM 配置以启用 AI 规则（架构、安全、整洁代码）。可使用 API 密钥，或已安装的 Claude Code / Codex / Gemini CLI。若只需依赖图与确定性检查，可跳过。",
+  "wizard.llmNoKey":
+    "尚未填写 API 密钥 — 配置完成前 AI 校验规则将不可用（也可选择本地 CLI 提供商）。",
   "wizard.llmSavedGlobal": "此配置将保存为全局默认。",
+  "wizard.llmCliChecking": "正在检查 CLI 是否已安装并在 PATH 中…",
+  "wizard.llmCliMissing":
+    "未在 PATH 中找到 CLI。请安装并确保 DevTree 能看到你的 shell PATH。",
   "wizard.defaultLlmName": "默认",
   "wizard.checkProject": "项目",
   "wizard.checkLsp": "语言服务器",
@@ -654,12 +658,15 @@ export const zhCN: MessageCatalog = {
   "lsp.install": "安装",
 
   "llm.configsHint":
-    "添加带 API 密钥的 LLM 配置。输入有效 API 密钥后会从提供商加载模型。将其中一个配置标为全局默认。",
+    "添加 LLM 配置（API 密钥，或本地 Claude Code / Codex / Gemini CLI）。输入有效 API 密钥后会从提供商加载模型；CLI 后端可立即使用。将其中一个配置标为全局默认。",
   "llm.addConfiguration": "添加配置",
   "llm.loadingProviders": "正在加载提供商…",
   "llm.noConfigs": "尚无配置。添加一个以启用 AI 校验。",
   "llm.ready": "就绪",
   "llm.missingApiKey": "缺少 API 密钥",
+  "llm.cliProbing": "正在检查 CLI…",
+  "llm.cliBinaryMissing": "未找到 CLI",
+  "llm.cliModelsHint": "CLI 后端使用已安装工具的默认模型。",
   "llm.removeConfiguration": "移除配置",
   "llm.namePlaceholder": "配置名称（可选）",
   "llm.apiKeyPlaceholder": "API 密钥",

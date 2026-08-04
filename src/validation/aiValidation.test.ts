@@ -96,6 +96,18 @@ describe("aiValidation LLM configuration", () => {
     expect(aiRuleCategoryLabel("ai")).toBe("AI Validation");
   });
 
+  it("treats CLI providers as ready without an API key", () => {
+    const cli = createLlmConfiguration({
+      id: "cli-1",
+      provider: "claude_code",
+      apiKey: "",
+      model: "claude-code",
+      isGlobal: true,
+    });
+    expect(isLlmConfigurationReady(cli)).toBe(true);
+    expect(configuredLlmConfigurations([cli])).toHaveLength(1);
+  });
+
   it("manages global LLM configuration", () => {
     expect(defaultLlmConfigurations()).toEqual([]);
     expect(isLlmConfigurationReady(ready)).toBe(true);

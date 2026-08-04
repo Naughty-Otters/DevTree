@@ -23,6 +23,7 @@ use analysis::{
     slim_analysis_for_ipc, AnalysisProgress, AnalysisResult, AnalysisRule, RuleSettingsMap,
 };
 use agent::{cancel_agent_run, list_agent_skills, list_llm_provider_models, list_llm_providers, run_agent_skill};
+use agent::cli_backends::{probe_cli_backend, CliBackendProbe};
 use agent::types::{AgentEvent, AgentRunRequest, AgentRunResult, AgentSkillInfo, LlmProvider, LlmProviderInfo};
 use analysis_session::AnalysisSessionRegistry;
 use db::{init_db, DbState};
@@ -144,6 +145,11 @@ fn get_llm_providers() -> Vec<LlmProviderInfo> {
 #[tauri::command]
 async fn list_llm_models(provider: LlmProvider, api_key: String) -> Result<Vec<String>, String> {
     list_llm_provider_models(provider, api_key).await
+}
+
+#[tauri::command]
+fn probe_cli_llm_backend(provider: LlmProvider) -> Result<CliBackendProbe, String> {
+    probe_cli_backend(provider)
 }
 
 #[tauri::command]
@@ -293,6 +299,7 @@ pub fn run() {
             get_agent_skills,
             get_llm_providers,
             list_llm_models,
+            probe_cli_llm_backend,
             run_agent_skill_command,
             cancel_agent_run_command,
             get_analysis_rules,

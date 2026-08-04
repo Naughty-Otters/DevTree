@@ -19,5 +19,8 @@ export function mockLlmProviders(): { id: LlmProviderId; label: string }[] {
     { id: "openai", label: "OpenAI" },
     { id: "anthropic", label: "Anthropic" },
     { id: "grok", label: "Grok (xAI)" },
+    { id: "claude_code", label: "Claude Code (CLI)" },
+    { id: "codex", label: "Codex (CLI)" },
+    { id: "gemini_cli", label: "Gemini CLI" },
   ];
 }
