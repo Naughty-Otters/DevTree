@@ -6,8 +6,10 @@
 use crate::agent::run::ValidationStreamEvent;
 use crate::agent::types::LlmProvider;
 use crate::agent::workspace::ProjectWorkspace;
-use crate::linter::resolve_which;
+use crate::linter::{enrich_path, resolve_which};
+use crate::lsp::build_enriched_path;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -38,6 +40,12 @@ const FINDINGS_SCHEMA_JSON: &str = r#"{
   },
   "required": ["items"]
 }"#;
+
+/// Per-item text already emitted for Codex `item.updated` / `item.completed` streams.
+#[derive(Default)]
+struct CliStreamState {
+    codex_item_text: HashMap<String, String>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +95,7 @@ pub fn install_hint(provider: &LlmProvider) -> String {
 }
 
 pub fn resolve_cli_binary(provider: &LlmProvider) -> Result<PathBuf, String> {
+    enrich_path();
     let name = binary_name(provider).ok_or_else(|| format!("{provider:?} is not a CLI backend"))?;
     resolve_which(name)
         .map(PathBuf::from)
@@ -190,15 +199,25 @@ fn run_cli_validation_blocking(
     mut on_event: impl FnMut(ValidationStreamEvent),
 ) -> Result<String, String> {
     let binary = resolve_cli_binary(&provider)?;
-    let combined = format!("{preamble}\n\n{prompt}");
-    let schema_path = write_temp_schema()?;
+    let combined = format!("{preamble}\n\n{prompt}\n");
+    let schema_path = if provider == LlmProvider::Codex {
+        Some(write_temp_schema()?)
+    } else {
+        None
+    };
 
     let mut command = match provider {
-        LlmProvider::ClaudeCode => build_claude_command(&binary, root, max_turns, &schema_path),
-        LlmProvider::Codex => build_codex_command(&binary, root, &schema_path),
+        LlmProvider::ClaudeCode => build_claude_command(&binary, root, max_turns),
+        LlmProvider::Codex => build_codex_command(
+            &binary,
+            root,
+            schema_path.as_ref().expect("codex schema"),
+        ),
         LlmProvider::GeminiCli => build_gemini_command(&binary, root),
         _ => return Err("Not a CLI backend".into()),
     };
+
+    command.env("PATH", build_enriched_path());
 
     command.stdin(Stdio::piped());
     command.stdout(Stdio::piped());
@@ -208,10 +227,22 @@ fn run_cli_validation_blocking(
         .spawn()
         .map_err(|e| format!("Failed to start {}: {e}", binary.display()))?;
 
+    let provider_label = match provider {
+        LlmProvider::ClaudeCode => "claude",
+        LlmProvider::Codex => "codex",
+        LlmProvider::GeminiCli => "gemini",
+        _ => "cli",
+    };
+    on_event(ValidationStreamEvent::ToolActivity(format!(
+        "{provider_label}:session started"
+    )));
+
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(err) = stdin.write_all(combined.as_bytes()) {
             kill_child(&mut child);
-            let _ = std::fs::remove_file(&schema_path);
+            if let Some(path) = &schema_path {
+                let _ = std::fs::remove_file(path);
+            }
             return Err(format!("Failed to write prompt to CLI stdin: {err}"));
         }
         drop(stdin);
@@ -234,31 +265,37 @@ fn run_cli_validation_blocking(
         }
     });
 
+    let (stderr_tx, stderr_rx) = mpsc::channel::<String>();
     let stderr_thread = thread::spawn(move || {
         let reader = BufReader::new(stderr);
-        let mut buf = String::new();
         for line in reader.lines().flatten() {
-            if !buf.is_empty() {
-                buf.push('\n');
-            }
-            buf.push_str(&line);
-            if buf.len() > 32_000 {
-                break;
-            }
+            let _ = stderr_tx.send(line);
         }
-        buf
     });
 
     let mut final_text = String::new();
     let mut accumulated_text = String::new();
+    let mut stream_state = CliStreamState::default();
 
     loop {
         if cancel.load(Ordering::Relaxed) {
             kill_child(&mut child);
             let _ = stdout_thread.join();
             let _ = stderr_thread.join();
-            let _ = std::fs::remove_file(&schema_path);
+            if let Some(path) = &schema_path {
+                let _ = std::fs::remove_file(path);
+            }
             return Err("AI validation cancelled".into());
+        }
+
+        while let Ok(line) = stderr_rx.try_recv() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            on_event(ValidationStreamEvent::ToolOutputDelta(format!(
+                "{trimmed}\n"
+            )));
         }
 
         while let Ok(line) = line_rx.try_recv() {
@@ -269,6 +306,7 @@ fn run_cli_validation_blocking(
             apply_stream_line(
                 &provider,
                 &line,
+                &mut stream_state,
                 &mut on_event,
                 &mut final_text,
                 &mut accumulated_text,
@@ -280,7 +318,9 @@ fn run_cli_validation_blocking(
             Ok(None) => thread::sleep(Duration::from_millis(30)),
             Err(err) => {
                 kill_child(&mut child);
-                let _ = std::fs::remove_file(&schema_path);
+                if let Some(path) = &schema_path {
+                    let _ = std::fs::remove_file(path);
+                }
                 return Err(format!("Failed waiting for CLI: {err}"));
             }
         }
@@ -289,6 +329,15 @@ fn run_cli_validation_blocking(
     // Drain remaining stdout after the process exits.
     let _ = child.wait();
     let _ = stdout_thread.join();
+    while let Ok(line) = stderr_rx.try_recv() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        on_event(ValidationStreamEvent::ToolOutputDelta(format!(
+            "{trimmed}\n"
+        )));
+    }
     while let Ok(line) = line_rx.try_recv() {
         let line = line.trim().to_string();
         if line.is_empty() {
@@ -297,14 +346,27 @@ fn run_cli_validation_blocking(
         apply_stream_line(
             &provider,
             &line,
+            &mut stream_state,
             &mut on_event,
             &mut final_text,
             &mut accumulated_text,
         );
     }
 
-    let stderr_text = stderr_thread.join().unwrap_or_default();
-    let _ = std::fs::remove_file(&schema_path);
+    let mut stderr_text = String::new();
+    let _ = stderr_thread.join();
+    while let Ok(line) = stderr_rx.try_recv() {
+        if !stderr_text.is_empty() {
+            stderr_text.push('\n');
+        }
+        stderr_text.push_str(line.trim());
+        if stderr_text.len() > 32_000 {
+            break;
+        }
+    }
+    if let Some(path) = &schema_path {
+        let _ = std::fs::remove_file(path);
+    }
 
     if cancel.load(Ordering::Relaxed) {
         return Err("AI validation cancelled".into());
@@ -339,14 +401,22 @@ fn run_cli_validation_blocking(
 fn apply_stream_line(
     provider: &LlmProvider,
     line: &str,
+    state: &mut CliStreamState,
     on_event: &mut impl FnMut(ValidationStreamEvent),
     final_text: &mut String,
     accumulated_text: &mut String,
 ) {
     let parsed = match provider {
         LlmProvider::ClaudeCode => parse_claude_stream_line(line),
-        LlmProvider::Codex => parse_codex_stream_line(line),
-        LlmProvider::GeminiCli => parse_gemini_stream_line(line),
+        LlmProvider::Codex => parse_codex_stream_line(line, &mut state.codex_item_text),
+        LlmProvider::GeminiCli => {
+            let parsed = parse_gemini_stream_line(line);
+            if matches!(parsed, StreamLine::Ignore) && !line.trim().is_empty() {
+                StreamLine::TextDelta(format!("{line}\n"))
+            } else {
+                parsed
+            }
+        }
         _ => StreamLine::Ignore,
     };
     match parsed {
@@ -360,8 +430,22 @@ fn apply_stream_line(
             on_event(ValidationStreamEvent::TextDelta(delta));
         }
         StreamLine::Final(text) => {
-            if !text.trim().is_empty() {
-                *final_text = text;
+            if text.trim().is_empty() {
+                return;
+            }
+            *final_text = text.clone();
+            if *accumulated_text == text {
+                return;
+            }
+            if text.starts_with(accumulated_text.as_str()) {
+                let delta = text[accumulated_text.len()..].to_string();
+                if !delta.is_empty() {
+                    accumulated_text.push_str(&delta);
+                    on_event(ValidationStreamEvent::TextDelta(delta));
+                }
+            } else {
+                *accumulated_text = text.clone();
+                on_event(ValidationStreamEvent::TextDelta(text));
             }
         }
         StreamLine::Ignore => {}
@@ -378,24 +462,20 @@ fn write_temp_schema() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn build_claude_command(
-    binary: &Path,
-    root: &Path,
-    max_turns: u32,
-    schema_path: &Path,
-) -> Command {
+fn build_claude_command(binary: &Path, root: &Path, max_turns: u32) -> Command {
     let mut cmd = Command::new(binary);
+    // Do not pass --json-schema: it hangs with piped stdout (no stream-json for minutes).
+    // JSON output is enforced via the validation prompt contract instead.
     cmd.current_dir(root)
         .arg("-p")
         .arg("--output-format")
         .arg("stream-json")
         .arg("--verbose")
+        .arg("--include-partial-messages")
         .arg("--permission-mode")
         .arg("bypassPermissions")
         .arg("--max-turns")
-        .arg(max_turns.max(1).to_string())
-        .arg("--json-schema")
-        .arg(schema_path);
+        .arg(max_turns.max(1).to_string());
     cmd
 }
 
@@ -414,10 +494,8 @@ fn build_codex_command(binary: &Path, root: &Path, schema_path: &Path) -> Comman
 
 fn build_gemini_command(binary: &Path, root: &Path) -> Command {
     let mut cmd = Command::new(binary);
-    cmd.current_dir(root)
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--yolo");
+    // Gemini CLI 0.5.x has no --output-format stream-json; use YOLO + stdin prompt.
+    cmd.current_dir(root).arg("-y");
     cmd
 }
 
@@ -462,8 +540,30 @@ fn parse_claude_stream_line(line: &str) -> StreamLine {
     let type_str = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match type_str {
+        "system" => {
+            let subtype = value.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
+            if subtype == "init" {
+                let model = value
+                    .get("model")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown");
+                let api_key = value
+                    .get("apiKeySource")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown");
+                return StreamLine::Events(vec![ValidationStreamEvent::ToolActivity(
+                    format!("claude:connected ({model}, auth={api_key})"),
+                )]);
+            }
+            StreamLine::Ignore
+        }
         "assistant" => {
             let mut events = Vec::new();
+            if let Some(err) = value.get("error").and_then(|e| e.as_str()) {
+                events.push(ValidationStreamEvent::ToolOutputDelta(format!(
+                    "Claude error: {err}\n"
+                )));
+            }
             if let Some(content) = value
                 .pointer("/message/content")
                 .and_then(|c| c.as_array())
@@ -518,6 +618,45 @@ fn parse_claude_stream_line(line: &str) -> StreamLine {
             }
             StreamLine::Ignore
         }
+        "stream_event" => {
+            if let Some(event) = value.get("event") {
+                let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                match event_type {
+                    "content_block_delta" => {
+                        if let Some(delta) = event.get("delta") {
+                            let dtype = delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                            if dtype == "text_delta" {
+                                if let Some(t) = delta.get("text").and_then(|t| t.as_str()) {
+                                    return StreamLine::TextDelta(t.to_string());
+                                }
+                            }
+                            if dtype == "thinking_delta" {
+                                if let Some(t) = delta.get("thinking").and_then(|t| t.as_str()) {
+                                    return StreamLine::Events(vec![
+                                        ValidationStreamEvent::ThinkingDelta(t.to_string()),
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                    "content_block_start" => {
+                        if let Some(block) = event.get("content_block") {
+                            if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                                let name = block
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("tool");
+                                return StreamLine::Events(vec![
+                                    ValidationStreamEvent::ToolActivity(format!("claude:{name}")),
+                                ]);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            StreamLine::Ignore
+        }
         "result" => {
             if let Some(result) = value.get("result").and_then(|r| r.as_str()) {
                 StreamLine::Final(result.to_string())
@@ -547,7 +686,7 @@ fn parse_claude_stream_line(line: &str) -> StreamLine {
     }
 }
 
-fn parse_codex_stream_line(line: &str) -> StreamLine {
+fn parse_codex_stream_line(line: &str, item_text: &mut HashMap<String, String>) -> StreamLine {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
         return StreamLine::Ignore;
     };
@@ -555,17 +694,42 @@ fn parse_codex_stream_line(line: &str) -> StreamLine {
     let type_str = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match type_str {
-        "item.completed" | "item.updated" => {
+        "thread.started" => StreamLine::Events(vec![ValidationStreamEvent::ToolActivity(
+            "codex:thread started".into(),
+        )]),
+        "turn.started" => StreamLine::Events(vec![ValidationStreamEvent::ToolActivity(
+            "codex:turn started".into(),
+        )]),
+        "item.started" | "item.updated" | "item.completed" => {
             let item = value.get("item").cloned().unwrap_or(serde_json::json!({}));
+            let item_id = item
+                .get("id")
+                .and_then(|id| id.as_str())
+                .unwrap_or("")
+                .to_string();
             let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
             match item_type {
-                "agent_message" | "message" => {
+                "agent_message" | "message" | "assistant_message" => {
                     if let Some(text) = item
                         .get("text")
                         .or_else(|| item.get("content"))
                         .and_then(|t| t.as_str())
                     {
-                        return StreamLine::Final(text.to_string());
+                        if type_str == "item.completed" {
+                            item_text.insert(item_id, text.to_string());
+                            return StreamLine::Final(text.to_string());
+                        }
+                        let previous = item_text.get(&item_id).map(String::as_str).unwrap_or("");
+                        if text.len() > previous.len() && text.starts_with(previous) {
+                            let delta = text[previous.len()..].to_string();
+                            if !delta.is_empty() {
+                                item_text.insert(item_id, text.to_string());
+                                return StreamLine::TextDelta(delta);
+                            }
+                        } else if text != previous {
+                            item_text.insert(item_id, text.to_string());
+                            return StreamLine::TextDelta(text.to_string());
+                        }
                     }
                 }
                 "reasoning" => {
@@ -575,7 +739,54 @@ fn parse_codex_stream_line(line: &str) -> StreamLine {
                         )]);
                     }
                 }
-                "command_execution" | "tool_call" | "function_call" => {
+                "command_execution" => {
+                    let name = item
+                        .get("command")
+                        .or_else(|| item.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("command");
+                    let mut events = vec![ValidationStreamEvent::ToolActivity(format!(
+                        "codex:{name}"
+                    ))];
+                    if let Some(output) = item.get("aggregated_output").and_then(|o| o.as_str()) {
+                        let previous = item_text
+                            .get(&format!("{item_id}:output"))
+                            .map(String::as_str)
+                            .unwrap_or("");
+                        if output.len() > previous.len() && output.starts_with(previous) {
+                            let delta = output[previous.len()..].to_string();
+                            if !delta.is_empty() {
+                                item_text.insert(format!("{item_id}:output"), output.to_string());
+                                events.push(ValidationStreamEvent::ToolOutputDelta(delta));
+                            }
+                        }
+                    }
+                    return StreamLine::Events(events);
+                }
+                "mcp_tool_call" => {
+                    let server = item.get("server").and_then(|s| s.as_str()).unwrap_or("mcp");
+                    let tool = item.get("tool").and_then(|t| t.as_str()).unwrap_or("tool");
+                    return StreamLine::Events(vec![ValidationStreamEvent::ToolActivity(
+                        format!("codex:{server}/{tool}"),
+                    )]);
+                }
+                "file_change" => {
+                    let count = item
+                        .get("changes")
+                        .and_then(|c| c.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    return StreamLine::Events(vec![ValidationStreamEvent::ToolActivity(
+                        format!("codex:file_change ({count})"),
+                    )]);
+                }
+                "web_search" => {
+                    let query = item.get("query").and_then(|q| q.as_str()).unwrap_or("search");
+                    return StreamLine::Events(vec![ValidationStreamEvent::ToolActivity(
+                        format!("codex:web_search:{query}"),
+                    )]);
+                }
+                "tool_call" | "function_call" => {
                     let name = item
                         .get("command")
                         .or_else(|| item.get("name"))
@@ -607,9 +818,10 @@ fn parse_codex_stream_line(line: &str) -> StreamLine {
                 StreamLine::Ignore
             }
         }
-        "error" => {
+        "error" | "turn.failed" => {
             let msg = value
                 .get("message")
+                .or_else(|| value.pointer("/error/message"))
                 .and_then(|m| m.as_str())
                 .unwrap_or("Codex error");
             StreamLine::Events(vec![ValidationStreamEvent::ToolOutputDelta(format!(
@@ -753,12 +965,51 @@ mod tests {
     }
 
     #[test]
+    fn parses_claude_system_init() {
+        let line = r#"{"type":"system","subtype":"init","model":"claude-sonnet-4-6","apiKeySource":"none"}"#;
+        match parse_claude_stream_line(line) {
+            StreamLine::Events(events) => {
+                assert!(matches!(
+                    &events[0],
+                    ValidationStreamEvent::ToolActivity(s) if s.contains("connected")
+                ));
+            }
+            other => panic!("expected Events, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_codex_agent_message() {
         let line =
             r#"{"type":"item.completed","item":{"type":"agent_message","text":"{\"items\":[]}"}}"#;
-        match parse_codex_stream_line(line) {
+        let mut item_text = HashMap::new();
+        match parse_codex_stream_line(line, &mut item_text) {
             StreamLine::Final(text) => assert!(text.contains("items")),
             other => panic!("expected Final, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_codex_incremental_agent_message() {
+        let mut item_text = HashMap::new();
+        let started = r#"{"type":"item.updated","item":{"id":"m1","type":"agent_message","text":"hel"}}"#;
+        match parse_codex_stream_line(started, &mut item_text) {
+            StreamLine::TextDelta(delta) => assert_eq!(delta, "hel"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+        let updated = r#"{"type":"item.updated","item":{"id":"m1","type":"agent_message","text":"hello"}}"#;
+        match parse_codex_stream_line(updated, &mut item_text) {
+            StreamLine::TextDelta(delta) => assert_eq!(delta, "lo"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_claude_stream_event_text_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}"#;
+        match parse_claude_stream_line(line) {
+            StreamLine::TextDelta(delta) => assert_eq!(delta, "hi"),
+            other => panic!("expected TextDelta, got {other:?}"),
         }
     }
 
