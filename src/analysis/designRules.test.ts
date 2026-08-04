@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   checkDesignRules,
+  collectDesignRulePackageIds,
   suggestLayersFromPartition,
   designRulesValidationItem,
   matchesTarget,
@@ -21,6 +22,27 @@ function emptyHierarchy(): HierarchyIndex {
     symbol_edges: [],
   };
 }
+
+describe("collectDesignRulePackageIds", () => {
+  it("merges hierarchy, quality keys, graph packages, and DSM ids", () => {
+    const ids = collectDesignRulePackageIds({
+      hierarchy: {
+        ...emptyHierarchy(),
+        packages: ["core"],
+      },
+      graph: {
+        nodes: [
+          { id: "ui", path: "ui", label: "ui", loc: 1, kind: "package" },
+          { id: "src/main.ts", path: "src/main.ts", label: "main", loc: 1, kind: "module" },
+        ],
+        edges: [],
+      },
+      qualityPackageKeys: ["api", "core"],
+      dsmElementIds: ["services"],
+    });
+    expect(ids).toEqual(["api", "core", "services", "ui"]);
+  });
+});
 
 describe("matchesTarget", () => {
   it("matches exact and prefix paths", () => {

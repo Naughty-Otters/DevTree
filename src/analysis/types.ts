@@ -9,6 +9,13 @@ export interface SymbolInfo {
   line: number;
 }
 
+/** Per-file counts of functions, variables, and data-structure symbols. */
+export interface SymbolKindCounts {
+  functions: number;
+  variables: number;
+  structures: number;
+}
+
 export interface SymbolEdge {
   source: string;
   target: string;
@@ -49,6 +56,8 @@ export interface HierarchyIndex {
   package_edges: PackageEdge[];
   symbols: Record<string, SymbolInfo[]>;
   symbol_edges: SymbolEdge[];
+  /** Per-file symbol counts (persisted in hierarchy-lite). */
+  symbol_counts?: Record<string, SymbolKindCounts>;
   scope_graphs?: Record<string, ScopeGraph>;
 }
 

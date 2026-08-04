@@ -509,6 +509,14 @@ mod tests {
                 target: "src/a.ts::main".into(),
                 kind: "reference".into(),
             }],
+            symbol_counts: HashMap::from([(
+                "src/a.ts".into(),
+                crate::hierarchy::SymbolKindCounts {
+                    functions: 1,
+                    variables: 0,
+                    structures: 0,
+                },
+            )]),
             scope_graphs: HashMap::new(),
         }
     }

@@ -19,6 +19,7 @@ import {
   type PercentileViewMode,
 } from "../analysis/percentileView";
 import { qualityReportFromIndex } from "../analysis/qualityIndex";
+import { fileSymbolCounts } from "../analysis/symbolCounts";
 import type { AnalysisResult, HierarchyIndex } from "../analysis/types";
 import { nodeColor } from "../canvas/colors";
 import { createNodeKindShape, nodeKindLabel } from "../canvas/nodeIcons";
@@ -512,6 +513,28 @@ export function createModuleDetailsPanel(
       appendMetaRow(meta, t("details.line"), formatInt(node.line));
     } else {
       appendMetaRow(meta, t("details.lines"), formatInt(node.loc));
+    }
+
+    const nodeKind = node.kind || "";
+    if (nodeKind === "file" || nodeKind === "module") {
+      const symbolCounts = fileSymbolCounts(hierarchy, node.path || node.id);
+      if (symbolCounts) {
+        appendMetaRow(
+          meta,
+          t("details.functions"),
+          formatInt(symbolCounts.functions),
+        );
+        appendMetaRow(
+          meta,
+          t("details.variables"),
+          formatInt(symbolCounts.variables),
+        );
+        appendMetaRow(
+          meta,
+          t("details.structures"),
+          formatInt(symbolCounts.structures),
+        );
+      }
     }
 
     const rating = ratingForQualityPath(

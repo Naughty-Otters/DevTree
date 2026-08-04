@@ -1284,6 +1284,7 @@ fn empty_hierarchy_for_ipc() -> HierarchyIndex {
         package_edges: vec![],
         symbols: std::collections::HashMap::new(),
         symbol_edges: vec![],
+        symbol_counts: std::collections::HashMap::new(),
         scope_graphs: std::collections::HashMap::new(),
     }
 }
@@ -1807,6 +1808,7 @@ mod tests {
                     target: "b".into(),
                     kind: "ref".into(),
                 }],
+                symbol_counts: HashMap::new(),
                 scope_graphs: HashMap::new(),
             },
             validation: vec![ValidationItem {
@@ -1882,6 +1884,14 @@ mod tests {
                     target: "b".into(),
                     kind: "ref".into(),
                 }],
+                symbol_counts: HashMap::from([(
+                    "a.ts".into(),
+                    crate::hierarchy::SymbolKindCounts {
+                        functions: 1,
+                        variables: 0,
+                        structures: 0,
+                    },
+                )]),
                 scope_graphs: HashMap::new(),
             },
             validation: vec![],
@@ -1896,6 +1906,7 @@ mod tests {
         assert_eq!(lite.files.len(), 1);
         assert!(lite.symbols.is_empty());
         assert!(lite.symbol_edges.is_empty());
+        assert_eq!(lite.symbol_counts.get("a.ts").map(|c| c.functions), Some(1));
 
         let _ = std::fs::remove_dir_all(&tmp);
         unsafe {

@@ -350,6 +350,9 @@ export const zhCN: MessageCatalog = {
   "details.files": "文件",
   "details.line": "行",
   "details.lines": "行数",
+  "details.functions": "函数",
+  "details.variables": "变量",
+  "details.structures": "结构体",
   "details.rating": "评分",
   "details.ratingTitle":
     "相对同项目模块的百分位评分（100 = 相对质量最佳）",
@@ -567,20 +570,47 @@ export const zhCN: MessageCatalog = {
     "有 {n} 条状态为“{kind}”的校验规则。",
 
   "designRules.intro":
-    "LDM 设计规则用于描述目标架构。分层按自下而上排列；上层可依赖下层。禁止规则用于阻止特定依赖方向。",
-  "designRules.addLayerStack": "添加分层栈",
-  "designRules.addForbidRule": "添加禁止规则",
-  "designRules.suggestLayers": "根据 DSM 建议分层",
+    "定义目标架构。每次分析后，DevTree 会根据这些规则检查包与文件导入。",
+  "designRules.reportNote":
+    "违规会显示在 Validation（架构符合性）和 DSM 视图中。未配置规则时将跳过符合性检查。",
+  "designRules.packagesHint":
+    "上次分析发现 {n} 个包 — 在规则中使用这些名称（每行或每字段一个包或路径前缀）。",
+  "designRules.packagesHintNoAnalysis":
+    "请先运行分析，以便在编辑规则时参考包名。",
+  "designRules.actionsTitle": "添加规则",
+  "designRules.addLayerStack": "分层栈",
+  "designRules.addLayerStackHint":
+    "自下而上的分层顺序。上层可依赖下层，反之不允许。",
+  "designRules.addForbidRule": "禁止依赖",
+  "designRules.addForbidRuleHint":
+    "阻止从来源包/路径到目标包/路径的导入。",
+  "designRules.suggestLayers": "从 DSM 建议",
+  "designRules.suggestLayersHint":
+    "用分区 DSM 的包顺序替换分层栈（基础层在前）。",
   "designRules.suggestLayersTitle":
     "使用当前分区后的 DSM 顺序（基础 → 依赖方）",
-  "designRules.empty": "暂无设计规则 — 将跳过架构符合性检查",
-  "designRules.enabled": "已启用",
-  "designRules.kindLayers": "分层",
-  "designRules.kindForbid": "禁止",
+  "designRules.empty":
+    "尚无规则 — 请在上方添加分层栈或禁止规则，或在分析后从 DSM 建议分层。",
+  "designRules.enabled": "启用规则",
+  "designRules.kindLayers": "分层栈",
+  "designRules.kindForbid": "禁止依赖",
   "designRules.remove": "移除规则",
-  "designRules.layersLabel": "分层（自下而上，每行一个包）",
-  "designRules.fromLabel": "来源（包 / 路径前缀）",
-  "designRules.toLabel": "目标（包 / 路径前缀）",
+  "designRules.layersLabel": "分层（自下而上）",
+  "designRules.layersPlaceholder": "core\nservices\nui",
+  "designRules.layersHelp":
+    "每行一层。第一行为最底层（基础）；最后一行为最上层（依赖方）。代码只能依赖同层或更低层。",
+  "designRules.selectPackage": "选择包…",
+  "designRules.searchPackages": "筛选包…",
+  "designRules.noPackageMatch": "没有匹配的包",
+  "designRules.customPrefix": "自定义路径前缀…",
+  "designRules.addLayerRow": "添加层",
+  "designRules.removeLayerRow": "移除此层",
+  "designRules.layerBottom": "底层",
+  "designRules.layerTop": "顶层",
+  "designRules.forbidHelp":
+    "阻止导入方匹配「来源」且被导入模块匹配「目标」的边。前缀可匹配子路径（如 ui 匹配 ui/widgets）。",
+  "designRules.fromLabel": "来源（导入方包 / 路径前缀）",
+  "designRules.toLabel": "目标（被导入包 / 路径前缀）",
   "designRules.fromPlaceholder": "例如 ui",
   "designRules.toPlaceholder": "例如 core",
 

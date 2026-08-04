@@ -293,4 +293,63 @@ describe("createModuleDetailsPanel", () => {
     expect(root.textContent).toContain("15");
     expect(root.textContent).toContain("lines/90d");
   });
+
+  it("shows function, variable, and structure counts for file modules", () => {
+    const root = document.createElement("aside");
+    const panel = createModuleDetailsPanel(root);
+    const file: GraphNode = {
+      id: "pkg/a.ts",
+      label: "a.ts",
+      path: "pkg/a.ts",
+      loc: 40,
+      kind: "file",
+    };
+    const hierarchy: HierarchyIndex = {
+      files: [{ path: "pkg/a.ts", label: "a.ts", loc: 40, package: "pkg" }],
+      packages: ["pkg"],
+      file_imports: {},
+      package_edges: [],
+      symbols: {
+        "pkg/a.ts": [
+          {
+            id: "pkg/a.ts::main",
+            label: "main",
+            kind: "function",
+            file: "pkg/a.ts",
+            line: 1,
+          },
+          {
+            id: "pkg/a.ts::x",
+            label: "x",
+            kind: "const",
+            file: "pkg/a.ts",
+            line: 2,
+          },
+          {
+            id: "pkg/a.ts::App",
+            label: "App",
+            kind: "class",
+            file: "pkg/a.ts",
+            line: 10,
+          },
+        ],
+      },
+      symbol_edges: [],
+    };
+
+    panel.show({
+      node: file,
+      nodes: [file],
+      edges: [],
+      hierarchy,
+      navigation: rootNavigation(),
+    });
+
+    expect(root.textContent).toContain("Functions");
+    expect(root.textContent).toContain("Variables");
+    expect(root.textContent).toContain("Structures");
+    expect(root.textContent).toMatch(/Functions\s*1/);
+    expect(root.textContent).toMatch(/Variables\s*1/);
+    expect(root.textContent).toMatch(/Structures\s*1/);
+  });
 });

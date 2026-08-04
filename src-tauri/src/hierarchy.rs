@@ -22,6 +22,28 @@ pub struct SymbolEdge {
     pub kind: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct SymbolKindCounts {
+    pub functions: u32,
+    pub variables: u32,
+    pub structures: u32,
+}
+
+fn count_symbols_by_kind(syms: &[SymbolInfo]) -> SymbolKindCounts {
+    let mut counts = SymbolKindCounts::default();
+    for s in syms {
+        match s.kind.as_str() {
+            "function" | "method" | "fn" => counts.functions += 1,
+            "variable" | "const" | "constant" | "let" => counts.variables += 1,
+            "class" | "struct" | "interface" | "enum" | "trait" | "type" => {
+                counts.structures += 1
+            }
+            _ => {}
+        }
+    }
+    counts
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
     pub path: String,
@@ -63,6 +85,9 @@ pub struct HierarchyIndex {
     pub package_edges: Vec<PackageEdge>,
     pub symbols: HashMap<String, Vec<SymbolInfo>>,
     pub symbol_edges: Vec<SymbolEdge>,
+    /// Per-file symbol counts by kind (persisted in hierarchy-lite).
+    #[serde(default)]
+    pub symbol_counts: HashMap<String, SymbolKindCounts>,
     pub scope_graphs: HashMap<String, ScopeGraph>,
 }
 
@@ -1225,6 +1250,7 @@ pub fn build_hierarchy_with_progress(
     let all_files: HashSet<String> = files.iter().map(|(p, _)| p.clone()).collect();
     let mut file_imports: HashMap<String, Vec<String>> = HashMap::new();
     let mut symbols: HashMap<String, Vec<SymbolInfo>> = HashMap::new();
+    let mut symbol_counts: HashMap<String, SymbolKindCounts> = HashMap::new();
     let mut symbol_edges = Vec::new();
 
     let mut package_roots = Vec::new();
@@ -1300,6 +1326,7 @@ pub fn build_hierarchy_with_progress(
             extract_symbols(path, &content)
         };
 
+        symbol_counts.insert(path.clone(), count_symbols_by_kind(&syms));
         if !syms.is_empty() {
             symbols.insert(path.clone(), syms);
         }
@@ -1326,6 +1353,7 @@ pub fn build_hierarchy_with_progress(
         package_edges,
         symbols,
         symbol_edges,
+        symbol_counts,
         scope_graphs,
     })
 }
@@ -1704,6 +1732,56 @@ import com.example.lib.*;
         assert_eq!(
             parse_java_symbol("public interface Service {"),
             Some(("interface".into(), "Service".into()))
+        );
+    }
+
+    #[test]
+    fn symbol_kind_counts_bucket_symbols() {
+        let syms = vec![
+            SymbolInfo {
+                id: "f::a".into(),
+                label: "a".into(),
+                kind: "function".into(),
+                file: "f".into(),
+                line: 1,
+            },
+            SymbolInfo {
+                id: "f::b".into(),
+                label: "b".into(),
+                kind: "method".into(),
+                file: "f".into(),
+                line: 2,
+            },
+            SymbolInfo {
+                id: "f::c".into(),
+                label: "c".into(),
+                kind: "const".into(),
+                file: "f".into(),
+                line: 3,
+            },
+            SymbolInfo {
+                id: "f::d".into(),
+                label: "d".into(),
+                kind: "class".into(),
+                file: "f".into(),
+                line: 4,
+            },
+            SymbolInfo {
+                id: "f::e".into(),
+                label: "e".into(),
+                kind: "trait".into(),
+                file: "f".into(),
+                line: 5,
+            },
+        ];
+        let counts = count_symbols_by_kind(&syms);
+        assert_eq!(
+            counts,
+            SymbolKindCounts {
+                functions: 2,
+                variables: 1,
+                structures: 2,
+            }
         );
     }
 }

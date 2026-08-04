@@ -75,6 +75,7 @@ import { createDesignRulesPanel } from "./ui/designRulesPanel";
 import { computeDsm } from "./analysis/dsm";
 import {
   checkDesignRules,
+  collectDesignRulePackageIds,
   designRulesValidationItem,
   suggestLayersFromPartition,
   type DesignRule,
@@ -746,6 +747,7 @@ export async function startApp(): Promise<void> {
     // DSM refresh uses package-level data already on the result.
     runWhenIdle(() => {
       refreshDsmView();
+      renderDesignRulesPanel();
     }, 300);
   }
 
@@ -833,6 +835,7 @@ export async function startApp(): Promise<void> {
       app.hierarchyLoading = false;
       refreshModulesList({ loading: false });
       if (hierarchyIsHydrated(app.hierarchy)) {
+        renderDesignRulesPanel();
         // loadGraph / caller will hide overlay after layout.
       } else if (!app.renderState) {
         showOverlay(t("overlay.graphUnavailable"));
@@ -1050,12 +1053,28 @@ export async function startApp(): Promise<void> {
     );
   }
 
+  function designRulePackageIds(): string[] {
+    const hierarchy = app.hierarchy ?? app.analysisResult?.hierarchy ?? null;
+    const result = app.analysisResult;
+    return collectDesignRulePackageIds({
+      hierarchy,
+      graph: result?.graph ?? null,
+      qualityPackageKeys: result?.quality
+        ? Object.keys(result.quality.packages)
+        : [],
+      dsmElementIds: result?.dsm?.elements?.map((e) => e.id) ?? [],
+    });
+  }
+
   function renderDesignRulesPanel(): void {
     createDesignRulesPanel(designRulesContainer, app.designRules, {
-      packageIds: app.hierarchy?.packages ?? app.analysisResult?.hierarchy?.packages ?? [],
-      onChange: (rules) => {
+      packageIds: designRulePackageIds(),
+      onChange: (rules, meta) => {
         app.designRules = rules;
         persist();
+        if (meta?.refreshPanel) {
+          renderDesignRulesPanel();
+        }
         recheckDesignRulesInPlace();
       },
       onSuggestLayers: () => {

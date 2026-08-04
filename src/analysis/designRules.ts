@@ -2,6 +2,7 @@
 
 import type { HierarchyIndex } from "./types";
 import type { DesignViolation } from "./dsm";
+import type { Graph } from "../graph/types";
 
 export type DesignRule =
   | {
@@ -25,6 +26,34 @@ export function newRuleId(): string {
 
 export function defaultDesignRules(): DesignRule[] {
   return [];
+}
+
+/** Package ids for design-rule pickers (slim IPC leaves hierarchy.packages empty). */
+export function collectDesignRulePackageIds(opts: {
+  hierarchy?: HierarchyIndex | null;
+  graph?: Graph | null;
+  qualityPackageKeys?: string[];
+  dsmElementIds?: string[];
+}): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (id: string) => {
+    const v = id.trim();
+    if (!v || seen.has(v)) return;
+    seen.add(v);
+    out.push(v);
+  };
+
+  for (const p of opts.hierarchy?.packages ?? []) add(p);
+  for (const k of opts.qualityPackageKeys ?? []) add(k);
+  if (opts.graph) {
+    for (const n of opts.graph.nodes) {
+      if (n.kind === "package") add(n.path);
+    }
+  }
+  for (const id of opts.dsmElementIds ?? []) add(id);
+
+  return out.sort((a, b) => a.localeCompare(b));
 }
 
 /** Package/path prefix match: exact or `from` is a path prefix of `id`. */

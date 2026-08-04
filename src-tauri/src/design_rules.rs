@@ -140,6 +140,7 @@ mod tests {
             package_edges: vec![],
             symbols: HashMap::new(),
             symbol_edges: vec![],
+            symbol_counts: HashMap::new(),
             scope_graphs: HashMap::new(),
         }
     }

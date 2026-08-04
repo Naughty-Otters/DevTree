@@ -383,6 +383,9 @@ export const en = {
   "details.files": "Files",
   "details.line": "Line",
   "details.lines": "Lines",
+  "details.functions": "Functions",
+  "details.variables": "Variables",
+  "details.structures": "Structures",
   "details.rating": "Rating",
   "details.ratingTitle":
     "Percentile-based score vs peers in this project (100 = best relative quality)",
@@ -625,22 +628,47 @@ export const en = {
 
   // Design rules (architecture)
   "designRules.intro":
-    "LDM design rules capture intended architecture. Layers are ordered bottom→top; higher layers may depend on lower ones. Forbid rules block specific dependency directions.",
-  "designRules.addLayerStack": "Add layer stack",
-  "designRules.addForbidRule": "Add forbid rule",
-  "designRules.suggestLayers": "Suggest layers from DSM",
+    "Define your intended architecture. DevTree checks package and file imports against these rules after each analysis.",
+  "designRules.reportNote":
+    "Violations appear in Validation (Architecture Conformance) and in the DSM view. With no rules configured, conformance checks are skipped.",
+  "designRules.packagesHint":
+    "{n} packages found in the last analysis — use these exact names in rules (one package or path prefix per line or field).",
+  "designRules.packagesHintNoAnalysis":
+    "Run analysis first so package names are available for reference when editing rules.",
+  "designRules.actionsTitle": "Add a rule",
+  "designRules.addLayerStack": "Layer stack",
+  "designRules.addLayerStackHint":
+    "Ordered layers: bottom → top. Code in a higher layer may depend on lower layers, not vice versa.",
+  "designRules.addForbidRule": "Forbid dependency",
+  "designRules.addForbidRuleHint":
+    "Block imports from a source package/path to a target package/path.",
+  "designRules.suggestLayers": "Suggest from DSM",
+  "designRules.suggestLayersHint":
+    "Replace the layer stack with package order from the partitioned DSM (foundations first).",
   "designRules.suggestLayersTitle":
     "Use current partitioned DSM order (foundations → dependents)",
   "designRules.empty":
-    "No design rules — architecture conformance is skipped",
-  "designRules.enabled": "Enabled",
-  "designRules.kindLayers": "Layers",
-  "designRules.kindForbid": "Forbid",
+    "No rules yet — add a layer stack or forbid rule above, or suggest layers after analysis.",
+  "designRules.enabled": "Rule enabled",
+  "designRules.kindLayers": "Layer stack",
+  "designRules.kindForbid": "Forbid dependency",
   "designRules.remove": "Remove rule",
-  "designRules.layersLabel":
-    "Layers (bottom → top, one package per line)",
-  "designRules.fromLabel": "From (package / path prefix)",
-  "designRules.toLabel": "To (package / path prefix)",
+  "designRules.layersLabel": "Layers (bottom → top)",
+  "designRules.layersPlaceholder": "core\nservices\nui",
+  "designRules.layersHelp":
+    "Each row is one layer. First row = bottom (foundations); last row = top (dependents). Code may depend on the same or lower layers only.",
+  "designRules.selectPackage": "Select package…",
+  "designRules.searchPackages": "Filter packages…",
+  "designRules.noPackageMatch": "No matching packages",
+  "designRules.customPrefix": "Custom path prefix…",
+  "designRules.addLayerRow": "Add layer",
+  "designRules.removeLayerRow": "Remove layer",
+  "designRules.layerBottom": "Bottom",
+  "designRules.layerTop": "Top",
+  "designRules.forbidHelp":
+    "Blocks edges where the importer matches “From” and the imported module matches “To”. Prefixes match subpaths (e.g. ui matches ui/widgets).",
+  "designRules.fromLabel": "From (importer package / path prefix)",
+  "designRules.toLabel": "To (imported package / path prefix)",
   "designRules.fromPlaceholder": "e.g. ui",
   "designRules.toPlaceholder": "e.g. core",
 
