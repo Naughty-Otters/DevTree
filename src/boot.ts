@@ -132,12 +132,15 @@ import {
 import type { HierarchyIndex } from "./analysis/types";
 import type { PersistedAppState, PersistedUiState } from "./state/types";
 import {
+  appendScoreHistorySnapshot,
   loadPersistedAnalysisMeta,
   loadPersistedAnalysisQuality,
   loadPersistedUiState,
+  loadScoreHistory,
   scheduleSaveAnalysis,
   scheduleSaveUiState,
 } from "./state/store";
+import type { AnalysisScoreSnapshot } from "./analysis/scoreHistory";
 import {
   parsePercentileViewMode,
   type PercentileViewMode,
@@ -237,6 +240,9 @@ export async function startApp(): Promise<void> {
   let percentileView: PercentileViewMode = parsePercentileViewMode(
     persisted.percentileView,
   );
+  /** In-memory score history for the open project (Report charts). */
+  let scoreHistoryCache: AnalysisScoreSnapshot[] = [];
+  let scoreHistoryProject: string | null = null;
 
   const rulesState: RulesPanelState = {
     rules: [],
@@ -655,6 +661,14 @@ export async function startApp(): Promise<void> {
       onRequestShowProgress: () => {
         showProgressView();
       },
+      getScoreHistory: async () => {
+        const root = app.projectPath;
+        if (!root) return [];
+        if (scoreHistoryProject === root) return scoreHistoryCache;
+        scoreHistoryCache = await loadScoreHistory(root);
+        scoreHistoryProject = root;
+        return scoreHistoryCache;
+      },
       onRequestQualityFiles: async () => {
         if (!app.analysisResult) return null;
         const quality = await loadAnalysisQualityWithFiles(
@@ -699,6 +713,20 @@ export async function startApp(): Promise<void> {
     refreshBreadcrumbs(result.graph);
     persist();
     persistAnalysis();
+
+    if (app.projectPath) {
+      try {
+        scoreHistoryCache = await appendScoreHistorySnapshot(
+          result,
+          app.projectPath,
+          percentileView,
+        );
+        scoreHistoryProject = app.projectPath;
+        resultsPanel.refreshReport();
+      } catch (err) {
+        console.warn("Failed to append score history", err);
+      }
+    }
 
     // Hydrate the package graph in the background; Report stays front-and-center.
     try {
@@ -1993,6 +2021,8 @@ export async function startApp(): Promise<void> {
     app.hierarchy = null;
     app.graphNavigation = rootNavigation();
     app.renderState = null;
+    scoreHistoryCache = [];
+    scoreHistoryProject = null;
     app.modulesListState = {
       graphNodes: [],
       visibleIds: new Set(),

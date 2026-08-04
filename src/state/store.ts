@@ -8,6 +8,14 @@ import type {
 import type { DsmResult } from "../analysis/dsm";
 import type { Graph } from "../graph/types";
 import {
+  appendScorePoint,
+  computeScoreSnapshot,
+  parseScoreHistory,
+  type AnalysisScoreHistory,
+  type AnalysisScoreSnapshot,
+} from "../analysis/scoreHistory";
+import type { PercentileViewMode } from "../analysis/percentileView";
+import {
   defaultPersistedState,
   type PersistedAppState,
   type PersistedUiState,
@@ -61,12 +69,14 @@ function analysisKeys(projectRoot: string): {
   meta: string;
   hierarchy: string;
   quality: string;
+  scoreHistory: string;
 } {
   const id = normalizeProjectRoot(projectRoot);
   return {
     meta: `analysis-meta::${id}`,
     hierarchy: `analysis-hierarchy::${id}`,
     quality: `analysis-quality::${id}`,
+    scoreHistory: `analysis-score-history::${id}`,
   };
 }
 
@@ -479,6 +489,44 @@ export async function loadPersistedAnalysisQuality(
 
   const migrated = await migrateLegacyAnalysisToProject(root);
   return qualityIsHydrated(migrated?.quality) ? migrated!.quality! : null;
+}
+
+export async function loadScoreHistory(
+  projectRoot?: string | null,
+): Promise<AnalysisScoreSnapshot[]> {
+  const root = await resolveProjectRoot(projectRoot);
+  if (!root) return [];
+
+  const keys = analysisKeys(root);
+  const raw = parseJson<unknown>(await loadRaw(keys.scoreHistory));
+  const history = parseScoreHistory(raw, root);
+  return history?.points ?? [];
+}
+
+/**
+ * Compute and append a score snapshot for a completed analysis run.
+ * No-ops when quality metrics are missing.
+ */
+export async function appendScoreHistorySnapshot(
+  result: AnalysisResult,
+  projectRoot: string | null | undefined,
+  percentileView: PercentileViewMode | string = "all",
+): Promise<AnalysisScoreSnapshot[]> {
+  if (!projectRoot?.trim()) return [];
+  const root = normalizeProjectRoot(projectRoot);
+  const snap = computeScoreSnapshot(result, percentileView);
+  if (!snap) return loadScoreHistory(root);
+
+  const keys = analysisKeys(root);
+  const existing = await loadScoreHistory(root);
+  const points = appendScorePoint(existing, snap);
+  const payload: AnalysisScoreHistory = {
+    version: 2,
+    projectRoot: root,
+    points,
+  };
+  await saveRaw(keys.scoreHistory, JSON.stringify(payload));
+  return points;
 }
 
 export async function loadPersistedAnalysis(

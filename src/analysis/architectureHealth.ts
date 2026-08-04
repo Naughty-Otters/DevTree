@@ -782,6 +782,31 @@ export function buildArchitectureHealth(
   };
 }
 
+/** Labels for architecture quality metric ids (for chart pickers). */
+export const ARCHITECTURE_METRIC_OPTIONS: { id: string; label: string }[] =
+  FILE_METRIC_DEFS.map((d) => ({ id: d.id, label: d.label }));
+
+/**
+ * Per-metric 0–100 scores from an architecture health report
+ * (same absolute thresholds as the headline rating).
+ */
+export function architectureMetricScores(
+  report: ArchitectureHealthReport,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const def of FILE_METRIC_DEFS) {
+    const row = report.metrics.find((r) => r.id === def.id);
+    if (!row) continue;
+    out[def.id] = absoluteMetricScore(
+      metricFocusValue(row, report.percentileView),
+      def.direction,
+      def.thresholds.healthy,
+      def.thresholds.fair,
+    );
+  }
+  return out;
+}
+
 /** Lookup a precomputed rating for a module path (file or package). */
 export function ratingForPath(
   report: ArchitectureHealthReport | null | undefined,

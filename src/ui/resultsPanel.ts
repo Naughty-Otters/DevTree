@@ -24,6 +24,8 @@ import {
   formatAnalysisStatusSummary,
 } from "../analysis/statusSummary";
 import { renderAiStreamPreview } from "./aiStreamPreview";
+import { mountScoreHistorySection } from "./scoreHistoryCharts";
+import type { AnalysisScoreSnapshot } from "../analysis/scoreHistory";
 import {
   effectiveRuleStatus,
   getPipelineStages,
@@ -74,6 +76,8 @@ export interface ResultsPanelHandlers {
   onRequestShowReport?: () => void;
   /** Switch the main center view to live analysis progress. */
   onRequestShowProgress?: () => void;
+  /** Load score history for Report time-series charts. */
+  getScoreHistory?: () => Promise<AnalysisScoreSnapshot[]>;
 }
 
 export interface ResultsPanelOptions {
@@ -1049,6 +1053,23 @@ function renderAnalysisTab(
 
   root.appendChild(stats);
 
+  if (opts.asReport) {
+    const overallSection = document.createElement("section");
+    overallSection.className = "arch-health overall-health";
+    const heading = document.createElement("h3");
+    heading.className = "arch-health-heading";
+    heading.textContent = "Overall";
+    overallSection.appendChild(heading);
+    const overallChart = document.createElement("div");
+    overallSection.appendChild(overallChart);
+    mountScoreHistorySection(
+      overallChart,
+      "overall",
+      handlers.getScoreHistory,
+    );
+    root.appendChild(overallSection);
+  }
+
   const percentileView = parsePercentileViewMode(
     handlers.getPercentileView?.() ?? "all",
   );
@@ -1086,6 +1107,16 @@ function renderAnalysisTab(
           );
         },
         fileRatingsState,
+        opts.asReport
+          ? {
+              mountHistory: (host) =>
+                mountScoreHistorySection(
+                  host,
+                  "architecture",
+                  handlers.getScoreHistory,
+                ),
+            }
+          : undefined,
       ),
     );
   } else {
@@ -1096,7 +1127,22 @@ function renderAnalysisTab(
     root.appendChild(empty);
   }
 
-  root.appendChild(renderModularityHealthSection(result, handlers));
+  root.appendChild(
+    renderModularityHealthSection(
+      result,
+      handlers,
+      opts.asReport
+        ? {
+            mountHistory: (host) =>
+              mountScoreHistorySection(
+                host,
+                "modularity",
+                handlers.getScoreHistory,
+              ),
+          }
+        : undefined,
+    ),
+  );
   container.appendChild(root);
 }
 
@@ -1148,6 +1194,7 @@ function renderArchitectureHealthSection(
     filesHydrated: true,
     filesLoading: false,
   },
+  chartOpts?: { mountHistory?: (host: HTMLElement) => void },
 ): HTMLElement {
   const cachedLists: Partial<
     Record<RatingsSubtab, ArchitectureHealthReport | null>
@@ -1205,6 +1252,12 @@ function renderArchitectureHealthSection(
 
   scorecard.append(scoreEl, statusEl);
   section.appendChild(scorecard);
+
+  if (chartOpts?.mountHistory) {
+    const historyHost = document.createElement("div");
+    section.appendChild(historyHost);
+    chartOpts.mountHistory(historyHost);
+  }
 
   const meta = document.createElement("div");
   meta.className = "arch-health-meta";
@@ -1474,6 +1527,7 @@ function renderRatingGridCard(
 function renderModularityHealthSection(
   result: AnalysisResult,
   handlers: ResultsPanelHandlers,
+  chartOpts?: { mountHistory?: (host: HTMLElement) => void },
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "arch-health modularity-health";
@@ -1495,6 +1549,12 @@ function renderModularityHealthSection(
     empty.textContent =
       "No modularity health yet. Run analysis to compute Design Structure Matrix scores.";
     section.appendChild(empty);
+
+    if (chartOpts?.mountHistory) {
+      const historyHost = document.createElement("div");
+      section.appendChild(historyHost);
+      chartOpts.mountHistory(historyHost);
+    }
 
     const openBtn = document.createElement("button");
     openBtn.type = "button";
@@ -1527,6 +1587,12 @@ function renderModularityHealthSection(
 
   scorecard.append(scoreEl, statusEl);
   section.appendChild(scorecard);
+
+  if (chartOpts?.mountHistory) {
+    const historyHost = document.createElement("div");
+    section.appendChild(historyHost);
+    chartOpts.mountHistory(historyHost);
+  }
 
   const meta = document.createElement("div");
   meta.className = "arch-health-meta";
