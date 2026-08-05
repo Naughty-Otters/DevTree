@@ -273,6 +273,26 @@ async fn git_code_churn(
 }
 
 #[tauri::command]
+async fn git_corrective_commit_probability(
+    project_path: String,
+    path: String,
+    days: Option<u32>,
+) -> git_metrics::GitCcpResult {
+    let days = days.unwrap_or(90);
+    tauri::async_runtime::spawn_blocking(move || {
+        git_metrics::collect_git_ccp(std::path::Path::new(&project_path), &path, days)
+    })
+    .await
+    .unwrap_or_else(|e| git_metrics::GitCcpResult {
+        available: false,
+        days,
+        project_ccp: 0.0,
+        files: vec![],
+        message: Some(format!("git CCP task failed: {e}")),
+    })
+}
+
+#[tauri::command]
 async fn list_lsp_servers() -> Vec<LspServerStatus> {
     tauri::async_runtime::spawn_blocking(lsp::list_lsp_servers)
         .await
@@ -313,6 +333,7 @@ pub fn run() {
             write_project_file,
             compute_project_dsm,
             git_code_churn,
+            git_corrective_commit_probability,
             list_lsp_servers,
             install_lsp_server,
             list_language_linters,

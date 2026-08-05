@@ -33,6 +33,12 @@ function sampleIndex(): QualityIndex {
         duplicatedPct: 4,
         deadCodePct: 12,
         staleDecisionDensity: 2.5,
+        abcMagnitude: 12.5,
+        abcAssignments: 4,
+        abcBranches: 8,
+        abcConditions: 6,
+        cyclomaticDensity: 0.167,
+        cohesion: 80,
       },
     },
     packages: {
@@ -59,6 +65,9 @@ function sampleIndex(): QualityIndex {
         commentDensity: rollup(16.7),
         deadCode: rollup(12),
         staleDecisions: rollup(2.5),
+        abc: rollup(12.5),
+        cyclomaticDensity: rollup(0.167),
+        cohesion: rollup(80),
         size: rollup(40),
       },
     },
@@ -81,6 +90,11 @@ describe("qualityReportFromIndex", () => {
     expect(report?.metrics.find((m) => m.id === "staleDecisions")?.value).toBe(
       2.5,
     );
+    expect(report?.metrics.find((m) => m.id === "abc")?.value).toBe(12.5);
+    expect(report?.metrics.find((m) => m.id === "cyclomaticDensity")?.value).toBe(
+      0.167,
+    );
+    expect(report?.metrics.find((m) => m.id === "cohesion")?.value).toBe(80);
   });
 
   it("returns package rollups with percentiles", () => {

@@ -441,6 +441,44 @@ export async function gitCodeChurn(
   };
 }
 
+export interface GitFileCcp {
+  path: string;
+  commits: number;
+  correctiveCommits: number;
+  ccp: number;
+}
+
+export interface GitCcpResult {
+  available: boolean;
+  days: number;
+  projectCcp: number;
+  files: GitFileCcp[];
+  message?: string | null;
+}
+
+/** Corrective Commit Probability under a path for the last `days` (default 90). */
+export async function gitCorrectiveCommitProbability(
+  projectPath: string,
+  path: string,
+  days = 90,
+): Promise<GitCcpResult> {
+  if (isTauri()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<GitCcpResult>("git_corrective_commit_probability", {
+      projectPath,
+      path,
+      days,
+    });
+  }
+  return {
+    available: false,
+    days,
+    projectCcp: 0,
+    files: [],
+    message: "Git CCP requires the desktop app",
+  };
+}
+
 export async function readProjectFile(
   projectRoot: string,
   relativePath: string,

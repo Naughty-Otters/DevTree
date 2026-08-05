@@ -132,6 +132,16 @@ describe("createModuleDetailsPanel", () => {
     expect(root.textContent).toContain("AI quality");
     expect(root.textContent).toMatch(/Avgp50p80p90All/);
     expect(root.textContent).toMatch(/avg \d/);
+
+    const metric = root.querySelector<HTMLElement>(".module-details-metric");
+    expect(metric).toBeTruthy();
+    expect(metric!.querySelector(".metric-info-mark")).toBeTruthy();
+    metric!.click();
+    const popup = document.querySelector<HTMLElement>(".metric-def-popup");
+    expect(popup).toBeTruthy();
+    expect(popup!.classList.contains("hidden")).toBe(false);
+    expect(popup!.textContent).toMatch(/better|越好|cyclomatic|圈复杂度|CC\s*=/i);
+    expect(popup!.querySelector(".metric-def-link")).toBeTruthy();
   });
 
   it("shows rating and switches percentile view from quality index", () => {

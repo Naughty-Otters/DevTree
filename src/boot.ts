@@ -1779,6 +1779,9 @@ export async function startApp(): Promise<void> {
   let projectChurnCache: import("./analysis/codeQualityMetrics").ChurnMap | null =
     null;
   let projectChurnPromise: Promise<void> | null = null;
+  let projectCcpCache: import("./analysis/codeQualityMetrics").CcpMap | null =
+    null;
+  let projectCcpPromise: Promise<void> | null = null;
 
   async function ensureProjectChurnLoaded(): Promise<void> {
     if (!app.projectPath) return;
@@ -1809,6 +1812,37 @@ export async function startApp(): Promise<void> {
       }
     })();
     return projectChurnPromise;
+  }
+
+  async function ensureProjectCcpLoaded(): Promise<void> {
+    if (!app.projectPath) return;
+    if (projectCcpCache?.available) return;
+    if (projectCcpPromise) return projectCcpPromise;
+    const root = app.projectPath;
+    projectCcpPromise = (async () => {
+      try {
+        const { gitCorrectiveCommitProbability } = await import("./project/api");
+        const { ccpMapFromResult } = await import("./analysis/codeQualityMetrics");
+        const result = await gitCorrectiveCommitProbability(root, ".", 90);
+        if (app.projectPath !== root) return;
+        projectCcpCache = ccpMapFromResult(result);
+        if (moduleDetailsPanel.isOpen() && projectCcpCache) {
+          moduleDetailsPanel.updateQuality({ ccp: projectCcpCache });
+        }
+      } catch (err) {
+        console.warn("Project CCP prefetch failed", err);
+        projectCcpCache = {
+          available: false,
+          days: 90,
+          projectCcp: 0,
+          byPath: new Map(),
+          message: "Git CCP unavailable",
+        };
+      } finally {
+        projectCcpPromise = null;
+      }
+    })();
+    return projectCcpPromise;
   }
 
   function focusModuleOnGraph(nodeId: string): void {
@@ -1876,11 +1910,15 @@ export async function startApp(): Promise<void> {
       navigation: app.graphNavigation,
       analysis: app.analysisResult,
       churn: projectChurnCache,
+      ccp: projectCcpCache,
       qualityLoading: needsFileQuality,
     });
     persist();
     if (!projectChurnCache) {
       void ensureProjectChurnLoaded();
+    }
+    if (!projectCcpCache) {
+      void ensureProjectCcpLoaded();
     }
     // Lazy: pull per-file quality only when opening details (not on analysis apply).
     if (needsFileQuality && app.analysisResult) {
@@ -2102,6 +2140,8 @@ export async function startApp(): Promise<void> {
     clearQualityLoadCache();
     projectChurnCache = null;
     projectChurnPromise = null;
+    projectCcpCache = null;
+    projectCcpPromise = null;
     pendingGraphRestore = null;
 
     app.analysisResult = null;
@@ -2145,6 +2185,8 @@ export async function startApp(): Promise<void> {
       app.projectScan = scan;
       projectChurnCache = null;
       projectChurnPromise = null;
+      projectCcpCache = null;
+      projectCcpPromise = null;
 
       const displayPath = scan.root.split("/").pop() ?? scan.root;
       projectPathEl.textContent = displayPath;

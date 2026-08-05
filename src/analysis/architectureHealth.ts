@@ -84,6 +84,25 @@ const FILE_METRIC_DEFS: Array<FileMetricDef & { thresholds: AbsoluteThresholds }
     thresholds: { healthy: 10, fair: 25 },
   },
   {
+    id: "cyclomaticDensity",
+    label: "CC dens.",
+    key: "cyclomaticDensity",
+    direction: "lower-better",
+    weight: 1.1,
+    digits: 3,
+    unit: "CC/NLOC",
+    thresholds: { healthy: 0.15, fair: 0.35 },
+  },
+  {
+    id: "abc",
+    label: "ABC",
+    key: "abcMagnitude",
+    direction: "lower-better",
+    weight: 1,
+    digits: 1,
+    thresholds: { healthy: 20, fair: 60 },
+  },
+  {
     id: "halstead",
     label: "Halstead",
     key: "halsteadVolume",
@@ -116,6 +135,15 @@ const FILE_METRIC_DEFS: Array<FileMetricDef & { thresholds: AbsoluteThresholds }
     direction: "lower-better",
     weight: 1,
     thresholds: { healthy: 5, fair: 12 },
+  },
+  {
+    id: "cohesion",
+    label: "Cohesion",
+    key: "cohesion",
+    direction: "higher-better",
+    weight: 1,
+    asPercent: true,
+    thresholds: { healthy: 70, fair: 40 },
   },
   {
     id: "coverage",
@@ -248,6 +276,16 @@ interface PackageMetricDef {
 
 const PACKAGE_METRIC_DEFS: PackageMetricDef[] = [
   { id: "complexity", label: "Complexity", pick: (p) => p.complexity, direction: "lower-better", weight: 1.1 },
+  {
+    id: "cyclomaticDensity",
+    label: "CC dens.",
+    pick: (p) => p.cyclomaticDensity,
+    direction: "lower-better",
+    weight: 1.1,
+    digits: 3,
+    unit: "CC/NLOC",
+  },
+  { id: "abc", label: "ABC", pick: (p) => p.abc, direction: "lower-better", weight: 1, digits: 1 },
   { id: "halstead", label: "Halstead", pick: (p) => p.halstead, direction: "lower-better", weight: 1, unit: "V" },
   { id: "cognitive", label: "Cognitive", pick: (p) => p.cognitive, direction: "lower-better", weight: 1.1 },
   {
@@ -259,6 +297,14 @@ const PACKAGE_METRIC_DEFS: PackageMetricDef[] = [
     unit: "/100",
   },
   { id: "cbo", label: "CBO", pick: (p) => p.cbo, direction: "lower-better", weight: 1 },
+  {
+    id: "cohesion",
+    label: "Cohesion",
+    pick: (p) => p.cohesion,
+    direction: "higher-better",
+    weight: 1,
+    asPercent: true,
+  },
   {
     id: "coverage",
     label: "Coverage",

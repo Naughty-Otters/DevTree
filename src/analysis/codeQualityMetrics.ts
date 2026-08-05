@@ -42,7 +42,11 @@ export type MetricId =
   | "codeDensity"
   | "commentDensity"
   | "deadCode"
-  | "staleDecisions";
+  | "staleDecisions"
+  | "abc"
+  | "cyclomaticDensity"
+  | "cohesion"
+  | "ccp";
 
 /** Source-derived classic metrics attached after file enrichment. */
 export type FileSourceMetrics = SourceClassicMetrics;
@@ -76,6 +80,24 @@ export interface ChurnMap {
   available: boolean;
   days: number;
   byPath: Map<string, FileChurnData>;
+  message?: string;
+}
+
+/** Corrective Commit Probability (Amit & Feitelson) from git history. */
+export interface FileCcpData {
+  path: string;
+  commits: number;
+  correctiveCommits: number;
+  /** 0–100 probability (%). */
+  ccp: number;
+}
+
+export interface CcpMap {
+  available: boolean;
+  days: number;
+  /** Project-wide CCP 0–100. */
+  projectCcp: number;
+  byPath: Map<string, FileCcpData>;
   message?: string;
 }
 
@@ -854,6 +876,12 @@ export function computeQualityReport(
         ),
         depthOfInheritance: 0,
         cyclomaticComplexity: opts.keywordComplexity,
+        abc: {
+          assignments: 0,
+          branches: 0,
+          conditions: 0,
+          magnitude: 0,
+        },
       };
     }
     return {
@@ -907,6 +935,46 @@ export function churnMapFromResult(result: {
   return {
     available: result.available,
     days: result.days,
+    byPath,
+    message: result.message ?? undefined,
+  };
+}
+
+export function emptyCcpMap(days = 90, message?: string): CcpMap {
+  return {
+    available: false,
+    days,
+    projectCcp: 0,
+    byPath: new Map(),
+    message,
+  };
+}
+
+export function ccpMapFromResult(result: {
+  available: boolean;
+  days: number;
+  projectCcp: number;
+  files: Array<{
+    path: string;
+    commits: number;
+    correctiveCommits: number;
+    ccp: number;
+  }>;
+  message?: string | null;
+}): CcpMap {
+  const byPath = new Map<string, FileCcpData>();
+  for (const f of result.files) {
+    byPath.set(f.path, {
+      path: f.path,
+      commits: f.commits,
+      correctiveCommits: f.correctiveCommits,
+      ccp: f.ccp,
+    });
+  }
+  return {
+    available: result.available,
+    days: result.days,
+    projectCcp: result.projectCcp,
     byPath,
     message: result.message ?? undefined,
   };

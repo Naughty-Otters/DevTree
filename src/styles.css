@@ -1407,15 +1407,40 @@ body.is-resizing-v {
 }
 
 .module-details-metric {
-  display: grid;
-  grid-template-columns: 92px 1fr;
-  gap: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   font-size: 12px;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.module-details-metric:hover,
+.module-details-metric.is-def-open {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.module-details-metric:focus-visible {
+  outline: 1px solid var(--accent, #58a6ff);
+  outline-offset: 1px;
+}
+
+.module-details-metric-main {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 4px 8px;
 }
 
 .module-details-metric-label {
   color: var(--text-muted);
   padding-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .module-details-metric-value {
@@ -1434,6 +1459,160 @@ body.is-resizing-v {
   font-size: 10px;
   color: var(--text-muted);
   line-height: 1.35;
+}
+
+.metric-info-mark {
+  flex-shrink: 0;
+  font-size: 11px;
+  opacity: 0.55;
+  line-height: 1;
+}
+
+.metric-has-def:hover .metric-info-mark,
+.metric-has-def.is-def-open .metric-info-mark {
+  opacity: 0.95;
+}
+
+/* Floating metric definition popup */
+.metric-def-popup {
+  position: fixed;
+  z-index: 2400;
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - 16px));
+  display: flex;
+  flex-direction: column;
+  background: rgba(22, 26, 34, 0.98);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+}
+
+.metric-def-popup.hidden {
+  display: none;
+}
+
+.metric-def-popup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.metric-def-popup-title {
+  font-weight: 600;
+  color: var(--text-primary, var(--text));
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.metric-def-popup-close {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.metric-def-popup-close:hover {
+  background: rgba(128, 128, 128, 0.2);
+  color: var(--text-primary, var(--text));
+}
+
+.metric-def-popup-body {
+  padding: 10px 12px 12px;
+  overflow: auto;
+  line-height: 1.45;
+}
+
+.metric-def-summary {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: var(--text-primary, var(--text));
+}
+
+.metric-def-body {
+  margin: 0 0 10px;
+}
+
+.metric-def-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.metric-def-formula-block {
+  margin: 0 0 10px;
+}
+
+.metric-def-formula {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(128, 128, 128, 0.12);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  color: var(--text-primary, var(--text));
+  line-height: 1.4;
+}
+
+.metric-def-meta {
+  margin-bottom: 10px;
+}
+
+.metric-def-direction {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.18);
+  color: var(--text-muted);
+}
+
+.metric-def-value-row {
+  margin: 0 0 8px;
+}
+
+.metric-def-value {
+  font-weight: 600;
+  color: var(--text-primary, var(--text));
+}
+
+.metric-def-measured {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.metric-def-link {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent, #58a6ff);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.metric-def-link:hover {
+  text-decoration: underline;
 }
 
 .module-details-drill {
@@ -4601,6 +4780,16 @@ body.is-resizing-v {
   background: rgba(127, 127, 127, 0.08);
 }
 
+.health-scorecard.metric-has-def {
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.health-scorecard.metric-has-def:hover,
+.health-scorecard.metric-has-def.is-def-open {
+  box-shadow: 0 0 0 1px var(--accent, #58a6ff);
+}
+
 .health-scorecard.health-healthy {
   border-color: rgba(63, 185, 80, 0.4);
   background: rgba(63, 185, 80, 0.08);
@@ -4655,7 +4844,21 @@ body.is-resizing-v {
   border-radius: 4px;
 }
 
+.health-metric.metric-has-def {
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.health-metric.metric-has-def:hover,
+.health-metric.metric-has-def.is-def-open {
+  border-color: var(--accent, #58a6ff);
+  background: rgba(88, 166, 255, 0.06);
+}
+
 .health-metric-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--text-secondary);
   margin-bottom: 2px;

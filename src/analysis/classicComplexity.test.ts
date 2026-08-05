@@ -111,5 +111,7 @@ describe("analyzeSourceClassicMetrics", () => {
     expect(m.cognitiveComplexity).toBeGreaterThan(0);
     expect(m.maintainabilityIndex).toBeGreaterThan(0);
     expect(m.depthOfInheritance).toBeGreaterThanOrEqual(1);
+    expect(m.abc.magnitude).toBeGreaterThan(0);
+    expect(m.abc.conditions).toBeGreaterThan(0);
   });
 });

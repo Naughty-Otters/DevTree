@@ -250,6 +250,19 @@ describe("resultsPanel", () => {
     expect(container.textContent).toContain("Propagation cost");
     expect(container.textContent).toContain("Clustered cost");
     expect(container.textContent).toContain("Vertical buses");
+
+    const prop = [
+      ...container.querySelectorAll(
+        "#modularity-health-section .health-metric",
+      ),
+    ].find((el) => el.textContent?.includes("Propagation cost"));
+    expect(prop).toBeTruthy();
+    expect(prop!.querySelector(".metric-info-mark")).toBeTruthy();
+    (prop as HTMLElement).click();
+    const popup = document.querySelector<HTMLElement>(".metric-def-popup");
+    expect(popup).toBeTruthy();
+    expect(popup!.classList.contains("hidden")).toBe(false);
+    expect(popup!.textContent).toMatch(/propagation|MacCormack|N²/i);
   });
 
   it("renders the overall report in a main-view host instead of bottom Analysis tab", () => {

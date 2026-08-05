@@ -26,6 +26,10 @@ import { renderAiStreamPreview } from "./aiStreamPreview";
 import { mountScoreHistorySection } from "./scoreHistoryCharts";
 import type { AnalysisScoreSnapshot } from "../analysis/scoreHistory";
 import {
+  attachMetricDefinitionToggle,
+  metricInfoAffordance,
+} from "./metricExplain";
+import {
   effectiveRuleStatus,
   getPipelineStages,
   overallProgressMeta,
@@ -1353,11 +1357,33 @@ function renderArchitectureHealthSection(
     const unit = row.unit
       ? ` <span class="arch-health-unit">${row.unit}</span>`
       : "";
-    item.innerHTML = `
-      <div class="health-metric-label">${row.label}${percentileView !== "avg" && percentileView !== "all" ? ` · ${percentileView}` : ""}</div>
-      <div class="health-metric-value">${primary}${unit}</div>
-      ${hint ? `<div class="health-metric-hint">${hint}</div>` : ""}
-    `;
+    const labelSuffix =
+      percentileView !== "avg" && percentileView !== "all"
+        ? ` · ${percentileView}`
+        : "";
+    const labelEl = document.createElement("div");
+    labelEl.className = "health-metric-label";
+    const labelText = document.createElement("span");
+    labelText.textContent = `${row.label}${labelSuffix}`;
+    labelEl.append(labelText, metricInfoAffordance());
+
+    const valueEl = document.createElement("div");
+    valueEl.className = "health-metric-value";
+    valueEl.innerHTML = `${primary}${unit}`;
+
+    item.append(labelEl, valueEl);
+    if (hint) {
+      const hintEl = document.createElement("div");
+      hintEl.className = "health-metric-hint";
+      hintEl.textContent = hint;
+      item.appendChild(hintEl);
+    }
+    attachMetricDefinitionToggle(item, row.id, {
+      listRoot: metrics,
+      label: row.label,
+      displayValue: row.unit ? `${primary} ${row.unit}` : primary,
+      measuredDetail: row.detail,
+    });
     metrics.appendChild(item);
   }
   section.appendChild(metrics);
@@ -1680,28 +1706,38 @@ function renderModularityHealthSection(
   const metrics = document.createElement("div");
   metrics.className = "health-metrics arch-health-metrics";
 
-  const metricRows: { label: string; value: string; hint: string }[] = [
+  const metricRows: {
+    id: string;
+    label: string;
+    value: string;
+    hint: string;
+  }[] = [
     {
+      id: "cycles",
       label: t("report.metric.cycles"),
       value: String(dsm.metrics.cycleCount),
       hint: t("report.metric.cyclesHint", { n: dsm.metrics.nodesInCycles }),
     },
     {
+      id: "upperTriangle",
       label: t("report.metric.upperTriangle"),
       value: `${(dsm.metrics.upperTriangleDensity * 100).toFixed(1)}%`,
       hint: t("report.metric.upperTriangleHint"),
     },
     {
+      id: "coupling",
       label: t("report.metric.coupling"),
       value: `${(dsm.metrics.couplingDensity * 100).toFixed(1)}%`,
       hint: t("report.metric.couplingHint"),
     },
     {
+      id: "propagation",
       label: t("report.metric.propagation"),
       value: `${(dsm.metrics.propagationCost * 100).toFixed(1)}%`,
       hint: t("report.metric.propagationHint"),
     },
     {
+      id: "clustered",
       label: t("report.metric.clustered"),
       value: `${(dsm.metrics.clusteredCostNormalized * 100).toFixed(1)}%`,
       hint: t("report.metric.clusteredHint", {
@@ -1709,6 +1745,7 @@ function renderModularityHealthSection(
       }),
     },
     {
+      id: "buses",
       label: t("report.metric.buses"),
       value: String(dsm.metrics.busCount ?? dsm.busIds?.length ?? 0),
       hint: t("report.metric.busesHint"),
@@ -1718,14 +1755,42 @@ function renderModularityHealthSection(
   for (const row of metricRows) {
     const item = document.createElement("div");
     item.className = "health-metric";
-    item.innerHTML = `
-      <div class="health-metric-label">${row.label}</div>
-      <div class="health-metric-value">${row.value}</div>
-      <div class="health-metric-hint">${row.hint}</div>
-    `;
+    item.title = row.hint;
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "health-metric-label";
+    const labelText = document.createElement("span");
+    labelText.textContent = row.label;
+    labelEl.append(labelText, metricInfoAffordance());
+
+    const valueEl = document.createElement("div");
+    valueEl.className = "health-metric-value";
+    valueEl.textContent = row.value;
+
+    const hintEl = document.createElement("div");
+    hintEl.className = "health-metric-hint";
+    hintEl.textContent = row.hint;
+
+    item.append(labelEl, valueEl, hintEl);
+    attachMetricDefinitionToggle(item, row.id, {
+      listRoot: section,
+      label: row.label,
+      displayValue: row.value,
+      measuredDetail: row.hint,
+    });
     metrics.appendChild(item);
   }
   section.appendChild(metrics);
+
+  // Make the modularity scorecard clickable for the blended health formula.
+  scorecard.classList.add("metric-has-def");
+  scorecard.title = t("metric.clickForDef");
+  attachMetricDefinitionToggle(scorecard, "modularityHealth", {
+    listRoot: section,
+    label: t("scoreHistory.modularity"),
+    displayValue: `${score}/100`,
+    measuredDetail: statusEl.textContent ?? undefined,
+  });
 
   const violations = dsm.violations ?? [];
   if (violations.length > 0) {

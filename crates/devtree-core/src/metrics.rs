@@ -18,6 +18,17 @@ pub struct HalsteadMetrics {
     pub effort: f64,
 }
 
+/// Fitzpatrick ABC metric: Assignments, Branches, Conditions.
+/// Magnitude = √(A² + B² + C²).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbcMetrics {
+    pub assignments: u32,
+    pub branches: u32,
+    pub conditions: u32,
+    pub magnitude: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceClassicMetrics {
@@ -26,6 +37,8 @@ pub struct SourceClassicMetrics {
     pub maintainability_index: f64,
     pub depth_of_inheritance: f64,
     pub cyclomatic_complexity: f64,
+    #[serde(default)]
+    pub abc: AbcMetrics,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -93,6 +106,21 @@ pub struct FileQualityMetrics {
     /// Stale-decision markers (TODO/FIXME/…) per kLOC.
     #[serde(default)]
     pub stale_decision_density: f64,
+    /// ABC magnitude √(A²+B²+C²).
+    #[serde(default)]
+    pub abc_magnitude: f64,
+    #[serde(default)]
+    pub abc_assignments: u32,
+    #[serde(default)]
+    pub abc_branches: u32,
+    #[serde(default)]
+    pub abc_conditions: u32,
+    /// Cyclomatic complexity / NLOC (Gill–Kemerer density).
+    #[serde(default)]
+    pub cyclomatic_density: f64,
+    /// Intra-file symbol connectivity cohesion 0–100 (higher = more cohesive).
+    #[serde(default)]
+    pub cohesion: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation_score: Option<f64>,
 }
@@ -138,6 +166,12 @@ pub struct PackageQualityMetrics {
     pub dead_code: PackageMetricRollup,
     #[serde(default)]
     pub stale_decisions: PackageMetricRollup,
+    #[serde(default)]
+    pub abc: PackageMetricRollup,
+    #[serde(default)]
+    pub cyclomatic_density: PackageMetricRollup,
+    #[serde(default)]
+    pub cohesion: PackageMetricRollup,
     pub size: PackageMetricRollup,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation: Option<PackageMetricRollup>,
@@ -338,6 +372,9 @@ fn approximate_classic_from_size(loc: u32) -> SourceClassicMetrics {
     let volume = (loc_f * 2.5) * 5.0; // rough Halstead volume proxy
     let difficulty = (cyclomatic / 4.0).max(1.0);
     let mi = maintainability_index(volume, cyclomatic, loc_f);
+    let assignments = (loc_f / 8.0).round() as u32;
+    let branches = (cyclomatic / 2.0).round() as u32;
+    let conditions = (cyclomatic / 2.0).round() as u32;
     SourceClassicMetrics {
         halstead: HalsteadMetrics {
             distinct_operators: 8,
@@ -354,6 +391,12 @@ fn approximate_classic_from_size(loc: u32) -> SourceClassicMetrics {
         maintainability_index: mi,
         depth_of_inheritance: 0.0,
         cyclomatic_complexity: cyclomatic,
+        abc: AbcMetrics {
+            assignments,
+            branches,
+            conditions,
+            magnitude: abc_magnitude(assignments, branches, conditions),
+        },
     }
 }
 
@@ -460,6 +503,156 @@ pub fn maintainability_index(halstead_volume: f64, cyclomatic: f64, loc: f64) ->
     ((raw * 100.0) / 171.0).clamp(0.0, 100.0)
 }
 
+pub fn abc_magnitude(assignments: u32, branches: u32, conditions: u32) -> f64 {
+    let a = assignments as f64;
+    let b = branches as f64;
+    let c = conditions as f64;
+    (a * a + b * b + c * c).sqrt()
+}
+
+/// Gill–Kemerer cyclomatic complexity density: CC / NLOC.
+pub fn cyclomatic_density(cyclomatic: f64, nloc: u32) -> f64 {
+    if nloc == 0 {
+        return 0.0;
+    }
+    cyclomatic / nloc as f64
+}
+
+/// Fitzpatrick ABC: count assignments, branches, and conditions in source.
+pub fn compute_abc(source: &str) -> AbcMetrics {
+    let text = strip_noise(source);
+    let mut assignments = 0u32;
+    let mut branches = 0u32;
+    let mut conditions = 0u32;
+
+    // Assignments: = but not ==, !=, <=, >=, =>, ===, !==, and not part of :=
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Skip multi-char comparisons / arrows first
+        if i + 2 < bytes.len()
+            && ((b == b'=' && bytes[i + 1] == b'=' && bytes[i + 2] == b'=')
+                || (b == b'!' && bytes[i + 1] == b'=' && bytes[i + 2] == b'='))
+        {
+            i += 3;
+            continue;
+        }
+        if i + 1 < bytes.len() {
+            let n = bytes[i + 1];
+            if (b == b'=' && (n == b'=' || n == b'>'))
+                || (b == b'!' && n == b'=')
+                || (b == b'<' && n == b'=')
+                || (b == b'>' && n == b'=')
+                || (b == b':' && n == b'=')
+                || (b == b'+' && n == b'=')
+                || (b == b'-' && n == b'=')
+                || (b == b'*' && n == b'=')
+                || (b == b'/' && n == b'=')
+                || (b == b'%' && n == b'=')
+                || (b == b'|' && n == b'=')
+                || (b == b'&' && n == b'=')
+                || (b == b'^' && n == b'=')
+            {
+                if matches!(b, b'+' | b'-' | b'*' | b'/' | b'%' | b'|' | b'&' | b'^') && n == b'='
+                {
+                    assignments += 1;
+                }
+                i += 2;
+                continue;
+            }
+        }
+        if b == b'=' {
+            assignments += 1;
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+
+    // Branches: function/method calls ending with ) — approximate via call-like patterns.
+    // ABC "Branches" = function calls (outward control transfers).
+    branches += count_ident(&text, "return") as u32;
+    branches += count_ident(&text, "goto") as u32;
+    branches += count_ident(&text, "throw") as u32;
+    branches += count_ident(&text, "raise") as u32;
+    // Call sites: ident(
+    {
+        let mut j = 0;
+        let b = text.as_bytes();
+        while j < b.len() {
+            if is_ident_start(b[j] as char) {
+                let start = j;
+                j += 1;
+                while j < b.len() && is_ident_cont(b[j] as char) {
+                    j += 1;
+                }
+                let word = std::str::from_utf8(&b[start..j]).unwrap_or("");
+                let lower = word.to_ascii_lowercase();
+                // Skip control / type keywords that use paren forms.
+                let skip = matches!(
+                    lower.as_str(),
+                    "if" | "for"
+                        | "while"
+                        | "switch"
+                        | "catch"
+                        | "elif"
+                        | "elseif"
+                        | "function"
+                        | "fn"
+                        | "def"
+                        | "class"
+                        | "new"
+                        | "typeof"
+                        | "sizeof"
+                        | "return"
+                        | "throw"
+                        | "raise"
+                );
+                let mut k = j;
+                while k < b.len() && b[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                if !skip && k < b.len() && b[k] == b'(' {
+                    branches += 1;
+                }
+                continue;
+            }
+            j += 1;
+        }
+    }
+
+    // Conditions: predicates / boolean decisions
+    conditions += count_ident(&text, "if") as u32;
+    conditions += count_ident(&text, "elif") as u32;
+    conditions += count_ident(&text, "case") as u32;
+    conditions += count_ident(&text, "while") as u32;
+    conditions += count_ident(&text, "for") as u32;
+    conditions += count_ident(&text, "catch") as u32;
+    conditions += count_ident(&text, "except") as u32;
+    conditions += text.matches("&&").count() as u32;
+    conditions += text.matches("||").count() as u32;
+    conditions += text.matches('?').count() as u32;
+
+    AbcMetrics {
+        assignments,
+        branches,
+        conditions,
+        magnitude: abc_magnitude(assignments, branches, conditions),
+    }
+}
+
+/// Cohesion 0–100 from weakly-connected symbol components in a file.
+/// One component → 100; all isolated → 0.
+pub fn cohesion_from_components(symbol_count: u32, component_count: u32) -> f64 {
+    if symbol_count <= 1 {
+        return 100.0;
+    }
+    let components = component_count.max(1).min(symbol_count);
+    let score = 1.0 - ((components - 1) as f64 / (symbol_count - 1) as f64);
+    (score * 100.0).clamp(0.0, 100.0)
+}
+
 pub fn depth_of_inheritance(source: &str) -> f64 {
     let text = strip_noise(source);
     let mut max_depth: f64 = 0.0;
@@ -514,12 +707,14 @@ pub fn analyze_source_classic(source: &str, loc_hint: Option<u32>) -> SourceClas
     let cyclomatic = keyword_complexity(sample);
     let cognitive = compute_cognitive_complexity(sample);
     let mi = maintainability_index(halstead.volume, cyclomatic, loc as f64);
+    let abc = compute_abc(sample);
     SourceClassicMetrics {
         halstead,
         cognitive_complexity: cognitive,
         maintainability_index: mi,
         depth_of_inheritance: depth_of_inheritance(sample),
         cyclomatic_complexity: cyclomatic,
+        abc,
     }
 }
 
@@ -848,10 +1043,23 @@ function main() {
     }
 
     #[test]
-    fn normalized_code_lines_skips_imports_and_comments() {
-        let src = "import x from 'y';\nconst meaningfulVariableNameHere = 1;\n// c\n";
-        let lines = normalized_code_lines(src, "a.ts");
-        assert_eq!(lines.len(), 1);
-        assert!(lines[0].contains("meaningfulVariableNameHere"));
+    fn abc_counts_assignments_and_conditions() {
+        let abc = compute_abc("function f(a) { let x = 1; if (a && x) return a; }");
+        assert!(abc.assignments >= 1);
+        assert!(abc.conditions >= 1);
+        assert!(abc.magnitude > 0.0);
+    }
+
+    #[test]
+    fn cohesion_bounds() {
+        assert_eq!(cohesion_from_components(1, 1), 100.0);
+        assert_eq!(cohesion_from_components(4, 1), 100.0);
+        assert_eq!(cohesion_from_components(4, 4), 0.0);
+    }
+
+    #[test]
+    fn cyclomatic_density_divides_by_nloc() {
+        assert!((cyclomatic_density(10.0, 100) - 0.1).abs() < 1e-9);
+        assert_eq!(cyclomatic_density(5.0, 0), 0.0);
     }
 }

@@ -8,7 +8,7 @@ import type {
   PackageQualityMetrics,
   QualityIndex,
 } from "./types";
-import type { ChurnMap, MetricScore, QualityReport } from "./codeQualityMetrics";
+import type { CcpMap, ChurnMap, MetricScore, QualityReport } from "./codeQualityMetrics";
 import { packageSizeHealth, type SizeHealth } from "./moduleStats";
 
 function formatNum(n: number, digits = 0): string {
@@ -80,6 +80,69 @@ function churnLines(churn: ChurnMap | null | undefined, path: string): number | 
   return row.linesAdded + row.linesDeleted;
 }
 
+function ccpForPath(ccp: CcpMap | null | undefined, path: string): number | null {
+  if (!ccp?.available) return null;
+  const row = ccp.byPath.get(path);
+  if (!row || row.commits === 0) return ccp.projectCcp;
+  return row.ccp;
+}
+
+function packageCcpMetric(
+  pkg: PackageQualityMetrics,
+  quality: QualityIndex,
+  ccp: CcpMap | null | undefined,
+): MetricScore {
+  if (!ccp?.available) {
+    return {
+      id: "ccp",
+      label: "CCP",
+      value: null,
+      display: ccp?.message ? "n/a" : "…",
+      direction: "lower-better",
+      health: "unknown",
+      detail: ccp?.message ?? "Loading corrective commit probability…",
+    };
+  }
+
+  const perFile: number[] = [];
+  for (const file of Object.values(quality.files)) {
+    if ((file.package || "") === pkg.path) {
+      const row = ccp.byPath.get(file.path);
+      if (row && row.commits > 0) perFile.push(row.ccp);
+    }
+  }
+
+  if (perFile.length === 0) {
+    return {
+      id: "ccp",
+      label: "CCP",
+      value: ccp.projectCcp,
+      display: `${formatNum(ccp.projectCcp, 1)}%`,
+      direction: "lower-better",
+      health: healthLower(ccp.projectCcp, 15, 35),
+      detail: `Project corrective commit probability · last ${ccp.days}d`,
+    };
+  }
+
+  const avg = perFile.reduce((a, b) => a + b, 0) / perFile.length;
+  const sorted = [...perFile].sort((a, b) => a - b);
+  const pct = (p: number) => {
+    const rank = Math.ceil((p / 100) * sorted.length) - 1;
+    return sorted[Math.max(0, Math.min(sorted.length - 1, rank))]!;
+  };
+  const percentiles = { p50: pct(50), p80: pct(80), p90: pct(90) };
+  return {
+    id: "ccp",
+    label: "CCP",
+    value: avg,
+    display: `${formatNum(avg, 1)}%`,
+    direction: "lower-better",
+    health: healthLower(percentiles.p90, 15, 35),
+    detail: `Avg corrective commit probability · p50/p80/p90 ${formatPercentiles(percentiles, 1)}`,
+    percentiles,
+  };
+}
+
 function packageChurnMetric(
   pkg: PackageQualityMetrics,
   quality: QualityIndex,
@@ -140,8 +203,10 @@ function packageChurnMetric(
 function fileMetricsFromBlob(
   file: FileQualityMetrics,
   churn: ChurnMap | null | undefined,
+  ccp?: CcpMap | null,
 ): MetricScore[] {
   const churnValue = churnLines(churn, file.path);
+  const ccpValue = ccpForPath(ccp, file.path);
   return [
     {
       id: "complexity",
@@ -151,6 +216,25 @@ function fileMetricsFromBlob(
       direction: "lower-better",
       health: healthLower(file.cyclomatic, 10, 25),
       detail: "Precomputed cyclomatic complexity",
+    },
+    {
+      id: "cyclomaticDensity",
+      label: "CC dens.",
+      value: file.cyclomaticDensity ?? 0,
+      display: formatNum(file.cyclomaticDensity ?? 0, 3),
+      unit: "CC/NLOC",
+      direction: "lower-better",
+      health: healthLower(file.cyclomaticDensity ?? 0, 0.15, 0.35),
+      detail: "Cyclomatic complexity density (CC / NLOC)",
+    },
+    {
+      id: "abc",
+      label: "ABC",
+      value: file.abcMagnitude ?? 0,
+      display: formatNum(file.abcMagnitude ?? 0, 1),
+      direction: "lower-better",
+      health: healthLower(file.abcMagnitude ?? 0, 20, 60),
+      detail: `ABC ⟨${formatNum(file.abcAssignments ?? 0)}, ${formatNum(file.abcBranches ?? 0)}, ${formatNum(file.abcConditions ?? 0)}⟩ magnitude`,
     },
     {
       id: "halstead",
@@ -200,6 +284,15 @@ function fileMetricsFromBlob(
       detail: "Precomputed Coupling Between Objects",
     },
     {
+      id: "cohesion",
+      label: "Cohesion",
+      value: file.cohesion ?? 100,
+      display: `${formatNum(file.cohesion ?? 100, 0)}%`,
+      direction: "higher-better",
+      health: healthHigher(file.cohesion ?? 100, 70, 40),
+      detail: "Intra-file symbol connectivity (higher = more cohesive)",
+    },
+    {
       id: "churn",
       label: "Churn",
       value: churnValue,
@@ -209,6 +302,23 @@ function fileMetricsFromBlob(
       direction: "lower-better",
       health: churnValue == null ? "unknown" : healthLower(churnValue, 100, 400),
       detail: "Git churn from project-wide cache",
+    },
+    {
+      id: "ccp",
+      label: "CCP",
+      value: ccpValue,
+      display:
+        ccpValue == null
+          ? ccp?.message
+            ? "n/a"
+            : "…"
+          : `${formatNum(ccpValue, 1)}%`,
+      direction: "lower-better",
+      health: ccpValue == null ? "unknown" : healthLower(ccpValue, 15, 35),
+      detail:
+        ccpValue == null
+          ? (ccp?.message ?? "Corrective Commit Probability from git history")
+          : `Share of commits touching this file that look corrective · last ${ccp?.days ?? 90}d`,
     },
     {
       id: "coverage",
@@ -290,7 +400,7 @@ function fileMetricsFromBlob(
       unit: "/kLOC",
       direction: "lower-better",
       health: healthLower(file.issueDensity, 2, 10),
-      detail: "Precomputed issue density",
+      detail: "Precomputed issue density (bugs/defects proxy per kLOC)",
     },
     {
       id: "aiQuality",
@@ -357,6 +467,7 @@ function packageMetricsFromBlob(
   pkg: PackageQualityMetrics,
   quality: QualityIndex,
   churn: ChurnMap | null | undefined,
+  ccp?: CcpMap | null,
 ): MetricScore[] {
   return [
     fromRollup("complexity", "Complexity", pkg.complexity, "lower-better", {
@@ -364,6 +475,45 @@ function packageMetricsFromBlob(
       healthy: 10,
       fair: 25,
     }),
+    pkg.cyclomaticDensity
+      ? fromRollup(
+          "cyclomaticDensity",
+          "CC dens.",
+          pkg.cyclomaticDensity,
+          "lower-better",
+          {
+            unit: "CC/NLOC",
+            detail: "Avg cyclomatic complexity density",
+            healthy: 0.15,
+            fair: 0.35,
+            digits: 3,
+          },
+        )
+      : {
+          id: "cyclomaticDensity",
+          label: "CC dens.",
+          value: null,
+          display: "n/a",
+          direction: "lower-better",
+          health: "unknown",
+          detail: "Re-run analysis for cyclomatic density",
+        },
+    pkg.abc
+      ? fromRollup("abc", "ABC", pkg.abc, "lower-better", {
+          detail: "Avg ABC magnitude √(A²+B²+C²)",
+          healthy: 20,
+          fair: 60,
+          digits: 1,
+        })
+      : {
+          id: "abc",
+          label: "ABC",
+          value: null,
+          display: "n/a",
+          direction: "lower-better",
+          health: "unknown",
+          detail: "Re-run analysis for ABC metric",
+        },
     fromRollup("halstead", "Halstead", pkg.halstead, "lower-better", {
       unit: "V",
       detail: "Precomputed avg Halstead volume",
@@ -395,7 +545,24 @@ function packageMetricsFromBlob(
       healthy: 5,
       fair: 12,
     }),
+    pkg.cohesion
+      ? fromRollup("cohesion", "Cohesion", pkg.cohesion, "higher-better", {
+          detail: "Avg intra-file symbol cohesion",
+          healthy: 70,
+          fair: 40,
+          asPercent: true,
+        })
+      : {
+          id: "cohesion",
+          label: "Cohesion",
+          value: null,
+          display: "n/a",
+          direction: "higher-better",
+          health: "unknown",
+          detail: "Re-run analysis for cohesion",
+        },
     packageChurnMetric(pkg, quality, churn),
+    packageCcpMetric(pkg, quality, ccp),
     fromRollup("coverage", "Coverage", pkg.coverage, "higher-better", {
       detail: "Precomputed test-file presence rate",
       healthy: 80,
@@ -490,7 +657,7 @@ function packageMetricsFromBlob(
         },
     fromRollup("issues", "Issues", pkg.issues, "lower-better", {
       unit: "/kLOC",
-      detail: "Precomputed issue density",
+      detail: "Precomputed issue density (bugs/defects proxy)",
       healthy: 2,
       fair: 10,
       digits: 1,
@@ -583,6 +750,7 @@ export function qualityReportFromIndex(
   quality: QualityIndex | null | undefined,
   node: { kind?: string; path: string },
   churn?: ChurnMap | null,
+  ccp?: CcpMap | null,
 ): QualityReport | null {
   if (!quality) return null;
   const kind = node.kind || "";
@@ -594,7 +762,7 @@ export function qualityReportFromIndex(
       kind: "package",
       path: node.path,
       fileCount: pkg.fileCount,
-      metrics: packageMetricsFromBlob(pkg, quality, churn),
+      metrics: packageMetricsFromBlob(pkg, quality, churn, ccp),
     };
   }
 
@@ -605,7 +773,7 @@ export function qualityReportFromIndex(
       kind: "file",
       path: node.path,
       fileCount: 1,
-      metrics: fileMetricsFromBlob(file, churn),
+      metrics: fileMetricsFromBlob(file, churn, ccp),
     };
   }
 

@@ -366,10 +366,20 @@ export const zhCN: MessageCatalog = {
   "details.qualityLoadingDetail": "正在从分析缓存获取各文件评分。",
   "details.qualityEmpty": "运行分析以计算质量指标",
   "details.qualityNotePackage":
-    "包级数值遵循所选视图（平均值或百分位）。",
+    "包级数值遵循所选视图（平均值或百分位）。点击指标可查看定义。",
   "details.qualityNoteFile":
-    "覆盖率基于测试文件是否存在；复杂度基于结构（或已加载时的关键字）。",
+    "覆盖率基于测试文件是否存在；复杂度基于结构（或已加载时的关键字）。点击指标可查看定义。",
   "details.percentileView": "百分位视图",
+
+  // Metric definition chrome
+  "metric.clickForDef": "点击查看定义",
+  "metric.learnMore": "了解更多",
+  "metric.howMeasured": "该值如何测得",
+  "metric.formula": "计算公式",
+  "metric.currentValue": "当前值",
+  "metric.direction.lower": "越低越好",
+  "metric.direction.higher": "越高越好",
+
   "details.openAtLine": "打开到行",
   "details.openFile": "打开文件",
   "details.openSymbols": "在图谱中打开符号",

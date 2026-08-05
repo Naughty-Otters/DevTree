@@ -399,10 +399,20 @@ export const en = {
     "Fetching per-file scores from the analysis cache.",
   "details.qualityEmpty": "Run analysis to compute quality metrics",
   "details.qualityNotePackage":
-    "Package values follow the selected view (avg or percentile).",
+    "Package values follow the selected view (avg or percentile). Click a metric for its definition.",
   "details.qualityNoteFile":
-    "Coverage is test-file presence; complexity uses structure (or keywords when loaded).",
+    "Coverage is test-file presence; complexity uses structure (or keywords when loaded). Click a metric for its definition.",
   "details.percentileView": "Percentile view",
+
+  // Metric definition chrome
+  "metric.clickForDef": "Click for definition",
+  "metric.learnMore": "Learn more",
+  "metric.howMeasured": "How this value was measured",
+  "metric.formula": "How it's calculated",
+  "metric.currentValue": "Current value",
+  "metric.direction.lower": "Lower is better",
+  "metric.direction.higher": "Higher is better",
+
   "details.openAtLine": "Open at line",
   "details.openFile": "Open file",
   "details.openSymbols": "Open symbols on graph",

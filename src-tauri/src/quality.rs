@@ -3,8 +3,8 @@
 use crate::analysis::ValidationItem;
 use crate::hierarchy::{HierarchyIndex, SymbolInfo};
 use devtree_core::metrics::{
-    analyze_loc_breakdown, analyze_source_classic, density_per_kloc,
-    for_each_normalized_code_line, has_companion_test, line_fingerprint, rollup,
+    analyze_loc_breakdown, analyze_source_classic, cohesion_from_components, cyclomatic_density,
+    density_per_kloc, for_each_normalized_code_line, has_companion_test, line_fingerprint, rollup,
     structural_complexity, FileQualityMetrics, PackageQualityMetrics, QualityIndex,
 };
 use rayon::prelude::*;
@@ -117,14 +117,20 @@ fn symbol_file_map(symbols: &HashMap<String, Vec<SymbolInfo>>) -> HashMap<&str, 
     map
 }
 
-/// Internal-call counts + CBO unique-neighbor counts (borrowed keys, no path clones).
+/// Internal-call counts + CBO unique-neighbor counts + per-file symbol component counts.
 fn precompute_edge_stats<'a>(
     hierarchy: &'a HierarchyIndex,
     symbol_file: &HashMap<&str, &'a str>,
-) -> (HashMap<&'a str, u32>, HashMap<&'a str, u32>) {
+) -> (
+    HashMap<&'a str, u32>,
+    HashMap<&'a str, u32>,
+    HashMap<&'a str, u32>,
+) {
     let mut internal_calls: HashMap<&str, u32> = HashMap::new();
     // path → unique neighbors (as interned indices into a small side table)
     let mut neighbor_sets: HashMap<&str, HashSet<&str>> = HashMap::new();
+    // path → undirected symbol adjacency for cohesion
+    let mut local_adj: HashMap<&str, HashMap<&str, HashSet<&str>>> = HashMap::new();
 
     for (path, imports) in &hierarchy.file_imports {
         let entry = neighbor_sets.entry(path.as_str()).or_default();
@@ -144,6 +150,13 @@ fn precompute_edge_stats<'a>(
         };
         if sf == tf {
             *internal_calls.entry(sf).or_insert(0) += 1;
+            let adj = local_adj.entry(sf).or_default();
+            adj.entry(edge.source.as_str())
+                .or_default()
+                .insert(edge.target.as_str());
+            adj.entry(edge.target.as_str())
+                .or_default()
+                .insert(edge.source.as_str());
         } else {
             neighbor_sets.entry(sf).or_default().insert(tf);
             neighbor_sets.entry(tf).or_default().insert(sf);
@@ -155,7 +168,31 @@ fn precompute_edge_stats<'a>(
         .map(|(path, set)| (path, set.len() as u32))
         .collect();
 
-    (internal_calls, cbo_counts)
+    let mut component_counts: HashMap<&str, u32> = HashMap::new();
+    for (path, symbols) in &hierarchy.symbols {
+        let adj = local_adj.get(path.as_str());
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut components = 0u32;
+        for s in symbols {
+            if !seen.insert(s.id.as_str()) {
+                continue;
+            }
+            components += 1;
+            let mut stack = vec![s.id.as_str()];
+            while let Some(cur) = stack.pop() {
+                if let Some(neighbors) = adj.and_then(|a| a.get(cur)) {
+                    for &n in neighbors {
+                        if seen.insert(n) {
+                            stack.push(n);
+                        }
+                    }
+                }
+            }
+        }
+        component_counts.insert(path.as_str(), components.max(symbols.len().min(1) as u32));
+    }
+
+    (internal_calls, cbo_counts, component_counts)
 }
 
 /// One pass over symbol edges → set of referenced symbol ids.
@@ -244,7 +281,8 @@ where
     let issues = build_issue_index(validation);
     let all_paths: HashSet<&str> = hierarchy.files.iter().map(|f| f.path.as_str()).collect();
     let symbol_file = symbol_file_map(&hierarchy.symbols);
-    let (internal_calls, cbo_counts) = precompute_edge_stats(hierarchy, &symbol_file);
+    let (internal_calls, cbo_counts, component_counts) =
+        precompute_edge_stats(hierarchy, &symbol_file);
     let referenced_symbols = precompute_referenced_symbols(hierarchy);
     let by_package = index_files_by_package(hierarchy);
 
@@ -305,6 +343,11 @@ where
                 let fps = collect_line_fingerprints(source, path);
                 let dead_pct =
                     dead_code_pct(symbols.map(|s| s.as_slice()).unwrap_or(&[]), &referenced_symbols);
+                let components = component_counts
+                    .get(path)
+                    .copied()
+                    .unwrap_or(symbol_count.max(1));
+                let cohesion = cohesion_from_components(symbol_count, components);
 
                 let metrics = FileQualityMetrics {
                     path: file.path.clone(),
@@ -337,6 +380,12 @@ where
                         loc_info.stale_markers as f64,
                         loc.max(1),
                     ),
+                    abc_magnitude: classic.abc.magnitude,
+                    abc_assignments: classic.abc.assignments,
+                    abc_branches: classic.abc.branches,
+                    abc_conditions: classic.abc.conditions,
+                    cyclomatic_density: cyclomatic_density(classic.cyclomatic_complexity, nloc),
+                    cohesion,
                     documentation_score,
                 };
 
@@ -408,6 +457,9 @@ where
         let comment_density: Vec<f64> = members.iter().map(|m| m.comment_density).collect();
         let dead_code: Vec<f64> = members.iter().map(|m| m.dead_code_pct).collect();
         let stale: Vec<f64> = members.iter().map(|m| m.stale_decision_density).collect();
+        let abc: Vec<f64> = members.iter().map(|m| m.abc_magnitude).collect();
+        let cc_density: Vec<f64> = members.iter().map(|m| m.cyclomatic_density).collect();
+        let cohesion: Vec<f64> = members.iter().map(|m| m.cohesion).collect();
         let size: Vec<f64> = members.iter().map(|m| m.loc as f64).collect();
         let docs: Vec<f64> = members
             .iter()
@@ -442,6 +494,9 @@ where
                 comment_density: rollup(&comment_density),
                 dead_code: rollup(&dead_code),
                 stale_decisions: rollup(&stale),
+                abc: rollup(&abc),
+                cyclomatic_density: rollup(&cc_density),
+                cohesion: rollup(&cohesion),
                 size: rollup(&size),
                 documentation: if docs.is_empty() {
                     None
@@ -581,9 +636,13 @@ mod tests {
         assert!(a.security_density > 0.0);
         assert!(a.nloc > 0);
         assert!(a.code_density > 0.0);
+        assert!(a.abc_magnitude > 0.0);
+        assert!(a.cyclomatic_density > 0.0);
+        assert!(a.cohesion >= 0.0);
         let pkg = index.packages.get("src").expect("src package");
         assert!(pkg.total_nloc > 0);
         assert!(pkg.code_density.avg > 0.0);
+        assert!(pkg.abc.avg >= 0.0);
         assert_eq!(last.1, 3);
         assert_eq!(last.0, 3);
     }

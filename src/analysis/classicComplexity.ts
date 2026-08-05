@@ -24,6 +24,15 @@ export interface HalsteadMetrics {
   effort: number;
 }
 
+/** Fitzpatrick ABC: Assignments, Branches, Conditions. */
+export interface AbcMetrics {
+  assignments: number;
+  branches: number;
+  conditions: number;
+  /** √(A² + B² + C²) */
+  magnitude: number;
+}
+
 export interface SourceClassicMetrics {
   halstead: HalsteadMetrics;
   /** Sonar-style cognitive complexity (simplified). */
@@ -34,6 +43,7 @@ export interface SourceClassicMetrics {
   depthOfInheritance: number;
   /** Keyword cyclomatic estimate (decision points + 1). */
   cyclomaticComplexity: number;
+  abc: AbcMetrics;
 }
 
 const OPERATOR_KEYWORDS = new Set([
@@ -227,6 +237,62 @@ export function maintainabilityIndex(
   return Math.max(0, Math.min(100, normalized));
 }
 
+export function abcMagnitude(
+  assignments: number,
+  branches: number,
+  conditions: number,
+): number {
+  return Math.sqrt(
+    assignments * assignments + branches * branches + conditions * conditions,
+  );
+}
+
+/** Fitzpatrick ABC metric from source heuristics. */
+export function computeAbc(source: string): AbcMetrics {
+  const text = stripNoise(source);
+  let assignments = 0;
+  let branches = 0;
+  let conditions = 0;
+
+  // Assignments: '=' not part of ==, ===, !=, !==, <=, >=, =>, :=
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    const prev = i > 0 ? text[i - 1]! : "";
+    const next = i + 1 < text.length ? text[i + 1]! : "";
+    if (
+      (c === "+" || c === "-" || c === "*" || c === "/" || c === "%" ||
+        c === "|" || c === "&" || c === "^") &&
+      next === "="
+    ) {
+      assignments += 1;
+      i += 1;
+      continue;
+    }
+    if (c === "=" && next !== "=" && next !== ">" && prev !== "=" && prev !== "!" &&
+      prev !== "<" && prev !== ">" && prev !== ":") {
+      assignments += 1;
+    }
+  }
+
+  // Branches ≈ calls + return/throw
+  branches += (text.match(/\b(return|goto|throw|raise)\b/g) ?? []).length;
+  const callRe =
+    /\b(?!(?:if|for|while|switch|catch|elif|elseif|function|fn|def|class|new|typeof|sizeof|return|throw|raise)\b)[A-Za-z_$][\w$]*\s*\(/g;
+  branches += (text.match(callRe) ?? []).length;
+
+  conditions += (
+    text.match(/\b(if|elif|case|while|for|catch|except)\b/g) ?? []
+  ).length;
+  conditions += (text.match(/&&|\|\||\?/g) ?? []).length;
+
+  return {
+    assignments,
+    branches,
+    conditions,
+    magnitude: abcMagnitude(assignments, branches, conditions),
+  };
+}
+
 /**
  * Depth of Inheritance — max local inheritance depth in the file.
  * Counts `extends` / Python bases / Java `extends` chains declared here (not cross-file).
@@ -297,6 +363,7 @@ export function analyzeSourceClassicMetrics(
     maintainabilityIndex: mi,
     depthOfInheritance: depthOfInheritance(source),
     cyclomaticComplexity,
+    abc: computeAbc(source),
   };
 }
 

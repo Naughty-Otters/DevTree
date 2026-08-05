@@ -184,6 +184,15 @@ export interface FileQualityMetrics {
   deadCodePct?: number;
   /** TODO/FIXME/HACK-style markers per kLOC. */
   staleDecisionDensity?: number;
+  /** ABC magnitude √(A²+B²+C²). */
+  abcMagnitude?: number;
+  abcAssignments?: number;
+  abcBranches?: number;
+  abcConditions?: number;
+  /** Cyclomatic complexity / NLOC. */
+  cyclomaticDensity?: number;
+  /** Intra-file symbol connectivity cohesion 0–100. */
+  cohesion?: number;
   documentationScore?: number | null;
 }
 
@@ -210,6 +219,9 @@ export interface PackageQualityMetrics {
   commentDensity?: PackageMetricRollup;
   deadCode?: PackageMetricRollup;
   staleDecisions?: PackageMetricRollup;
+  abc?: PackageMetricRollup;
+  cyclomaticDensity?: PackageMetricRollup;
+  cohesion?: PackageMetricRollup;
   size: PackageMetricRollup;
   documentation?: PackageMetricRollup | null;
 }

@@ -1,6 +1,7 @@
 import {
   computeQualityReport,
   healthLabel,
+  type CcpMap,
   type ChurnMap,
   type MetricScore,
   type QualityReport,
@@ -33,6 +34,10 @@ import { openableSourceForNode } from "../graph/openSource";
 import type { GraphEdge, GraphNode } from "../graph/types";
 import { t } from "../i18n";
 import { lucideIcon } from "./icons";
+import {
+  attachMetricDefinitionToggle,
+  metricInfoAffordance,
+} from "./metricExplain";
 import { relatedModules } from "./graphPopup";
 import { createLoadingPlaceholder } from "./loadingPlaceholder";
 import { appendPagedItems } from "./pagedList";
@@ -57,6 +62,7 @@ export interface ModuleDetailsData {
   navigation: GraphNavigation;
   analysis?: AnalysisResult | null;
   churn?: ChurnMap | null;
+  ccp?: CcpMap | null;
   /** Per-file quality is still loading from cache. */
   qualityLoading?: boolean;
 }
@@ -66,6 +72,7 @@ export interface ModuleDetailsPanelApi {
   /** Patch churn / quality-loading from the project-wide cache. */
   updateQuality: (patch: {
     churn?: ChurnMap | null;
+    ccp?: CcpMap | null;
     qualityLoading?: boolean;
   }) => void;
   hide: () => void;
@@ -154,6 +161,7 @@ function renderMetricRow(
   metric: MetricScore,
   isPackage: boolean,
   percentileView: PercentileViewMode,
+  listRoot: HTMLElement,
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = "module-details-metric";
@@ -168,7 +176,9 @@ function renderMetricRow(
     percentileView !== "all"
       ? ` · ${percentileView}`
       : "";
-  label.textContent = `${metric.label}${viewSuffix}`;
+  const labelText = document.createElement("span");
+  labelText.textContent = `${metric.label}${viewSuffix}`;
+  label.append(labelText, metricInfoAffordance());
 
   const value = document.createElement("div");
   value.className = "module-details-metric-value";
@@ -190,7 +200,10 @@ function renderMetricRow(
   }
 
   value.innerHTML = `${escapeHtml(primary)}${unit} ${healthBadgeHtml(metric.health)}`;
-  row.append(label, value);
+
+  const main = document.createElement("div");
+  main.className = "module-details-metric-main";
+  main.append(label, value);
 
   if (isPackage && metric.percentiles && metric.value != null) {
     const pct = document.createElement("div");
@@ -208,11 +221,21 @@ function renderMetricRow(
         percentileView,
         digits,
       );
-      if (!hint) return row;
-      pct.textContent = hint;
+      if (hint) pct.textContent = hint;
     }
-    row.appendChild(pct);
+    if (pct.textContent) main.appendChild(pct);
   }
+
+  row.appendChild(main);
+  const displayWithUnit = metric.unit
+    ? `${primary} ${metric.unit}`
+    : primary;
+  attachMetricDefinitionToggle(row, metric.id, {
+    listRoot,
+    label: metric.label,
+    displayValue: displayWithUnit,
+    measuredDetail: metric.detail,
+  });
 
   return row;
 }
@@ -288,7 +311,7 @@ function renderQualitySection(
   list.className = "module-details-metrics";
   for (const metric of report.metrics) {
     list.appendChild(
-      renderMetricRow(metric, report.kind === "package", percentileView),
+      renderMetricRow(metric, report.kind === "package", percentileView, list),
     );
   }
   section.appendChild(list);
@@ -405,6 +428,7 @@ export function createModuleDetailsPanel(
       data.analysis?.quality,
       data.node,
       data.churn ?? null,
+      data.ccp ?? null,
     );
     if (fromIndex) return fromIndex;
     return computeQualityReport(
@@ -646,12 +670,14 @@ export function createModuleDetailsPanel(
 
   function updateQuality(patch: {
     churn?: ChurnMap | null;
+    ccp?: CcpMap | null;
     qualityLoading?: boolean;
   }): void {
     if (!lastData || !open) return;
     lastData = {
       ...lastData,
       churn: patch.churn !== undefined ? patch.churn : lastData.churn,
+      ccp: patch.ccp !== undefined ? patch.ccp : lastData.ccp,
       qualityLoading:
         patch.qualityLoading !== undefined
           ? patch.qualityLoading
