@@ -8,9 +8,14 @@ use crate::{Graph, Point, PositionedNode};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-/// Target spread radius for the final layout (world units).
-const TARGET_SPREAD: f32 = 320.0;
-const MIN_NODE_DISTANCE: f32 = 42.0;
+/// Minimum final spread for small graphs (world units).
+const TARGET_SPREAD_MIN: f32 = 320.0;
+/// Minimum center-to-center distance after layout (covers max rendered radius ~13 + padding).
+const MIN_NODE_DISTANCE: f32 = 44.0;
+/// Packing factor for adaptive spread: √n · MIN_NODE_DISTANCE · factor.
+const SPREAD_PACK_FACTOR: f32 = 1.4;
+/// Overlap-resolution iterations (scales up for denser graphs).
+const SEPARATE_ITERS_BASE: usize = 100;
 /// d3-force default cooling: ~300 ticks until alpha < alphaMin.
 const ORGANIC_TICKS: usize = 300;
 const ORGANIC_ALPHA_MIN: f32 = 0.001;
@@ -89,12 +94,10 @@ pub fn layout_with_mode(graph: &Graph, mode: LayoutMode) -> Vec<PositionedNode> 
         LayoutMode::Cluster => layout_cluster(n, &edge_indices),
     };
 
-    normalize(&mut positions);
-    // Organic already resolves collisions via a collide force; cluster uses organic
-    // per-group so skip the global separation pass that would smear clusters.
-    if !matches!(mode, LayoutMode::Organic | LayoutMode::Cluster) {
-        separate_overlaps(&mut positions);
-    }
+    normalize(&mut positions, n);
+    // Always resolve overlaps after normalize — fixed-box scaling can crush
+    // organic/cluster collide gaps on larger graphs.
+    separate_overlaps(&mut positions);
 
     graph
         .nodes
@@ -163,10 +166,11 @@ fn layout_organic(n: usize, edge_indices: &[(usize, usize)]) -> Vec<Point> {
         degree[t] += 1;
     }
 
-    // Stronger charge / longer links for denser module graphs.
+    // Stronger charge / longer links / larger collide for denser module graphs.
     let charge = -30.0 - (n as f32).sqrt() * 12.0;
     let link_distance = 35.0 + (n as f32).sqrt() * 4.0;
-    let collide_radius = 16.0 + (n as f32).sqrt().min(8.0);
+    // Keep collide ≥ half of MIN_NODE_DISTANCE so pre-normalize spacing survives better.
+    let collide_radius = (MIN_NODE_DISTANCE * 0.55) + (n as f32).sqrt().min(10.0);
     let alpha_decay = 1.0 - ORGANIC_ALPHA_MIN.powf(1.0 / ORGANIC_TICKS as f32);
     let mut alpha = 1.0_f32;
 
@@ -877,7 +881,13 @@ fn reachable_from(root: usize, children: &[Vec<usize>]) -> HashSet<usize> {
     set
 }
 
-fn normalize(positions: &mut [Point]) {
+/// Final bbox side length grows with √n so normalize does not crush gaps.
+fn target_spread(n: usize) -> f32 {
+    let from_count = (n as f32).sqrt() * MIN_NODE_DISTANCE * SPREAD_PACK_FACTOR;
+    TARGET_SPREAD_MIN.max(from_count)
+}
+
+fn normalize(positions: &mut [Point], n: usize) {
     if positions.is_empty() {
         return;
     }
@@ -893,7 +903,7 @@ fn normalize(positions: &mut [Point]) {
     }
     let width = (max_x - min_x).max(1.0);
     let height = (max_y - min_y).max(1.0);
-    let scale = TARGET_SPREAD / width.max(height);
+    let scale = target_spread(n) / width.max(height);
     let cx = (min_x + max_x) / 2.0;
     let cy = (min_y + max_y) / 2.0;
     for p in positions.iter_mut() {
@@ -904,7 +914,12 @@ fn normalize(positions: &mut [Point]) {
 
 fn separate_overlaps(positions: &mut [Point]) {
     let n = positions.len();
-    for _ in 0..80 {
+    if n < 2 {
+        return;
+    }
+    let iters = SEPARATE_ITERS_BASE.max(n.saturating_mul(2).min(400));
+    for _ in 0..iters {
+        let mut moved = false;
         for i in 0..n {
             for j in (i + 1)..n {
                 let dx = positions[j].x - positions[i].x;
@@ -918,8 +933,12 @@ fn separate_overlaps(positions: &mut [Point]) {
                     positions[i].y -= ny * push;
                     positions[j].x += nx * push;
                     positions[j].y += ny * push;
+                    moved = true;
                 }
             }
+        }
+        if !moved {
+            break;
         }
     }
 }
@@ -979,8 +998,8 @@ mod tests {
                 let dy = positions[i].y - positions[j].y;
                 let dist = (dx * dx + dy * dy).sqrt();
                 assert!(
-                    dist > 20.0,
-                    "nodes {i} and {j} collapsed (mode positions too close)"
+                    dist + 0.5 >= MIN_NODE_DISTANCE,
+                    "nodes {i} and {j} overlap (dist={dist}, need ≥ {MIN_NODE_DISTANCE})"
                 );
             }
         }
@@ -1000,6 +1019,37 @@ mod tests {
         ] {
             let positions = layout_with_mode(&graph, mode);
             assert_eq!(positions.len(), 3, "{mode:?}");
+            assert_spread(&positions);
+        }
+    }
+
+    #[test]
+    fn dense_organic_graph_has_no_overlaps() {
+        // 24 nodes in a chain — previously normalize crushed organic collide gaps.
+        let nodes: Vec<Node> = (0..24)
+            .map(|i| {
+                let id = format!("n{i}");
+                Node {
+                    id: id.clone(),
+                    label: id.clone(),
+                    path: id,
+                    loc: 10 + i as u32 * 3,
+                    kind: "module".into(),
+                    line: 0,
+                }
+            })
+            .collect();
+        let edges: Vec<Edge> = (0..23)
+            .map(|i| Edge {
+                source: format!("n{i}"),
+                target: format!("n{}", i + 1),
+                kind: "import".into(),
+            })
+            .collect();
+        let graph = Graph { nodes, edges };
+        for mode in [LayoutMode::Organic, LayoutMode::Cluster, LayoutMode::Circular] {
+            let positions = layout_with_mode(&graph, mode);
+            assert_eq!(positions.len(), 24, "{mode:?}");
             assert_spread(&positions);
         }
     }
