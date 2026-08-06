@@ -1,6 +1,6 @@
 [package]
 name = "devtree"
-version = "0.1.1"
+version = "0.1.2"
 description = "Desktop codebase dependency graph and architecture validation"
 authors = ["DevTree contributors"]
 license = "AGPL-3.0-only"

@@ -9,7 +9,7 @@
 #   brew install --cask devtree
 
 cask "devtree" do
-  version "0.1.1"
+  version "0.1.2"
   desc "Desktop codebase dependency graph and architecture validation"
   homepage "https://github.com/Naughty-Otters/DevTree"
 
