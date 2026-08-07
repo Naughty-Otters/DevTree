@@ -32,8 +32,8 @@ brew tap Naughty-Otters/tap && brew install --cask devtree
 
 | # | Item | How it’s done |
 | --- | --- | --- |
-| 1 | Sync versions (root → CLI / cask / Tauri) | `npm run sync:version` · CI `--check` · bump with `npm run version:bump -- patch` |
-| 2 | Publish `devtree-ai` to npm | `release.yml` → `npm-publish-cli` (needs `NPM_TOKEN`) |
+| 1 | Sync versions | **Edit only `/VERSION`**, then `npm run version:bump -- patch` (or `npm run sync:version`). Tauri reads `../package.json`; Rust crates use `version.workspace = true`. CI runs `--check`. |
+| 2 | Publish `devtree-ai` to npm | Prefer `npm run publish:cli` (applies VERSION + refuses republish). Release workflow also publishes when `NPM_TOKEN` is set. |
 | 3 | Fill Homebrew cask sha256 from mac DMG | `release.yml` mac job → `node scripts/update-homebrew-cask.mjs` |
 | 4 | Push cask to tap (optional) | `release.yml` → `homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set |
 | 5 | GitHub Release assets | `tauri-action` (DMG / MSI / NSIS) — required for `devtree install` |
@@ -85,3 +85,5 @@ npm run sync:version -- --check
 npm --prefix packages/cli test
 (cd packages/cli && npm pack --dry-run)
 ```
+
+**Version source of truth:** edit `/VERSION` only (or `npm run version:bump -- patch`).

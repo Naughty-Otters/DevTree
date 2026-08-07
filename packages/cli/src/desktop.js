@@ -16,7 +16,6 @@ import { tmpdir, homedir, platform, arch } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pipeline } from "node:stream/promises";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const REPO = process.env.DEVTREE_REPO || "Naughty-Otters/DevTree";
@@ -24,17 +23,24 @@ const DESKTOP_APP_NAME = "devtree.app";
 const STATE_DIR = join(homedir(), ".devtree");
 const STATE_FILE = join(STATE_DIR, "install.json");
 
-const require = createRequire(import.meta.url);
-
 export function readCliVersion() {
-  try {
-    const pkg = require(
-      join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"),
-    );
-    return String(pkg.version || "0.0.0");
-  } catch {
-    return "0.0.0";
+  const here = dirname(fileURLToPath(import.meta.url));
+  // Monorepo: prefer root package.json (mirrors /VERSION). Published tarball: local package.json.
+  const candidates = [
+    join(here, "..", "..", "..", "package.json"),
+    join(here, "..", "package.json"),
+  ];
+  for (const path of candidates) {
+    try {
+      if (!existsSync(path)) continue;
+      const pkg = JSON.parse(readFileSync(path, "utf8"));
+      const version = String(pkg.version || "").trim();
+      if (version) return version;
+    } catch {
+      // try next
+    }
   }
+  return "0.0.0";
 }
 
 export function hostPlatform() {

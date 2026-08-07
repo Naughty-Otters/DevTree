@@ -3,7 +3,7 @@
  * Writes Shields.io endpoint JSON for README badges (version + coverage).
  * Intended to run after `npm run test:coverage` so coverage-summary.json exists.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +17,10 @@ function coverageColor(pct) {
   return "red";
 }
 
-const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const versionFile = join(root, "VERSION");
+const version = existsSync(versionFile)
+  ? readFileSync(versionFile, "utf8").trim().split(/\s+/)[0].replace(/^v/, "")
+  : JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 const summaryPath = join(root, "coverage", "coverage-summary.json");
 const summary = JSON.parse(readFileSync(summaryPath, "utf8"));
 const linesPct = Number(summary.total?.lines?.pct ?? 0);
@@ -31,7 +34,7 @@ writeFileSync(
     {
       schemaVersion: 1,
       label: "version",
-      message: `v${pkg.version}`,
+      message: `v${version}`,
       color: "blue",
     },
     null,
@@ -53,4 +56,4 @@ writeFileSync(
   )}\n`,
 );
 
-console.log(`Wrote badges → version v${pkg.version}, coverage ${message}`);
+console.log(`Wrote badges → version v${version}, coverage ${message}`);

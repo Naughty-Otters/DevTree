@@ -20,7 +20,10 @@ import {
 import { join, relative } from "node:path";
 
 const root = process.cwd();
-const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+const versionFile = join(root, "VERSION");
+const version = existsSync(versionFile)
+  ? readFileSync(versionFile, "utf8").trim().split(/\s+/)[0].replace(/^v/, "")
+  : JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 const allowMissing = process.argv.includes("--allow-missing");
 
 function argValue(flag) {

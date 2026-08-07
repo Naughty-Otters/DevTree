@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "devtree"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "cron",
@@ -881,7 +881,7 @@ dependencies = [
 
 [[package]]
 name = "devtree-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "js-sys",
  "serde",

@@ -1,6 +1,6 @@
 [package]
 name = "devtree"
-version = "0.1.1"
+version.workspace = true
 description = "Desktop codebase dependency graph and architecture validation"
 authors = ["DevTree contributors"]
 license = "AGPL-3.0-only"
@@ -32,12 +32,20 @@ lsp-types = { version = "0.97", features = ["default"] }
 url = "2.5.8"
 rig-core = "0.41"
 rig-agent = "0.41"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "process", "io-util", "time"] }
+tokio = { version = "1.53.1", features = [
+    "rt-multi-thread",
+    "macros",
+    "process",
+    "io-util",
+    "time",
+] }
 futures = "0.3.33"
 reqwest = { version = "0.12", features = ["json"] }
 regex = "1.13.1"
 notify = "6"
 cron = "0.15"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 rayon = "1.10"
-

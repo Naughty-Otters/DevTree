@@ -69,7 +69,7 @@ jobs:
         run: npm run test:files
 
       - name: Check release version sync
-        run: node scripts/sync-cli-version.mjs --check
+        run: node scripts/apply-version.mjs --check
 
       - name: Run CLI package tests
         run: npm --prefix packages/cli test

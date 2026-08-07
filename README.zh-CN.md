@@ -150,6 +150,7 @@ npm run tauri build   # 可分发应用
 **推送 tag：**
 
 ```bash
+# 如需升版先改 VERSION：npm run version:bump -- patch
 npm run sync:version
 git tag v0.1.0
 git push origin v0.1.0

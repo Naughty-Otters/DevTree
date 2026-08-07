@@ -1,6 +1,6 @@
 [package]
 name = "devtree-core"
-version = "0.1.1"
+version.workspace = true
 edition = "2021"
 description = "Graph layout and metrics for DevTree"
 license = "AGPL-3.0-only"

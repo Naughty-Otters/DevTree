@@ -150,6 +150,7 @@ CI on `main` runs tests with coverage, builds macOS (Apple Silicon) + Windows ar
 **Tag push:**
 
 ```bash
+# bump /VERSION first if needed: npm run version:bump -- patch
 npm run sync:version
 git tag v0.1.0
 git push origin v0.1.0

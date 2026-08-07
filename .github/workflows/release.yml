@@ -56,9 +56,12 @@ jobs:
             echo "::error::Invalid version '$RAW' (expected semver like 0.1.0)"
             exit 1
           fi
-          PKG="$(node -p "require('./package.json').version")"
+          PKG="$(tr -d '[:space:]' < VERSION | sed 's/^v//')"
+          if [ -z "$PKG" ]; then
+            PKG="$(node -p "require('./package.json').version")"
+          fi
           if [ "$PKG" != "$VERSION" ] && [ "$PKG" != "${VERSION%%-*}" ]; then
-            echo "::warning::package.json version is $PKG but release version is $VERSION — sync with npm run sync:version before publishing npm"
+            echo "::warning::VERSION is $PKG but release input is $VERSION — bump VERSION / npm run sync:version before publishing npm"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
@@ -107,7 +110,7 @@ jobs:
         run: npm ci
 
       - name: Sync / check package versions
-        run: node scripts/sync-cli-version.mjs --check
+        run: node scripts/apply-version.mjs --check
 
       - name: Require macOS signing secrets
         if: matrix.os == 'mac'
@@ -494,12 +497,23 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          node scripts/sync-cli-version.mjs
+          node scripts/apply-version.mjs
           npm --prefix packages/cli test
           if [ -z "${NODE_AUTH_TOKEN}" ]; then
             echo "::warning::NPM_TOKEN not set — skipping npm publish for devtree-ai"
             (cd packages/cli && npm pack --dry-run)
             exit 0
+          fi
+          set +e
+          node scripts/assert-cli-version-publishable.mjs
+          assert_status=$?
+          set -e
+          if [ "$assert_status" -eq 2 ]; then
+            echo "::warning::devtree-ai@version already on npm — skipping publish"
+            exit 0
+          fi
+          if [ "$assert_status" -ne 0 ]; then
+            exit "$assert_status"
           fi
           cd packages/cli
           npm publish --access public

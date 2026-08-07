@@ -36,6 +36,7 @@
   },
   "scripts": {
     "test": "node --test src/*.test.js",
+    "prepublishOnly": "node ../../scripts/apply-version.mjs && node ../../scripts/assert-cli-version-publishable.mjs",
     "postinstall": "node ./src/postinstall.js"
   },
   "publishConfig": {
