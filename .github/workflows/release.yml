@@ -518,9 +518,9 @@ jobs:
           if [ "$assert_status" -ne 0 ]; then
             exit "$assert_status"
           fi
-          # Apply/assert already ran from the repo root. Skip package lifecycle hooks
-          # so prepublishOnly cannot fail due to cwd when publishing from packages/cli.
-          npm publish --access public --ignore-scripts --prefix packages/cli
+          # Publish from packages/cli so npm reads that package.json (not the
+          # private root workspace package.json).
+          (cd packages/cli && npm publish --access public --ignore-scripts)
 
   homebrew-tap:
     name: Update Homebrew tap cask

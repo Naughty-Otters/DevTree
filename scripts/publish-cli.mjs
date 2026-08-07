@@ -55,10 +55,13 @@ run(process.execPath, [
 ]);
 
 if (dryRun) {
-  console.log("[dry-run] Would: npm publish --access public --ignore-scripts (in packages/cli)");
-  process.exit(0);
+console.log(
+  `[dry-run] Would: cd packages/cli && npm publish --access public --ignore-scripts`,
+);
+process.exit(0);
 }
 
+console.log("Publishing packages/cli (devtree-ai)…");
 run("npm", ["publish", "--access", "public", "--ignore-scripts"], {
   cwd: join(root, "packages", "cli"),
 });
