@@ -13,8 +13,9 @@
  */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { repoRoot } from "./repo-root.mjs";
 
-const root = process.cwd();
+const root = repoRoot();
 const args = process.argv.slice(2).filter((a) => a !== "--");
 const dryRun = args.includes("--dry-run");
 const bumpPatch = args.includes("--bump-patch");
@@ -36,7 +37,7 @@ function run(command, commandArgs, opts = {}) {
 }
 
 if (bumpPatch) {
-  console.log("Bumping patch version from root package.json…");
+  console.log("Bumping patch version from VERSION…");
   run(process.execPath, [
     join(root, "scripts", "bump-version.mjs"),
     "patch",

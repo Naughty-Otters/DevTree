@@ -12,8 +12,9 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { repoRoot } from "./repo-root.mjs";
 
-const root = process.cwd();
+const root = repoRoot();
 const versionPath = join(root, "VERSION");
 const args = process.argv.slice(2).filter((a) => a !== "--");
 const dryRun = args.includes("--dry-run");

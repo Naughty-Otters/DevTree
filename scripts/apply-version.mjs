@@ -27,8 +27,9 @@
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { repoRoot } from "./repo-root.mjs";
 
-const root = process.cwd();
+const root = repoRoot();
 const checkOnly = process.argv.includes("--check");
 const versionPath = join(root, "VERSION");
 

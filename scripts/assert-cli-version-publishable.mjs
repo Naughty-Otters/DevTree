@@ -11,8 +11,9 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { repoRoot } from "./repo-root.mjs";
 
-const root = process.cwd();
+const root = repoRoot();
 const versionFile = join(root, "VERSION");
 const rootPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const cliPkg = JSON.parse(
