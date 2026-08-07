@@ -496,6 +496,9 @@ jobs:
       - name: Sync version, test, publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Prevent husky/prepare from requiring a local husky binary during publish.
+          HUSKY: "0"
+          CI: "true"
         run: |
           node scripts/apply-version.mjs
           npm --prefix packages/cli test

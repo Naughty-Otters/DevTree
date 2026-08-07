@@ -26,7 +26,7 @@
     "publish:cli": "node scripts/publish-cli.mjs",
     "badges": "npm run test:coverage && node scripts/write-ci-badges.mjs",
     "precommit": "npm run test:all",
-    "prepare": "husky && node scripts/apply-version.mjs"
+    "prepare": "node scripts/prepare.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
